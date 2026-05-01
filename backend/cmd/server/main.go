@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"audio-room-mvp/backend/internal/config"
+	"voice-hub/backend/internal/config"
 )
 
 type healthResponse struct {

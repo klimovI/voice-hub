@@ -48,4 +48,6 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
-          files: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/voice-hub-desktop.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe

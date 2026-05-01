@@ -71,9 +71,9 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          ssh "deploy@$DEPLOY_HOST" 'mkdir -p /opt/audio-room/deploy'
-          scp docker-compose.prod.yml "deploy@$DEPLOY_HOST:/opt/audio-room/docker-compose.yml"
-          scp deploy/Caddyfile "deploy@$DEPLOY_HOST:/opt/audio-room/deploy/Caddyfile"
+          ssh "deploy@$DEPLOY_HOST" 'mkdir -p /opt/voice-hub/deploy'
+          scp docker-compose.prod.yml "deploy@$DEPLOY_HOST:/opt/voice-hub/docker-compose.yml"
+          scp deploy/Caddyfile "deploy@$DEPLOY_HOST:/opt/voice-hub/deploy/Caddyfile"
 
       - name: Write .env on host
         env:
@@ -82,12 +82,12 @@ jobs:
         run: |
           umask 077
           printf '%s\n' "$PROD_ENV" > .env.deploy
-          scp .env.deploy "deploy@$DEPLOY_HOST:/opt/audio-room/.env"
-          ssh "deploy@$DEPLOY_HOST" 'chmod 600 /opt/audio-room/.env'
+          scp .env.deploy "deploy@$DEPLOY_HOST:/opt/voice-hub/.env"
+          ssh "deploy@$DEPLOY_HOST" 'chmod 600 /opt/voice-hub/.env'
           rm -f .env.deploy
 
       - name: Pull and restart
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          ssh "deploy@$DEPLOY_HOST" 'cd /opt/audio-room && docker compose pull && docker compose up -d --remove-orphans'
+          ssh "deploy@$DEPLOY_HOST" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans'

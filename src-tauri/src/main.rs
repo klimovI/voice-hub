@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    audio_room_desktop_lib::run();
+    voice_hub_desktop_lib::run();
 }

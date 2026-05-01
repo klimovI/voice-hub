@@ -1,11 +1,11 @@
 [package]
-name = "audio-room-desktop"
+name = "voice-hub-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "Desktop shell for Audio Room built with Tauri"
+description = "Desktop shell for Voice Hub built with Tauri"
 
 [lib]
-name = "audio_room_desktop_lib"
+name = "voice_hub_desktop_lib"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [build-dependencies]

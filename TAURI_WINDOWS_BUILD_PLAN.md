@@ -22,7 +22,7 @@ git tag -a v0.1.1 -m "Release 0.1.1"
 git push origin v0.1.1
 ```
 
-GH Actions подхватит push тега → ~5-10 мин → новый Release на https://github.com/klimovI/voice-hub/releases с приложенным `Audio Room_0.1.1_x64-setup.exe`.
+GH Actions подхватит push тега → ~5-10 мин → новый Release на https://github.com/klimovI/voice-hub/releases с двумя файлами: `voice-hub-desktop.exe` (standalone) и `Voice Hub_0.1.1_x64-setup.exe` (NSIS installer).
 
 ### Стоимость
 
@@ -41,8 +41,8 @@ Repo публичный → unlimited GH Actions minutes. Storage — Releases �
 - `src-tauri/icons/icon.ico` + desktop PNGs (256/128/32)
 - `tauri.conf.json` → `bundle.targets = ["nsis"]`, GUI subsystem (`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`)
 - кросс-сборка проходит, артефакты:
-  - `src-tauri/target/x86_64-pc-windows-msvc/release/audio-room-desktop.exe` (PE32+ GUI)
-  - `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Audio Room_0.1.0_x64-setup.exe`
+  - `src-tauri/target/x86_64-pc-windows-msvc/release/voice-hub-desktop.exe` (PE32+ GUI)
+  - `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Voice Hub_0.1.0_x64-setup.exe`
 
 ### Build команда
 
@@ -56,7 +56,7 @@ CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
 
 ## Что проверить на Windows-машине после сборки
 
-- запуск `audio-room-desktop.exe` показывает окно с фронтендом из `web/`
+- запуск `voice-hub-desktop.exe` показывает окно с фронтендом из `web/`
 - NSIS installer ставит app, ярлык работает
 - `get_app_config` подхватывает env: `JANUS_WS_URL`, `ROOM_ID`, `ROOM_PIN`, `STUN_URL`, `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD`
 

@@ -1,6 +1,6 @@
 # Deploy
 
-> ⚠️ Репо публичный. Никаких реальных IP, хостов, паролей, токенов — только плейсхолдеры. Секреты живут в GitHub Secrets и `/opt/audio-room/.env` на сервере.
+> ⚠️ Репо публичный. Никаких реальных IP, хостов, паролей, токенов — только плейсхолдеры. Секреты живут в GitHub Secrets и `/opt/voice-hub/.env` на сервере.
 
 Прод-стек: VPS + GitHub Actions. CI собирает образы, пушит в `ghcr.io`, по SSH деплоит на сервер. На самом сервере крутится только compose-стек (Caddy + app + Janus + coturn) — никаких сорсов, никаких билдов.
 
@@ -46,12 +46,12 @@ sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_
 systemctl reload ssh
 
 # Каталог под compose-стек
-mkdir -p /opt/audio-room/deploy && chown -R deploy:deploy /opt/audio-room
+mkdir -p /opt/voice-hub/deploy && chown -R deploy:deploy /opt/voice-hub
 ```
 
 Сгенерируй deploy SSH key (отдельный от личного), pubkey в `/home/deploy/.ssh/authorized_keys`, privkey пойдёт в GitHub Secret.
 
-## `/opt/audio-room/.env`
+## `/opt/voice-hub/.env`
 
 Файл провижится workflow'ом из GitHub secret `PROD_ENV` на каждом деплое — вручную трогать не нужно. Формат (single multi-line blob, который кладётся в `PROD_ENV`):
 
@@ -86,8 +86,8 @@ APP_AUTH_PASSWORD=<openssl rand -base64 24>
 `.github/workflows/deploy.yml` запускается на push в master:
 
 1. Build matrix: app + janus → `ghcr.io/<owner>/voice-hub-{app,janus}:{latest,sha}`
-2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/audio-room/`
-3. Write .env on host: пишет `/opt/audio-room/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
+2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
+3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
 4. Pull & restart: `docker compose pull && up -d --remove-orphans`
 
 Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.

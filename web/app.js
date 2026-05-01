@@ -3,13 +3,13 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
 
 (function () {
   const STORAGE_KEYS = {
-    shortcut: "audio-room-mvp.shortcut",
-    outputVolume: "audio-room-mvp.output-volume",
-    outputMuted: "audio-room-mvp.output-muted",
-    sendVolume: "audio-room-mvp.send-volume",
-    rnnoiseMix: "audio-room-mvp.rnnoise-mix",
-    engine: "audio-room-mvp.engine",
-    displayName: "audio-room-mvp.display-name",
+    shortcut: "voice-hub.shortcut",
+    outputVolume: "voice-hub.output-volume",
+    outputMuted: "voice-hub.output-muted",
+    sendVolume: "voice-hub.send-volume",
+    rnnoiseMix: "voice-hub.rnnoise-mix",
+    engine: "voice-hub.engine",
+    displayName: "voice-hub.display-name",
   };
 
   const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
@@ -1716,12 +1716,12 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   }
 
   function clearLegacyStorage() {
-    localStorage.removeItem("audio-room-mvp.mic-mode");
-    localStorage.removeItem("audio-room-mvp.rnnoise-enabled");
-    localStorage.removeItem("audio-room-mvp.gate-enabled");
-    localStorage.removeItem("audio-room-mvp.gate-threshold");
-    localStorage.removeItem("audio-room-mvp.gate-attack");
-    localStorage.removeItem("audio-room-mvp.gate-release");
+    localStorage.removeItem("voice-hub.mic-mode");
+    localStorage.removeItem("voice-hub.rnnoise-enabled");
+    localStorage.removeItem("voice-hub.gate-enabled");
+    localStorage.removeItem("voice-hub.gate-threshold");
+    localStorage.removeItem("voice-hub.gate-attack");
+    localStorage.removeItem("voice-hub.gate-release");
   }
 
   function buildPublisherJoinBody(display) {

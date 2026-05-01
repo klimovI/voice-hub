@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Audio Room",
+  "productName": "Voice Hub",
   "version": "0.1.0",
-  "identifier": "com.audio-room.desktop",
+  "identifier": "com.voice-hub.desktop",
   "build": {
     "frontendDist": "../web"
   },
@@ -21,7 +21,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Audio Room",
+        "title": "Voice Hub",
         "width": 1440,
         "height": 980,
         "minWidth": 1100,

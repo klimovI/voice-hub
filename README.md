@@ -25,7 +25,10 @@ Desktop-обёртка на Tauri 2 в `src-tauri/`. Использует `web/`
 
 ### Скачать готовый билд (Windows)
 
-Готовые NSIS-установщики собираются GitHub Actions и публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest). Качай `Audio Room_<version>_x64-setup.exe`, ставь — ярлык в меню "Пуск".
+Билды собираются GitHub Actions, публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest). Два варианта:
+
+- **`voice-hub-desktop.exe`** — standalone, скачал и запустил, без установки. Требует Microsoft Edge WebView2 на машине (Windows 11 — есть всегда; Windows 10 — есть в подавляющем большинстве после 2023).
+- **`Voice Hub_<version>_x64-setup.exe`** — NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует.
 
 ### Релиз (как собрать новый билд)
 

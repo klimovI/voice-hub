@@ -7,7 +7,7 @@ RUN go mod download
 
 COPY backend ./
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/audio-room-app ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
 
 FROM debian:bookworm-slim
 
@@ -18,7 +18,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=build /out/audio-room-app /app/audio-room-app
+COPY --from=build /out/voice-hub-app /app/voice-hub-app
 COPY web /app/web
 
 ENV APP_ADDR=:8080
@@ -28,4 +28,4 @@ EXPOSE 8080
 
 USER app:app
 
-CMD ["/app/audio-room-app"]
+CMD ["/app/voice-hub-app"]

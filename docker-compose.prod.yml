@@ -1,3 +1,5 @@
+name: voice-hub
+
 services:
   caddy:
     image: caddy:2-alpine
