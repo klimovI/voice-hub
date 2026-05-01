@@ -1,0 +1,22 @@
+general: {
+  configs_folder = "/etc/janus"
+}
+
+media: {
+  rtp_port_range = "10000-10100"
+}
+
+nat: {
+  stun_server = "coturn"
+  stun_port = 3478
+  nat_1_1_mapping = "__PUBLIC_IP__"
+  keep_private_host = false
+}
+
+plugins: {
+  disable = "libjanus_audiobridge.so,libjanus_echotest.so,libjanus_recordplay.so,libjanus_sip.so,libjanus_nosip.so,libjanus_streaming.so,libjanus_textroom.so,libjanus_videocall.so,libjanus_voicemail.so"
+}
+
+transports: {
+  disable = "libjanus_http.so,libjanus_mqtt.so,libjanus_nanomsg.so,libjanus_pfunix.so,libjanus_rabbitmq.so"
+}

@@ -1,0 +1,70 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_HOSTNAME: ${APP_HOSTNAME}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - janus
+
+  app:
+    image: ghcr.io/klimovi/voice-hub-app:latest
+    restart: unless-stopped
+    environment:
+      APP_ADDR: ":8080"
+      WEB_DIR: "/app/web"
+      JANUS_WS_URL: "wss://${APP_HOSTNAME}/janus-ws"
+      ROOM_ID: "${ROOM_ID:-1001}"
+      ROOM_PIN: "${ROOM_PIN:-}"
+      STUN_URL: "stun:${APP_HOSTNAME}:3478"
+      TURN_URL: "turn:${APP_HOSTNAME}:3478?transport=udp"
+      TURN_USERNAME: "${TURN_USERNAME}"
+      TURN_PASSWORD: "${TURN_PASSWORD}"
+    expose:
+      - "8080"
+    depends_on:
+      - janus
+
+  janus:
+    image: ghcr.io/klimovi/voice-hub-janus:latest
+    restart: unless-stopped
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP}
+    expose:
+      - "8188"
+    ports:
+      - "10000-10100:10000-10100/udp"
+    depends_on:
+      - coturn
+
+  coturn:
+    image: coturn/coturn:4.10-alpine
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    command:
+      - --log-file=stdout
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --fingerprint
+      - --realm=${APP_HOSTNAME}
+      - --user=${TURN_USERNAME}:${TURN_PASSWORD}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --external-ip=${PUBLIC_IP}
+
+volumes:
+  caddy_data:
+  caddy_config:

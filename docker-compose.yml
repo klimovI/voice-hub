@@ -1,0 +1,51 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      APP_ADDR: ":8080"
+      WEB_DIR: "/app/web"
+      JANUS_WS_URL: "ws://localhost:8188"
+      ROOM_ID: "1001"
+      STUN_URL: "stun:localhost:3478"
+      TURN_URL: "turn:localhost:3478?transport=udp"
+      TURN_USERNAME: "room"
+      TURN_PASSWORD: "room-secret"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - janus
+
+  janus:
+    build:
+      context: .
+      dockerfile: deploy/janus/Dockerfile
+    command: ["/usr/bin/janus", "-F", "/etc/janus"]
+    ports:
+      - "8188:8188"
+      - "10000-10100:10000-10100/udp"
+    volumes:
+      - ./deploy/janus/janus.jcfg:/etc/janus/janus.jcfg:ro
+      - ./deploy/janus/janus.transport.websockets.jcfg:/etc/janus/janus.transport.websockets.jcfg:ro
+      - ./deploy/janus/janus.plugin.videoroom.jcfg:/etc/janus/janus.plugin.videoroom.jcfg:ro
+    depends_on:
+      - coturn
+
+  coturn:
+    image: coturn/coturn:4.10-alpine
+    command:
+      - --log-file=stdout
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --fingerprint
+      - --realm=localhost
+      - --user=room:room-secret
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
