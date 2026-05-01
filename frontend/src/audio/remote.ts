@@ -38,11 +38,14 @@ export function setupParticipantAudio(stream: MediaStream): RemoteParticipantAud
 
   const gainNode = ctx.createGain();
   const limiterNode = ctx.createDynamicsCompressor();
-  limiterNode.threshold.value = -1;
-  limiterNode.knee.value = 0;
-  limiterNode.ratio.value = 20;
-  limiterNode.attack.value = 0.001;
-  limiterNode.release.value = 0.05;
+  // Softer than a brick wall: hard-knee 1ms-attack limiters on Web Audio's
+  // DynamicsCompressor introduce intermodulation distortion that sounds like
+  // crackling on speech transients.
+  limiterNode.threshold.value = -6;
+  limiterNode.knee.value = 6;
+  limiterNode.ratio.value = 8;
+  limiterNode.attack.value = 0.005;
+  limiterNode.release.value = 0.1;
   gainNode.connect(limiterNode);
   limiterNode.connect(ctx.destination);
 
