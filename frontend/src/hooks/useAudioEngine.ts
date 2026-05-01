@@ -10,6 +10,7 @@ import {
   teardownMicGraph,
   applySendGain,
   startSpeakingLoop,
+  createLocalAudioContext,
   type MicGraph,
 } from "../audio/mic-graph";
 import {
@@ -21,6 +22,14 @@ import {
   stopRemoteSpeakingLoop,
   type RemoteParticipantAudio,
 } from "../audio/remote";
+import { preloadRnnoise } from "../audio/rnnoise";
+import { preloadDtln } from "../audio/dtln";
+import { DTLN_ASSET_BASE } from "../config";
+
+export function preloadEngine(engine: EngineKind): void {
+  if (engine === "rnnoise") preloadRnnoise();
+  else if (engine === "dtln") preloadDtln(DTLN_ASSET_BASE);
+}
 
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
@@ -66,7 +75,7 @@ export function useAudioEngine() {
   }, []);
 
   const buildGraph = useCallback(
-    async (engine: EngineKind) => {
+    async (engine: EngineKind, prebuiltContext?: AudioContext) => {
       const r = refs.current;
       if (!r.rawLocalStream) throw new Error("No mic stream");
       const graph = await buildMicGraph(
@@ -74,6 +83,7 @@ export function useAudioEngine() {
         engine,
         () => refs.current.rnnoiseMix,
         (msg, isError) => store.setStatus(msg, isError),
+        prebuiltContext,
       );
       r.micGraph = graph;
       return graph;
@@ -91,9 +101,19 @@ export function useAudioEngine() {
   }, []);
 
   const prepareLocalAudio = useCallback(
-    async (engine: EngineKind) => {
-      await acquireMic();
-      return buildGraph(engine);
+    async (engine: EngineKind, onProgress?: (stage: "mic-ready") => void) => {
+      // Kick off engine WASM warm-up in parallel with mic+context creation.
+      preloadEngine(engine);
+      // AudioContext creation+resume runs in parallel with getUserMedia.
+      // Both gate buildMicGraph; serializing them was needless waiting.
+      const ctxPromise = (async () => {
+        const ctx = createLocalAudioContext();
+        await ctx.resume();
+        return ctx;
+      })();
+      const [, ctx] = await Promise.all([acquireMic(), ctxPromise]);
+      onProgress?.("mic-ready");
+      return buildGraph(engine, ctx);
     },
     [acquireMic, buildGraph],
   );

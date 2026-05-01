@@ -7,7 +7,7 @@ import { useGlobalShortcut } from "./hooks/useShortcut";
 import { loadAppConfig, buildWsUrl } from "./config";
 import { clearLegacyStorage } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
-import { preloadRnnoise } from "./audio/rnnoise";
+import { preloadEngine } from "./hooks/useAudioEngine";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
 
@@ -55,11 +55,9 @@ export function App() {
       .catch((err: unknown) => {
         store.setStatus(err instanceof Error ? err.message : String(err), true);
       });
-    // Warm up RNNoise (default engine) while user enters their name —
+    // Warm up the selected engine while user enters their name —
     // shifts wasm fetch + init off the Join critical path.
-    if (useStore.getState().engine === "rnnoise") {
-      preloadRnnoise();
-    }
+    preloadEngine(useStore.getState().engine);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -273,7 +271,11 @@ export function App() {
       store.setStatus("Запрашиваю микрофон...");
 
       try {
-        const graph = await audio.prepareLocalAudio(store.engine);
+        const graph = await audio.prepareLocalAudio(store.engine, (stage) => {
+          if (stage === "mic-ready" && store.engine !== "off") {
+            store.setStatus("Загрузка шумоподавителя…");
+          }
+        });
         micGraphRef.current = graph;
 
         store.setStatus("Подключаюсь...");
@@ -328,6 +330,8 @@ export function App() {
     async (engine: EngineKind) => {
       if (engine === store.engine) return;
       store.setEngine(engine);
+      // Warm up newly selected engine ahead of next Join / rebuild.
+      preloadEngine(engine);
       if (store.joinState !== "joined") {
         store.setStatus(`Denoiser: ${engine}`);
         return;

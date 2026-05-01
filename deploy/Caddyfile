@@ -11,5 +11,9 @@
 		-Server
 	}
 
+	# Vendor WASM/JS denoiser blobs are content-pinned; cache aggressively.
+	@vendor path /vendor/*
+	header @vendor Cache-Control "public, max-age=31536000, immutable"
+
 	reverse_proxy app:8080
 }
