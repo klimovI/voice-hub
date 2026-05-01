@@ -13,6 +13,9 @@ import (
 
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/config"
+	"voice-hub/backend/internal/sfu"
+
+	"github.com/pion/webrtc/v4"
 )
 
 const sessionTTL = 30 * 24 * time.Hour
@@ -46,6 +49,10 @@ func main() {
 
 	limiter := newAuthLimiter(10, 15*time.Minute)
 
+	room := sfu.NewRoom(sfu.Config{
+		ICEServers: []webrtc.ICEServer{{URLs: []string{cfg.StunURL}}},
+	})
+
 	mux := http.NewServeMux()
 	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +66,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/login", loginHandler(cfg, limiter))
 	mux.HandleFunc("/api/logout", logoutHandler(cfg))
+	mux.Handle("/ws", requireAuthAPI(cfg, http.HandlerFunc(room.ServeWS)))
 	mux.Handle("/api/config", requireAuthAPI(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -87,9 +95,10 @@ func main() {
 		Addr:              cfg.Addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
+		// WebSocket and per-request timeouts would terminate it. Auth gates
+		// every other endpoint.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	log.Printf("auth enabled (user=%s, cookie_secure=%v)", cfg.AuthUser, cfg.CookieSecure)
