@@ -148,8 +148,9 @@ func authenticated(cfg config.Config, r *http.Request) bool {
 
 func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Login page and its assets must be reachable without auth.
-		if r.URL.Path == "/login.html" || r.URL.Path == "/login.js" {
+		// Login page, its assets, and the favicon must be reachable without auth.
+		switch r.URL.Path {
+		case "/login.html", "/login.js", "/favicon.ico", "/favicon.png":
 			next.ServeHTTP(w, r)
 			return
 		}
