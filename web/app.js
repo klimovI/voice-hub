@@ -344,7 +344,7 @@ import { createSFUClient } from "./sfu-client.js";
         },
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== "audio") return;
-          const participant = ensureParticipant({ id: peerId, display: `peer-${peerId}` });
+          const participant = ensureParticipant({ id: peerId });
           ensureParticipantAudio(participant, stream);
         },
         onError: (err) => {
@@ -559,7 +559,7 @@ import { createSFUClient } from "./sfu-client.js";
         channelCount: 1,
         echoCancellation: true,
         noiseSuppression: false,
-        autoGainControl: false,
+        autoGainControl: true,
       };
       state.rawLocalStream = await navigator.mediaDevices.getUserMedia({
         audio: audioConstraints,
@@ -699,7 +699,14 @@ import { createSFUClient } from "./sfu-client.js";
     const ctx = ensureRemoteAudioContext();
     if (!participant.gainNode) {
       participant.gainNode = ctx.createGain();
-      participant.gainNode.connect(ctx.destination);
+      participant.limiterNode = ctx.createDynamicsCompressor();
+      participant.limiterNode.threshold.value = -1;
+      participant.limiterNode.knee.value = 0;
+      participant.limiterNode.ratio.value = 20;
+      participant.limiterNode.attack.value = 0.001;
+      participant.limiterNode.release.value = 0.05;
+      participant.gainNode.connect(participant.limiterNode);
+      participant.limiterNode.connect(ctx.destination);
     }
     if (participant.sourceNode) {
       try { participant.sourceNode.disconnect(); } catch (_) {}
@@ -734,6 +741,7 @@ import { createSFUClient } from "./sfu-client.js";
       analyserData: null,
       monitorSource: null,
       gainNode: null,
+      limiterNode: null,
       sourceNode: null,
     };
 
@@ -766,8 +774,10 @@ import { createSFUClient } from "./sfu-client.js";
     participant.analyser?.disconnect();
     try { participant.sourceNode?.disconnect(); } catch (_) {}
     try { participant.gainNode?.disconnect(); } catch (_) {}
+    try { participant.limiterNode?.disconnect(); } catch (_) {}
     participant.sourceNode = null;
     participant.gainNode = null;
+    participant.limiterNode = null;
     participant.audioEl?.pause();
     if (participant.audioEl) {
       participant.audioEl.srcObject = null;
@@ -947,8 +957,10 @@ import { createSFUClient } from "./sfu-client.js";
     for (const participant of state.participants.values()) {
       try { participant.sourceNode?.disconnect(); } catch (_) {}
       try { participant.gainNode?.disconnect(); } catch (_) {}
+      try { participant.limiterNode?.disconnect(); } catch (_) {}
       participant.sourceNode = null;
       participant.gainNode = null;
+      participant.limiterNode = null;
       participant.audioEl?.pause();
       if (participant.audioEl) {
         participant.audioEl.srcObject = null;
