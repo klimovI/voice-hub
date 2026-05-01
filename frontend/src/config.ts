@@ -1,0 +1,22 @@
+import type { AppConfig } from "./types";
+
+export async function loadAppConfig(): Promise<AppConfig> {
+  const response = await fetch("/api/config", { credentials: "same-origin" });
+  if (response.status === 401) {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.replace("/login.html?next=" + next);
+    throw new Error("Требуется вход");
+  }
+  if (!response.ok) {
+    throw new Error("Не удалось получить конфиг комнаты");
+  }
+  return response.json() as Promise<AppConfig>;
+}
+
+export function buildWsUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws`;
+}
+
+// DTLN vendor assets live at this base URL.
+export const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
