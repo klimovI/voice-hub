@@ -2,20 +2,18 @@
 
 > ⚠️ Репо публичный. Никаких реальных IP, хостов, паролей, токенов — только плейсхолдеры. Секреты живут в GitHub Secrets и `/opt/voice-hub/.env` на сервере.
 
-Прод-стек: VPS + GitHub Actions. CI собирает образы, пушит в `ghcr.io`, по SSH деплоит на сервер. На самом сервере крутится только compose-стек (Caddy + app + Janus + coturn) — никаких сорсов, никаких билдов.
+Прод-стек: VPS + GitHub Actions. CI собирает образ, пушит в `ghcr.io`, по SSH деплоит на сервер. На самом сервере крутится только compose-стек (Caddy + app) — никаких сорсов, никаких билдов.
 
 ## Архитектура
 
 ```
 internet ──HTTPS/WSS──▶ Caddy (auto-TLS) ──▶ app  (8080)
-                                         └──▶ janus (8188 ws, /janus-ws)
-internet ──UDP 10000-10100──▶ Janus RTP
-internet ──UDP 3478, 49160-49200──▶ coturn
+internet ──UDP 3478, 10000-10100, 49160-49200──▶ app
 ```
 
-- Caddy фронтит signaling по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
-- WebRTC media идёт напрямую в Janus/coturn по UDP, в обход Caddy
-- coturn нужен как TURN-relay для клиентов за симметричным NAT
+- Caddy фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
+- WebRTC media и TURN-relay идут напрямую в app по UDP, в обход Caddy
+- app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN (HMAC short-term creds). Janus и coturn убраны
 
 ## Требования
 
@@ -57,17 +55,17 @@ mkdir -p /opt/voice-hub/deploy && chown -R deploy:deploy /opt/voice-hub
 
 ```
 APP_HOSTNAME=your-host.example.com
-PUBLIC_IP=0.0.0.0
-ROOM_ID=1001
-ROOM_PIN=
-TURN_USERNAME=<уникальное имя, не "room">
-TURN_PASSWORD=<openssl rand -base64 24>
-APP_AUTH_USER=<логин для basic auth>
+PUBLIC_IP=<внешний IP сервера для TURN>
+TURN_SHARED_SECRET=<openssl rand -base64 32>
+APP_AUTH_USER=<логин для входа>
 APP_AUTH_PASSWORD=<openssl rand -base64 24>
+APP_SESSION_SECRET=<openssl rand -base64 32, минимум 16 байт>
 ```
 
-- `APP_AUTH_*` — Basic Auth на `/` и `/api/config`. Сервис fail-fast если не заданы (`/healthz` остаётся публичным для health-check'ов).
-- Не используй дефолты из `backend/internal/config/config.go` (например `TURN_USERNAME=room`) — конфиг "из коробки" угадывается.
+- `APP_AUTH_*` — креды для login form (cookie-session). Сервис fail-fast если не заданы (`/healthz` остаётся публичным для health-check'ов).
+- `APP_SESSION_SECRET` — HMAC-ключ для подписи session cookie. Ротация = разлогинивает всех.
+- `TURN_SHARED_SECRET` — HMAC-ключ для генерации short-term TURN creds на `/api/ice-config`. Cleartext в клиент НЕ попадает.
+- `PUBLIC_IP` — нужен pion/turn для генерации SDP с правильным relay-адресом.
 - На сервере права `chmod 600` ставит сам workflow.
 - Сохрани копию `PROD_ENV` в менеджер паролей: GitHub UI секреты не показывает после создания.
 
@@ -79,13 +77,13 @@ APP_AUTH_PASSWORD=<openssl rand -base64 24>
 | `DEPLOY_SSH_KEY` | приватный ключ deploy-пользователя (целиком, с BEGIN/END) |
 | `PROD_ENV` | весь `.env` целиком (см. формат выше) |
 
-После первого успешного `build` — на github.com/<owner>?tab=packages для `voice-hub-app` и `voice-hub-janus` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
+После первого успешного `build` — на github.com/<owner>?tab=packages для `voice-hub-app` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
 
 ## Workflow
 
 `.github/workflows/deploy.yml` запускается на push в master:
 
-1. Build matrix: app + janus → `ghcr.io/<owner>/voice-hub-{app,janus}:{latest,sha}`
+1. Build: app → `ghcr.io/<owner>/voice-hub-app:{latest,sha}`
 2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
 3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
 4. Pull & restart: `docker compose pull && up -d --remove-orphans`

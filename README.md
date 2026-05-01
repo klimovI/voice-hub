@@ -3,7 +3,7 @@
 Self-hosted голосовая комната для маленьких компаний. Заточена под игры: фокус на чистом звуке и низкой задержке.
 
 - одна постоянная комната, 3–10 человек
-- WebRTC через Janus VideoRoom (audio-only SFU)
+- WebRTC через embedded pion SFU (audio-only, в одном Go-процессе)
 - два движка денойза на выбор, переключение без переподключения
 - весь стейт в браузере — никаких аккаунтов
 
@@ -21,7 +21,7 @@ VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает о
 
 ## Desktop (Tauri)
 
-Desktop-обёртка на Tauri 2 в `src-tauri/`. Использует `web/` как frontend, конфиг получает через Rust-команду `get_app_config` (читает env), а не через `/api/config` Go-бэкенда.
+Desktop-обёртка на Tauri 2 в `src-tauri/`. Грузит remote URL (`APP_BASE_URL`, по умолчанию `http://localhost:8080/`) через `WebviewUrl::External` — webview сам сохраняет cookie между запусками, login один раз. В бинаре только hostname, никаких секретов.
 
 ### Скачать готовый билд (Windows)
 
@@ -54,17 +54,18 @@ cargo tauri dev
 
 ### Конфигурация
 
-Env переменные — `JANUS_WS_URL`, `ROOM_ID`, `ROOM_PIN`, `STUN_URL`, `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD`. Дефолты в `src-tauri/src/lib.rs` указывают на `localhost` — для прод-сборки либо заменить дефолты, либо передать env в момент запуска.
+Build-time env: `APP_BASE_URL` (например `https://your-host.example.com/`). Бейкается в бинарь через `option_env!`. Дефолт — `http://localhost:8080/`. Никаких секретов в бинаре: ICE-конфиг и signaling клиент тянет из бэкенда после login.
 
 Hotkey в Tauri пока оконный, не глобальный системный.
 
 ## Структура
 
 ```
-backend/   Go HTTP-сервер: статика + /api/config
-web/       vanilla JS клиент (WebRTC, аудиограф, UI)
-src-tauri/ desktop-обёртка на Tauri 2
-deploy/    Caddyfile + конфиги Janus
+backend/   Go HTTP-сервер: auth + статика + /ws (signaling) + pion SFU + pion TURN
+frontend/  React 18 + TypeScript + Vite. Билдится в web/.
+web/       build output из frontend/ (статика, отдаётся бэкендом)
+src-tauri/ desktop-обёртка на Tauri 2 (remote URL)
+deploy/    Caddyfile
 .github/   CI: build & push в ghcr.io, deploy по SSH
 ```
 
@@ -82,18 +83,16 @@ deploy/    Caddyfile + конфиги Janus
 └─────────┘                  └─────┬────┘
      │                             │
      │  WebRTC (UDP)               ▼
-     │  ┌────────────────────┐ ┌──────┐
-     ├──┤      janus         │ │ app  │
-     │  │  VideoRoom (audio) │ └──────┘
-     │  └────────────────────┘
-     │  ┌────────────────────┐
-     └──┤      coturn        │  STUN/TURN fallback
-        └────────────────────┘
+     │       ┌──────────────────────────┐
+     ├──────▶│           app            │
+     │       │  static + auth + /ws     │
+     │       │  pion SFU + pion TURN    │
+     └──────▶└──────────────────────────┘
 ```
 
-Backend — статик-сервер плюс один JSON-эндпоинт с конфигом комнаты. Вся логика signaling-а в браузере: клиент сам открывает WebSocket к Janus, делает publish и подписывается на остальных участников. Если комнаты нет — клиент создаёт её сам.
+Один Go-бинарь делает всё: cookie-auth, отдача статики из `web/`, JSON-WS signaling, pion SFU (audio-only forwarding), pion TURN (HMAC short-term creds). Janus и coturn убраны.
 
-Speaking-индикатор у других участников приходит как Janus event `talking`/`stopped-talking`. Свой считается локально по RMS на `AnalyserNode`.
+Свой speaking считается локально по RMS на `AnalyserNode`. Чужой speaking-индикатор не реализован (server-side VAD пока нет в pion SFU-обёртке).
 
 ### Аудиограф
 

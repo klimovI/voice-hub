@@ -56,9 +56,10 @@ CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
 
 ## Что проверить на Windows-машине после сборки
 
-- запуск `voice-hub-desktop.exe` показывает окно с фронтендом из `web/`
+- запуск `voice-hub-desktop.exe` открывает webview на `APP_BASE_URL` (по умолчанию `http://localhost:8080/`), показывает login-форму
+- после логина cookie сохраняется между запусками — повторный пуск сразу попадает в комнату
 - NSIS installer ставит app, ярлык работает
-- `get_app_config` подхватывает env: `JANUS_WS_URL`, `ROOM_ID`, `ROOM_PIN`, `STUN_URL`, `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD`
+- `strings voice-hub-desktop.exe | grep -E 'turn|secret|password'` — ничего секретного в бинаре
 
 ## Возможные доработки
 

@@ -5,15 +5,15 @@
 ## Done
 
 ### Audio
-- [x] Janus VideoRoom (audio-only) + WebSocket signaling
+- [x] Embedded pion SFU (audio-only) + JSON-WS signaling в одном Go-процессе
 - [x] Локальный mute и громкость по каждому участнику
 - [x] RNNoise как первый движок денойза
 - [x] DTLN как второй движок (лучше на транзиентах — клики мыши/клавы)
-- [x] Hot-swap движков без переподключения к Janus
+- [x] Hot-swap движков без переподключения (RTCRtpSender.replaceTrack)
 - [x] VAD-gated envelope на RNNoise — давит клики/клаву в тишине, не режет хвосты слов
 - [x] Per-participant volume через Web Audio Gain (>100% реально работает)
 - [x] Soft compressor + HPF/LPF в mic-цепочке (мягкий, без пампинга)
-- [x] Speaking-индикатор — server-side для других, локальный AnalyserNode для себя
+- [x] Speaking-индикатор для себя — локальный AnalyserNode (RMS)
 - [x] Все клиентские настройки в localStorage
 
 ### UX
@@ -26,9 +26,11 @@
 - [x] `docker-compose.yml` для локального dev
 - [x] Backend с health-check и room-конфигом
 - [x] Production deploy на VPS — Caddy auto-TLS, GitHub Actions build & push в ghcr.io, SSH deploy под non-root user. Подробнее в [DEPLOY.md](DEPLOY.md)
-- [x] Tauri 2 desktop-обёртка для Windows, кросс-сборка из Linux через cargo-xwin, NSIS installer
-- [x] Basic Auth на `/` и `/api/config`, обязательный на старте (fail-fast без `APP_AUTH_USER`/`APP_AUTH_PASSWORD`); `/healthz` публичный
+- [x] Tauri 2 desktop-обёртка для Windows (remote URL, без секретов в бинаре), кросс-сборка из Linux через cargo-xwin, NSIS installer
+- [x] Cookie-session auth (HttpOnly signed) + login form на `/login.html`; `/healthz` публичный, `/api/login` rate-limited
+- [x] Embedded pion/turn (HMAC short-term creds через `/api/ice-config`) — coturn убран
 - [x] Прод `.env` провижится из GitHub secret `PROD_ENV` на каждом деплое (single source of truth)
+- [x] Frontend переписан на React 18 + TypeScript + Vite (multi-page index/login, zustand)
 
 ## In progress
 
@@ -43,8 +45,9 @@ _(пусто)_
 - [ ] Migration на AudioWorklet (ScriptProcessorNode deprecated)
 
 ### UX
-- [ ] **Глобальный hotkey** через browser extension — web-страница не может зарегистрировать system-wide шорткат
+- [ ] **Глобальный hotkey** в Tauri через `tauri-plugin-global-shortcut` (web-страница не может, в desktop-обёртке — может)
 - [ ] Push-to-talk режим
+- [ ] Speaking-индикатор для чужих (server-side VAD в pion SFU)
 
 ### Infra
 - [ ] Persistent room state на бекенде

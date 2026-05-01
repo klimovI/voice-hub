@@ -1,6 +1,11 @@
 # Voice Hub — план упрощения
 
-Цель: **один Go-бинарь** делает всё (auth, статика, signaling, SFU). Tauri — тонкая
+> **Статус: выполнен.** Phase 1 (cookie auth + Tauri remote URL), Phase 2
+> (Janus → embedded pion SFU), Phase 3 (coturn → embedded pion/turn) сделаны.
+> Phase 4 (TLS внутрь Go) не делали — Caddy остаётся. Документ — историческая
+> запись принятых решений.
+
+Цель: **один Go-бинарь** делает всё (auth, статика, signaling, SFU, TURN). Tauri — тонкая
 обёртка над remote URL, без секретов в бинаре. Минимум контейнеров, минимум кода,
 минимум секретов.
 
