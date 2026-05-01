@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +32,6 @@ type iceServer struct {
 }
 
 type appConfigResponse struct {
-	JanusWSURL string      `json:"janusWsUrl"`
-	RoomID     int         `json:"roomId"`
-	RoomPIN    string      `json:"roomPin,omitempty"`
 	ICEServers []iceServer `json:"iceServers"`
 }
 
@@ -49,9 +47,19 @@ func main() {
 
 	limiter := newAuthLimiter(10, 15*time.Minute)
 
-	room := sfu.NewRoom(sfu.Config{
+	var natIPs []string
+	if ip := os.Getenv("PUBLIC_IP"); ip != "" {
+		natIPs = []string{ip}
+	}
+	room, err := sfu.NewRoom(sfu.Config{
 		ICEServers: []webrtc.ICEServer{{URLs: []string{cfg.StunURL}}},
+		NAT1To1IPs: natIPs,
+		UDPPortMin: 10000,
+		UDPPortMax: 10100,
 	})
+	if err != nil {
+		log.Fatalf("sfu init: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
@@ -74,9 +82,6 @@ func main() {
 		}
 
 		response := appConfigResponse{
-			JanusWSURL: cfg.JanusWSURL,
-			RoomID:     cfg.RoomID,
-			RoomPIN:    cfg.RoomPIN,
 			ICEServers: []iceServer{
 				{URLs: []string{cfg.StunURL}},
 				{

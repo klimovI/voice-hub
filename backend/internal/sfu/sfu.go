@@ -36,6 +36,13 @@ type PeerInfo struct {
 // Config holds room-level configuration.
 type Config struct {
 	ICEServers []webrtc.ICEServer
+	// NAT1To1IPs lists public IPs to advertise as srflx candidates when the
+	// process runs behind 1:1 NAT (typical Docker bridge or NAT'd VPS).
+	NAT1To1IPs []string
+	// UDPPortRange limits ICE host candidates to this UDP port range so the
+	// container's exposed UDP ports match.
+	UDPPortMin uint16
+	UDPPortMax uint16
 }
 
 type peer struct {
@@ -71,14 +78,36 @@ type Room struct {
 	peers  map[string]*peer
 	tracks map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
 	cfg    Config
+	api    *webrtc.API
 }
 
-func NewRoom(cfg Config) *Room {
+func NewRoom(cfg Config) (*Room, error) {
+	settingEngine := webrtc.SettingEngine{}
+	if len(cfg.NAT1To1IPs) > 0 {
+		settingEngine.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+			External:        cfg.NAT1To1IPs,
+			AsCandidateType: webrtc.ICECandidateTypeHost,
+		})
+	}
+	if cfg.UDPPortMin > 0 && cfg.UDPPortMax >= cfg.UDPPortMin {
+		if err := settingEngine.SetEphemeralUDPPortRange(cfg.UDPPortMin, cfg.UDPPortMax); err != nil {
+			return nil, err
+		}
+	}
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		return nil, err
+	}
+	api := webrtc.NewAPI(
+		webrtc.WithSettingEngine(settingEngine),
+		webrtc.WithMediaEngine(mediaEngine),
+	)
 	return &Room{
 		peers:  make(map[string]*peer),
 		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
 		cfg:    cfg,
-	}
+		api:    api,
+	}, nil
 }
 
 // ServeWS upgrades the request to a WebSocket and runs one peer session.
@@ -92,7 +121,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "")
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: r.cfg.ICEServers})
+	pc, err := r.api.NewPeerConnection(webrtc.Configuration{ICEServers: r.cfg.ICEServers})
 	if err != nil {
 		log.Printf("sfu: new pc: %v", err)
 		return

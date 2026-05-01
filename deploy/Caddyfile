@@ -11,12 +11,5 @@
 		-Server
 	}
 
-	@janus_ws {
-		path /janus-ws
-		header Connection *Upgrade*
-		header Upgrade websocket
-	}
-	reverse_proxy @janus_ws janus:8188
-
 	reverse_proxy app:8080
 }

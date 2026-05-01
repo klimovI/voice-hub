@@ -1,9 +1,0 @@
-general: {
-  ws = true
-  ws_port = 8188
-  wss = false
-}
-
-admin: {
-  admin_ws = false
-}

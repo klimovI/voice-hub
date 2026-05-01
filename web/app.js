@@ -1,5 +1,6 @@
 import { Rnnoise } from "./vendor/rnnoise/rnnoise.js";
 import * as Dtln from "./vendor/dtln/dtln.mjs";
+import { createSFUClient } from "./sfu-client.js";
 
 (function () {
   const STORAGE_KEYS = {
@@ -29,12 +30,8 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
 
   const state = {
     config: null,
-    ws: null,
-    sessionId: null,
-    publisherHandleId: null,
-    publisherParticipantId: null,
-    publisherPrivateId: null,
-    publisherPC: null,
+    sfuClient: null,
+    peerId: null,
     rawLocalStream: null,
     processedLocalStream: null,
     localAudioContext: null,
@@ -64,9 +61,6 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     localDestinationNode: null,
     localMonitorAnalyser: null,
     localMonitorData: null,
-    keepaliveTimer: null,
-    pending: new Map(),
-    subscriptions: new Map(),
     joined: false,
     selfMuted: false,
     deafened: false,
@@ -175,11 +169,19 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   }
 
   function onDisplayNameInput(event) {
-    const value = event.target.value;
+    const value = event.target.value.trim();
     if (value) {
       localStorage.setItem(STORAGE_KEYS.displayName, value);
     } else {
       localStorage.removeItem(STORAGE_KEYS.displayName);
+    }
+    if (state.joined && state.sfuClient && value) {
+      state.sfuClient.setDisplayName(value);
+      const self = state.participants.get(state.peerId);
+      if (self) {
+        self.display = value;
+        renderParticipants();
+      }
     }
   }
 
@@ -211,8 +213,9 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
       throw new Error("No audio track after rebuild");
     }
     newTrack.enabled = !state.selfMuted;
-    if (state.publisherPC) {
-      const sender = state.publisherPC
+    const pc = state.sfuClient?.getPeerConnection?.();
+    if (pc) {
+      const sender = pc
         .getSenders()
         .find((s) => s.track && s.track.kind === "audio");
       if (sender) {
@@ -306,60 +309,82 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
 
     try {
       await prepareLocalAudioGraph();
-      await connectJanus();
-      await createSession();
-      await attachPublisherHandle();
 
-      const joinedData = await joinPublisher(display);
-      state.publisherParticipantId = joinedData.id;
-      state.publisherPrivateId = joinedData.private_id || null;
-
-      ensureParticipant({
-        id: state.publisherParticipantId,
-        display,
-        isSelf: true,
+      const client = createSFUClient({
+        onState: (s) => {
+          if (s === "connected") {
+            setStatus("Подключено");
+          } else if (s === "failed" || s === "closed") {
+            if (state.joined) {
+              setStatus("Соединение оборвалось", true);
+            }
+          }
+        },
+        onWelcome: ({ id, peers }) => {
+          state.peerId = id;
+          ensureParticipant({ id, display, isSelf: true });
+          for (const p of peers || []) {
+            ensureParticipant({ id: p.id, display: p.displayName || `peer-${p.id}` });
+          }
+          renderParticipants();
+        },
+        onPeerJoined: ({ id, displayName }) => {
+          ensureParticipant({ id, display: displayName || `peer-${id}` });
+          renderParticipants();
+        },
+        onPeerLeft: ({ id }) => {
+          removeParticipant(id);
+        },
+        onPeerInfo: ({ id, displayName }) => {
+          const p = state.participants.get(id);
+          if (p && displayName) {
+            p.display = displayName;
+            renderParticipants();
+          }
+        },
+        onTrack: ({ track, stream, peerId }) => {
+          if (!peerId || track.kind !== "audio") return;
+          const participant = ensureParticipant({ id: peerId, display: `peer-${peerId}` });
+          ensureParticipantAudio(participant, stream);
+        },
+        onError: (err) => {
+          // ignore — onState handles user-visible errors
+        },
       });
 
-      await publishAudio(display);
+      state.sfuClient = client;
 
-      const existingPublishers = Array.isArray(joinedData.publishers)
-        ? joinedData.publishers
-        : [];
-      for (const publisher of existingPublishers) {
-        await ensureRemoteSubscription(publisher);
-      }
+      setStatus("Подключаюсь...");
+      await client.connect({
+        wsUrl: buildWsUrl(),
+        iceServers: state.config.iceServers,
+        localStream: state.processedLocalStream,
+      });
+
+      client.setDisplayName(display);
 
       state.joined = true;
       toggleControls({ joined: true });
       syncButtons();
       renderParticipants();
-      setStatus("Подключено");
     } catch (error) {
       cleanup();
       toggleControls({ joined: false });
       syncButtons();
-      setStatus(error.message, true);
+      setStatus(error.message || String(error), true);
     }
   }
 
   async function onLeave() {
-    try {
-      if (state.ws && state.publisherHandleId) {
-        await sendJanus({
-          janus: "message",
-          body: { request: "leave" },
-          session_id: state.sessionId,
-          handle_id: state.publisherHandleId,
-        }, { acceptAck: true });
-      }
-    } catch (_) {
-      // Best effort shutdown.
-    }
-
     cleanup();
     toggleControls({ joined: false });
     syncButtons();
     setStatus("Отключено");
+  }
+
+  function buildWsUrl() {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/ws`;
   }
 
   async function onToggleSelfMute() {
@@ -411,7 +436,7 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
         track.enabled = !state.selfMuted;
       }
     }
-    const selfParticipant = state.participants.get(state.publisherParticipantId);
+    const selfParticipant = state.participants.get(state.peerId);
     if (selfParticipant) {
       selfParticipant.selfMuted = state.selfMuted;
       if (state.selfMuted) {
@@ -657,256 +682,6 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     }
   }
 
-  async function connectJanus() {
-    setStatus("Подключаюсь к Janus...");
-
-    await new Promise((resolve, reject) => {
-      const ws = new WebSocket(state.config.janusWsUrl, "janus-protocol");
-      state.ws = ws;
-
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("Не удалось открыть WebSocket до Janus"));
-      ws.onclose = () => {
-        if (state.joined) {
-          setStatus("Janus соединение закрыто", true);
-        }
-      };
-      ws.onmessage = async (event) => {
-        const message = JSON.parse(event.data);
-        await handleJanusMessage(message);
-      };
-    });
-  }
-
-  async function createSession() {
-    const response = await sendJanus({ janus: "create" });
-    state.sessionId = response.data.id;
-    state.keepaliveTimer = window.setInterval(() => {
-      void sendJanus({
-        janus: "keepalive",
-        session_id: state.sessionId,
-      }, { acceptAck: true });
-    }, 25000);
-  }
-
-  async function attachPublisherHandle() {
-    const response = await sendJanus({
-      janus: "attach",
-      plugin: "janus.plugin.videoroom",
-      session_id: state.sessionId,
-    });
-
-    state.publisherHandleId = response.data.id;
-  }
-
-  async function joinPublisher(display) {
-    setStatus("Вхожу в комнату...");
-
-    let response = await sendJanus({
-      janus: "message",
-      body: buildPublisherJoinBody(display),
-      session_id: state.sessionId,
-      handle_id: state.publisherHandleId,
-    });
-
-    const data = getVideoRoomData(response);
-    if (data?.error_code === 426) {
-      await ensureRoomExists();
-      response = await sendJanus({
-        janus: "message",
-        body: buildPublisherJoinBody(display),
-        session_id: state.sessionId,
-        handle_id: state.publisherHandleId,
-      });
-    }
-
-    const joinedData = getVideoRoomData(response);
-    if (!joinedData || joinedData.videoroom !== "joined") {
-      throw new Error(`Janus join returned unexpected payload: ${formatPayloadForError(response)}`);
-    }
-
-    return joinedData;
-  }
-
-  async function publishAudio(display) {
-    setStatus("Публикую аудио...");
-
-    state.publisherPC = new RTCPeerConnection({
-      iceServers: state.config.iceServers,
-    });
-    bindPeerConnection(state.publisherPC, state.publisherHandleId);
-
-    for (const track of state.processedLocalStream.getAudioTracks()) {
-      track.enabled = !state.selfMuted;
-      state.publisherPC.addTrack(track, state.processedLocalStream);
-    }
-
-    const offer = await state.publisherPC.createOffer({
-      offerToReceiveAudio: false,
-      offerToReceiveVideo: false,
-    });
-    await state.publisherPC.setLocalDescription(offer);
-
-    const response = await sendJanus({
-      janus: "message",
-      body: {
-        request: "publish",
-        audio: true,
-        video: false,
-        data: false,
-        audiocodec: "opus",
-        display,
-      },
-      jsep: offer,
-      session_id: state.sessionId,
-      handle_id: state.publisherHandleId,
-    });
-
-    if (!response.jsep) {
-      throw new Error("Janus не вернул SDP answer на publish");
-    }
-
-    await state.publisherPC.setRemoteDescription(response.jsep);
-  }
-
-  async function ensureRemoteSubscription(publisher) {
-    if (!publisher || publisher.id === state.publisherParticipantId) {
-      return;
-    }
-
-    const existing = state.participants.get(publisher.id);
-    if (existing?.subscriptionStatus === "ready" || existing?.subscriptionStatus === "connecting") {
-      return;
-    }
-
-    const audioStream = (publisher.streams || []).find(
-      (stream) => stream.type === "audio" && !stream.disabled
-    );
-    if (!audioStream) {
-      return;
-    }
-
-    const participant = ensureParticipant({
-      id: publisher.id,
-      display: publisher.display || `user-${publisher.id}`,
-      isSelf: false,
-      speaking: Boolean(audioStream.talking ?? publisher.talking),
-    });
-    participant.subscriptionStatus = "connecting";
-    renderParticipants();
-
-    const attachResponse = await sendJanus({
-      janus: "attach",
-      plugin: "janus.plugin.videoroom",
-      session_id: state.sessionId,
-    });
-
-    const handleId = attachResponse.data.id;
-    const pc = new RTCPeerConnection({
-      iceServers: state.config.iceServers,
-    });
-
-    participant.handleId = handleId;
-    participant.pc = pc;
-    bindPeerConnection(pc, handleId);
-    state.subscriptions.set(handleId, participant.id);
-
-    const body = {
-      request: "join",
-      ptype: "subscriber",
-      room: state.config.roomId,
-      use_msid: true,
-      streams: [
-        {
-          feed: publisher.id,
-          mid: audioStream.mid,
-        },
-      ],
-    };
-    if (state.publisherPrivateId) {
-      body.private_id = state.publisherPrivateId;
-    }
-    if (state.config.roomPin) {
-      body.pin = state.config.roomPin;
-    }
-
-    const response = await sendJanus({
-      janus: "message",
-      body,
-      session_id: state.sessionId,
-      handle_id: handleId,
-    });
-
-    await completeSubscriberNegotiation(participant, response.jsep);
-    participant.subscriptionStatus = "ready";
-    renderParticipants();
-  }
-
-  async function completeSubscriberNegotiation(participant, offer) {
-    if (!participant.pc || !offer) {
-      throw new Error("Janus не прислал SDP offer для subscriber");
-    }
-
-    await participant.pc.setRemoteDescription(offer);
-    const answer = await participant.pc.createAnswer();
-    await participant.pc.setLocalDescription(answer);
-
-    await sendJanus({
-      janus: "message",
-      body: { request: "start" },
-      jsep: answer,
-      session_id: state.sessionId,
-      handle_id: participant.handleId,
-    });
-  }
-
-  function bindPeerConnection(pc, handleId) {
-    pc.onicecandidate = async (event) => {
-      if (!state.ws || !handleId) {
-        return;
-      }
-
-      if (event.candidate) {
-        await sendJanus({
-          janus: "trickle",
-          candidate: event.candidate.toJSON(),
-          session_id: state.sessionId,
-          handle_id: handleId,
-        }, { acceptAck: true });
-        return;
-      }
-
-      await sendJanus({
-        janus: "trickle",
-        candidate: { completed: true },
-        session_id: state.sessionId,
-        handle_id: handleId,
-      }, { acceptAck: true });
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed") {
-        setStatus("WebRTC соединение оборвалось", true);
-      }
-    };
-
-    if (handleId !== state.publisherHandleId) {
-      pc.ontrack = (event) => {
-        const participantId = state.subscriptions.get(handleId);
-        if (!participantId) {
-          return;
-        }
-
-        const participant = state.participants.get(participantId);
-        if (!participant) {
-          return;
-        }
-
-        const [stream] = event.streams;
-        ensureParticipantAudio(participant, stream || new MediaStream([event.track]));
-      };
-    }
-  }
 
   function ensureParticipantAudio(participant, stream) {
     if (!participant.audioEl) {
@@ -937,162 +712,6 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     applyRemoteAudioSettings();
   }
 
-  async function handleJanusMessage(message) {
-    if (message.janus === "trickle") {
-      await handleRemoteTrickle(message);
-      return;
-    }
-
-    if (message.janus === "hangup") {
-      handleHangup(message);
-      return;
-    }
-
-    const pending = state.pending.get(message.transaction);
-    if (pending) {
-      if (message.janus === "ack" && pending.acceptAck) {
-        pending.resolve(message);
-        state.pending.delete(message.transaction);
-        return;
-      }
-
-      if (message.janus === "ack") {
-        return;
-      }
-
-      if (message.janus === "error") {
-        pending.reject(new Error(message.error?.reason || "Janus error"));
-        state.pending.delete(message.transaction);
-        return;
-      }
-
-      pending.resolve(message);
-      state.pending.delete(message.transaction);
-      return;
-    }
-
-    await handlePluginEvent(message);
-  }
-
-  async function handleRemoteTrickle(message) {
-    const pc = getPeerConnectionByHandle(message.sender);
-    if (!pc || !message.candidate) {
-      return;
-    }
-
-    if (message.candidate.completed) {
-      await pc.addIceCandidate(null);
-      return;
-    }
-
-    await pc.addIceCandidate(message.candidate);
-  }
-
-  function handleHangup(message) {
-    const participantId = state.subscriptions.get(message.sender);
-    if (!participantId) {
-      return;
-    }
-
-    removeParticipant(participantId);
-  }
-
-  async function handlePluginEvent(message) {
-    const data = getVideoRoomData(message);
-    if (handleTalkingEvent(data)) {
-      return;
-    }
-
-    if (message.sender === state.publisherHandleId) {
-      if (!data) {
-        return;
-      }
-
-      if (Array.isArray(data.publishers)) {
-        for (const publisher of data.publishers) {
-          await ensureRemoteSubscription(publisher);
-        }
-      }
-
-      if (typeof data.leaving !== "undefined") {
-        removeParticipant(data.leaving);
-      }
-
-      if (typeof data.unpublished !== "undefined" && data.unpublished !== "ok") {
-        removeParticipant(data.unpublished);
-      }
-
-      return;
-    }
-
-    const participantId = state.subscriptions.get(message.sender);
-    if (!participantId) {
-      return;
-    }
-
-    const participant = state.participants.get(participantId);
-    if (!participant) {
-      return;
-    }
-
-    if (message.jsep) {
-      await completeSubscriberNegotiation(participant, message.jsep);
-    }
-
-    if (data?.videoroom === "event" && data.unpublished) {
-      removeParticipant(participantId);
-    }
-  }
-
-  function handleTalkingEvent(data) {
-    if (!data || (data.videoroom !== "talking" && data.videoroom !== "stopped-talking")) {
-      return false;
-    }
-
-    const participant = state.participants.get(data.id);
-    if (!participant || participant.isSelf) {
-      return true;
-    }
-
-    const speakingNow = data.videoroom === "talking";
-    if (participant.speaking !== speakingNow) {
-      participant.speaking = speakingNow;
-      renderParticipants();
-    }
-
-    return true;
-  }
-
-  function sendJanus(payload, options = {}) {
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("Нет активного соединения с Janus"));
-    }
-
-    const transaction = randomID();
-    const message = { transaction, ...payload };
-
-    return new Promise((resolve, reject) => {
-      state.pending.set(transaction, {
-        resolve,
-        reject,
-        acceptAck: options.acceptAck === true,
-      });
-      state.ws.send(JSON.stringify(message));
-    });
-  }
-
-  function getPeerConnectionByHandle(handleId) {
-    if (handleId === state.publisherHandleId) {
-      return state.publisherPC;
-    }
-
-    const participantId = state.subscriptions.get(handleId);
-    if (!participantId) {
-      return null;
-    }
-
-    return state.participants.get(participantId)?.pc || null;
-  }
 
   function ensureParticipant(partial) {
     const existing = state.participants.get(partial.id);
@@ -1109,10 +728,7 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
       speaking: false,
       localMuted: false,
       localVolume: 100,
-      subscriptionStatus: partial.isSelf ? "self" : "idle",
       audioEl: null,
-      handleId: null,
-      pc: null,
       analyser: null,
       analyserData: null,
       monitorSource: null,
@@ -1136,7 +752,7 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   }
 
   function removeParticipant(participantId) {
-    if (participantId === state.publisherParticipantId) {
+    if (participantId === state.peerId) {
       return;
     }
 
@@ -1145,16 +761,6 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
       return;
     }
 
-    if (participant.handleId) {
-      state.subscriptions.delete(participant.handleId);
-      void sendJanus({
-        janus: "detach",
-        session_id: state.sessionId,
-        handle_id: participant.handleId,
-      }, { acceptAck: true }).catch(() => {});
-    }
-
-    participant.pc?.close();
     participant.monitorSource?.disconnect();
     participant.analyser?.disconnect();
     try { participant.sourceNode?.disconnect(); } catch (_) {}
@@ -1334,28 +940,10 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   }
 
   function cleanup() {
-    window.clearInterval(state.keepaliveTimer);
-    state.keepaliveTimer = null;
-
-    for (const pending of state.pending.values()) {
-      pending.reject(new Error("Соединение прервано"));
-    }
-    state.pending.clear();
-
-    if (state.ws && state.ws.readyState === WebSocket.OPEN && state.sessionId) {
-      try {
-        state.ws.send(JSON.stringify({
-          janus: "destroy",
-          session_id: state.sessionId,
-          transaction: randomID(),
-        }));
-      } catch (_) {
-        // Ignore shutdown errors.
-      }
-    }
+    state.sfuClient?.disconnect();
+    state.sfuClient = null;
 
     for (const participant of state.participants.values()) {
-      participant.pc?.close();
       try { participant.sourceNode?.disconnect(); } catch (_) {}
       try { participant.gainNode?.disconnect(); } catch (_) {}
       participant.sourceNode = null;
@@ -1368,20 +956,12 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     void state.remoteAudioContext?.close().catch(() => {});
     state.remoteAudioContext = null;
 
-    state.subscriptions.clear();
     state.participants.clear();
-    state.publisherPC?.close();
-    state.ws?.close();
     state.processedLocalStream?.getTracks().forEach((track) => track.stop());
     state.rawLocalStream?.getTracks().forEach((track) => track.stop());
     void state.localAudioContext?.close().catch(() => {});
 
-    state.ws = null;
-    state.sessionId = null;
-    state.publisherHandleId = null;
-    state.publisherParticipantId = null;
-    state.publisherPrivateId = null;
-    state.publisherPC = null;
+    state.peerId = null;
     state.rawLocalStream = null;
     state.processedLocalStream = null;
     state.localAudioContext = null;
@@ -1573,7 +1153,7 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     const tick = () => {
       let changed = false;
 
-      const selfParticipant = state.participants.get(state.publisherParticipantId);
+      const selfParticipant = state.participants.get(state.peerId);
       if (selfParticipant && state.localMonitorAnalyser && state.localMonitorData) {
         const speakingLevel = detectLevel(state.localMonitorAnalyser, state.localMonitorData);
         const speakingNow = !state.selfMuted && speakingLevel > SPEAKING_THRESHOLD;
@@ -1724,72 +1304,8 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     localStorage.removeItem("voice-hub.gate-release");
   }
 
-  function buildPublisherJoinBody(display) {
-    const body = {
-      request: "join",
-      ptype: "publisher",
-      room: state.config.roomId,
-      display,
-    };
-    if (state.config.roomPin) {
-      body.pin = state.config.roomPin;
-    }
-    return body;
-  }
-
-  async function ensureRoomExists() {
-    setStatus(`Комната ${state.config.roomId} не найдена, создаю её...`);
-
-    const response = await sendJanus({
-      janus: "message",
-      body: {
-        request: "create",
-        room: state.config.roomId,
-        permanent: false,
-        description: "Main audio room",
-        is_private: false,
-        publishers: 12,
-        require_pvtid: false,
-        audiocodec: "opus",
-        opus_fec: true,
-        opus_dtx: true,
-        audiolevel_ext: true,
-        audiolevel_event: true,
-        audio_active_packets: 100,
-        audio_level_average: 25,
-        notify_joining: true,
-      },
-      session_id: state.sessionId,
-      handle_id: state.publisherHandleId,
-    });
-
-    const data = getVideoRoomData(response);
-    const created =
-      data?.videoroom === "created" ||
-      (data?.videoroom === "event" && data?.error_code === 427);
-
-    if (!created) {
-      throw new Error(`Janus room create failed: ${formatPayloadForError(response)}`);
-    }
-  }
-
-  function getVideoRoomData(message) {
-    return message?.plugindata?.data || message?.data || null;
-  }
-
-  function formatPayloadForError(payload) {
-    try {
-      return JSON.stringify(payload);
-    } catch (_) {
-      return String(payload);
-    }
-  }
 
   function makeGuestName() {
     return `guest-${Math.random().toString(36).slice(2, 7)}`;
-  }
-
-  function randomID() {
-    return Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 })();

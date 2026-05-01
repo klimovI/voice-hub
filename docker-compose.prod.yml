@@ -17,7 +17,6 @@ services:
       - no-new-privileges:true
     depends_on:
       - app
-      - janus
 
   app:
     image: ghcr.io/klimovi/voice-hub-app:latest
@@ -25,9 +24,6 @@ services:
     environment:
       APP_ADDR: ":8080"
       WEB_DIR: "/app/web"
-      JANUS_WS_URL: "wss://${APP_HOSTNAME}/janus-ws"
-      ROOM_ID: "${ROOM_ID:-1001}"
-      ROOM_PIN: "${ROOM_PIN:-}"
       STUN_URL: "stun:${APP_HOSTNAME}:3478"
       TURN_URL: "turn:${APP_HOSTNAME}:3478?transport=udp"
       TURN_USERNAME: "${TURN_USERNAME}"
@@ -37,6 +33,8 @@ services:
       APP_SESSION_SECRET: "${APP_SESSION_SECRET:?APP_SESSION_SECRET is required (>=16 bytes random)}"
     expose:
       - "8080"
+    ports:
+      - "10000-10100:10000-10100/udp"
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -48,22 +46,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    depends_on:
-      - janus
-
-  janus:
-    image: ghcr.io/klimovi/voice-hub-janus:latest
-    restart: unless-stopped
-    environment:
-      PUBLIC_IP: ${PUBLIC_IP}
-    expose:
-      - "8188"
-    ports:
-      - "10000-10100:10000-10100/udp"
-    security_opt:
-      - no-new-privileges:true
-    depends_on:
-      - coturn
 
   coturn:
     image: coturn/coturn:4.10-alpine
