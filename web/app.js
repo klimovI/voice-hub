@@ -694,6 +694,8 @@ import { createSFUClient } from "./sfu-client.js";
 
     participant.audioEl.srcObject = stream;
     void participant.audioEl.play().catch(() => {});
+    participant.hasStream = true;
+    renderParticipants();
 
     const ctx = ensureRemoteAudioContext();
     if (!participant.gainNode) {
@@ -838,7 +840,7 @@ import { createSFUClient } from "./sfu-client.js";
           : participant.speaking
             ? "speaking"
             : "live"
-        : participant.subscriptionStatus === "ready"
+        : participant.hasStream
           ? participant.localMuted
             ? "muted locally"
             : participant.speaking
@@ -847,7 +849,7 @@ import { createSFUClient } from "./sfu-client.js";
           : "connecting";
 
       const isMuted = participant.isSelf ? participant.selfMuted : participant.localMuted;
-      const isReady = participant.isSelf || participant.subscriptionStatus === "ready";
+      const isReady = participant.isSelf || participant.hasStream;
 
       if (participant.speaking) {
         row.classList.add("participant-speaking");
