@@ -34,6 +34,7 @@ services:
       TURN_PASSWORD: "${TURN_PASSWORD}"
       APP_AUTH_USER: "${APP_AUTH_USER:?APP_AUTH_USER is required}"
       APP_AUTH_PASSWORD: "${APP_AUTH_PASSWORD:?APP_AUTH_PASSWORD is required}"
+      APP_SESSION_SECRET: "${APP_SESSION_SECRET:?APP_SESSION_SECRET is required (>=16 bytes random)}"
     expose:
       - "8080"
     security_opt:

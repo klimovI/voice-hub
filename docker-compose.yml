@@ -16,6 +16,8 @@ services:
       TURN_PASSWORD: "room-secret"
       APP_AUTH_USER: "dev"
       APP_AUTH_PASSWORD: "dev"
+      APP_SESSION_SECRET: "dev-session-secret-32-bytes-long!"
+      APP_COOKIE_SECURE: "false"
     ports:
       - "8080:8080"
     depends_on:

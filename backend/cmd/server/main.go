@@ -6,12 +6,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/config"
 )
+
+const sessionTTL = 30 * 24 * time.Hour
 
 type healthResponse struct {
 	Status string `json:"status"`
@@ -33,10 +37,17 @@ type appConfigResponse struct {
 func main() {
 	cfg := config.Load()
 
+	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
+		log.Fatal("APP_AUTH_USER and APP_AUTH_PASSWORD must be set")
+	}
+	if len(cfg.SessionSecret) < 16 {
+		log.Fatal("APP_SESSION_SECRET must be set (>= 16 bytes)")
+	}
+
 	limiter := newAuthLimiter(10, 15*time.Minute)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", basicAuth(cfg, limiter, http.FileServer(http.Dir(cfg.WebDir))))
+	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,7 +57,9 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok"})
 	})
-	mux.Handle("/api/config", basicAuth(cfg, limiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/login", loginHandler(cfg, limiter))
+	mux.HandleFunc("/api/logout", logoutHandler(cfg))
+	mux.Handle("/api/config", requireAuthAPI(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -79,37 +92,113 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
-		log.Fatal("APP_AUTH_USER and APP_AUTH_PASSWORD must be set")
-	}
-	log.Printf("basic auth enabled (user=%s)", cfg.AuthUser)
+	log.Printf("auth enabled (user=%s, cookie_secure=%v)", cfg.AuthUser, cfg.CookieSecure)
 	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
 
-func basicAuth(cfg config.Config, limiter *authLimiter, next http.Handler) http.Handler {
+func authenticated(cfg config.Config, r *http.Request) bool {
+	if cookie, err := r.Cookie(auth.CookieName); err == nil {
+		if _, err := auth.Decode(cfg.SessionSecret, cookie.Value); err == nil {
+			return true
+		}
+	}
+	if user, pass, ok := r.BasicAuth(); ok &&
+		subtle.ConstantTimeCompare([]byte(user), []byte(cfg.AuthUser)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(pass), []byte(cfg.AuthPassword)) == 1 {
+		return true
+	}
+	return false
+}
+
+func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login.html" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if authenticated(cfg, r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		nextURL := url.QueryEscape(r.URL.RequestURI())
+		http.Redirect(w, r, "/login.html?next="+nextURL, http.StatusSeeOther)
+	})
+}
+
+func requireAuthAPI(cfg config.Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authenticated(cfg, r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+func loginHandler(cfg config.Config, limiter *authLimiter) http.HandlerFunc {
 	wantUser := []byte(cfg.AuthUser)
 	wantPass := []byte(cfg.AuthPassword)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		ip := clientIP(r)
 		if limiter.blocked(ip) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
-		user, pass, ok := r.BasicAuth()
-		if !ok ||
-			subtle.ConstantTimeCompare([]byte(user), wantUser) != 1 ||
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		user := r.PostFormValue("user")
+		pass := r.PostFormValue("password")
+		if subtle.ConstantTimeCompare([]byte(user), wantUser) != 1 ||
 			subtle.ConstantTimeCompare([]byte(pass), wantPass) != 1 {
 			limiter.fail(ip)
-			w.Header().Set("WWW-Authenticate", `Basic realm="Voice Hub", charset="UTF-8"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		limiter.success(ip)
-		next.ServeHTTP(w, r)
+		setSessionCookie(w, cfg, user)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func logoutHandler(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     auth.CookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   cfg.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func setSessionCookie(w http.ResponseWriter, cfg config.Config, user string) {
+	value := auth.Encode(cfg.SessionSecret, user, sessionTTL)
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   int(sessionTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   cfg.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 

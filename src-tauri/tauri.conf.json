@@ -17,18 +17,8 @@
     ]
   },
   "app": {
-    "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Voice Hub",
-        "width": 1440,
-        "height": 980,
-        "minWidth": 1100,
-        "minHeight": 760,
-        "resizable": true
-      }
-    ],
+    "withGlobalTauri": false,
+    "windows": [],
     "security": {
       "capabilities": [
         "default"

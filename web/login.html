@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice Hub — вход</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-0: #07090a;
+        --bg-1: #11181b;
+        --bg-input: #0c1416;
+        --line: #2a3a3f;
+        --line-strong: #3a5057;
+        --text: #e8efe9;
+        --muted: #9aa8a2;
+        --accent: #22c55e;
+        --accent-strong: #16a34a;
+        --danger: #f87171;
+        --danger-soft: rgba(248, 113, 113, 0.12);
+        --radius: 14px;
+        --radius-lg: 20px;
+        --shadow-lg: 0 30px 80px -22px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+
+      body {
+        font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg-0);
+        background-image:
+          radial-gradient(900px 600px at 12% -10%, rgba(34, 197, 94, 0.10), transparent 60%),
+          radial-gradient(700px 500px at 110% 10%, rgba(34, 197, 94, 0.05), transparent 55%),
+          radial-gradient(600px 600px at 50% 120%, rgba(34, 197, 94, 0.06), transparent 60%);
+        background-attachment: fixed;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(380px, 100%);
+        padding: 28px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--bg-1);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 16px;
+        letter-spacing: -0.01em;
+        margin-bottom: 20px;
+      }
+
+      .brand .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 14px var(--accent);
+      }
+
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0 0 4px;
+        letter-spacing: -0.01em;
+      }
+
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      input {
+        width: 100%;
+        padding: 11px 13px;
+        font: inherit;
+        color: var(--text);
+        background: var(--bg-input);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        outline: none;
+        transition: border-color 120ms;
+      }
+
+      input:focus {
+        border-color: var(--line-strong);
+      }
+
+      .field + .field { margin-top: 14px; }
+
+      button {
+        width: 100%;
+        margin-top: 20px;
+        padding: 12px 14px;
+        font: inherit;
+        font-weight: 600;
+        color: #050807;
+        background: var(--accent);
+        border: 0;
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: background 120ms;
+      }
+
+      button:hover:not(:disabled) { background: var(--accent-strong); }
+      button:disabled { opacity: 0.6; cursor: progress; }
+
+      .error {
+        display: none;
+        margin-top: 14px;
+        padding: 10px 12px;
+        font-size: 13px;
+        color: var(--danger);
+        background: var(--danger-soft);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        border-radius: var(--radius);
+      }
+
+      .error.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="brand"><span class="dot"></span>Voice Hub</div>
+      <h1>Вход</h1>
+      <div class="sub">Введите общий логин и пароль.</div>
+      <form id="login-form">
+        <div class="field">
+          <label for="user">Логин</label>
+          <input id="user" name="user" autocomplete="username" required autofocus>
+        </div>
+        <div class="field">
+          <label for="password">Пароль</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" id="submit">Войти</button>
+        <div class="error" id="error"></div>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById("login-form");
+      const submit = document.getElementById("submit");
+      const errorEl = document.getElementById("error");
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.classList.add("show");
+      }
+
+      function clearError() {
+        errorEl.classList.remove("show");
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        clearError();
+        submit.disabled = true;
+        try {
+          const body = new URLSearchParams();
+          body.set("user", form.user.value);
+          body.set("password", form.password.value);
+          const res = await fetch("/api/login", {
+            method: "POST",
+            body,
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          });
+          if (res.status === 204) {
+            const next = new URLSearchParams(window.location.search).get("next") || "/";
+            window.location.replace(next);
+            return;
+          }
+          if (res.status === 429) {
+            showError("Слишком много попыток. Подождите 15 минут.");
+            return;
+          }
+          showError("Неверный логин или пароль.");
+        } catch (err) {
+          showError("Сетевая ошибка: " + err.message);
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

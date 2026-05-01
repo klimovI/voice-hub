@@ -13,7 +13,6 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   };
 
   const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
-  const tauriInvoke = window.__TAURI__?.core?.invoke ?? null;
   const ENGINES = ["off", "rnnoise", "dtln"];
   const DEFAULT_ENGINE = "dtln";
 
@@ -122,11 +121,12 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   }
 
   async function loadAppConfig() {
-    if (tauriInvoke) {
-      return tauriInvoke("get_app_config");
+    const response = await fetch("/api/config", { credentials: "same-origin" });
+    if (response.status === 401) {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.replace("/login.html?next=" + next);
+      throw new Error("Требуется вход");
     }
-
-    const response = await fetch("/api/config");
     if (!response.ok) {
       throw new Error("Не удалось получить конфиг комнаты");
     }
