@@ -6,11 +6,12 @@
 
 1. **Обрываются слова** — речь рвётся, теряются окончания/начала слов. Случается редко.
 2. **Индикатор говорящего** — UI-индикатор, кто из участников сейчас говорит.
+3. **Долгий `Запрашиваю микрофон…`** — статус иногда висит долго на старте join. Возможные причины: медленная инициализация WASM (DTLN/RNNoise preload), задержка `navigator.mediaDevices.getUserMedia` от ОС, прогрев `AudioContext.resume()`. Нужно профилировать `prepareLocalAudio` (`frontend/src/hooks/useAudioEngine.ts`).
 
 ## In Progress
 
-- **Потрещивания микрофона** — фаза 2 (см. Done — фаза 1, фаза 2). Если ещё слышны:
-  - debounce SFU renegotiation в `backend/internal/sfu/sfu.go:358-369` (щелчки на join/leave)
+- **Потрещивания микрофона** — фаза 2 закрыта (remote limiter). Замечено: щелчки приходят **только при включённом RNNoise-движке** (DTLN/off — чисто). Это указывает на ScriptProcessor RNNoise как источник, даже после zero-alloc-фикса (главный поток всё равно может стопориться на React-рендерах/zustand-обновлениях). После деплоя фазы 2 нужно перетестировать; если потрескивания всё ещё ловятся в RNNoise-режиме — переходим к:
+  - debounce SFU renegotiation в `backend/internal/sfu/sfu.go:358-369` (щелчки на join/leave — независимо от движка)
   - полный AudioWorklet port RNNoise (требует патча vendor `frontend/public/vendor/rnnoise/rnnoise.js` — emscripten env-check)
 
 ## Done
