@@ -24,36 +24,68 @@ struct AppConfigResponse {
 #[tauri::command]
 fn get_app_config() -> AppConfigResponse {
     AppConfigResponse {
-        janus_ws_url: env_or("JANUS_WS_URL", "ws://localhost:8188"),
-        room_id: env_or_int("ROOM_ID", 1001),
-        room_pin: env::var("ROOM_PIN").ok().filter(|value| !value.is_empty()),
+        janus_ws_url: cfg_str(
+            "JANUS_WS_URL",
+            option_env!("JANUS_WS_URL"),
+            "ws://localhost:8188",
+        ),
+        room_id: cfg_int("ROOM_ID", option_env!("ROOM_ID"), 1001),
+        room_pin: cfg_opt("ROOM_PIN", option_env!("ROOM_PIN")),
         ice_servers: vec![
             IceServer {
-                urls: vec![env_or("STUN_URL", "stun:localhost:3478")],
+                urls: vec![cfg_str(
+                    "STUN_URL",
+                    option_env!("STUN_URL"),
+                    "stun:localhost:3478",
+                )],
                 username: None,
                 credential: None,
             },
             IceServer {
-                urls: vec![env_or("TURN_URL", "turn:localhost:3478?transport=udp")],
-                username: Some(env_or("TURN_USERNAME", "room")),
-                credential: Some(env_or("TURN_PASSWORD", "room-secret")),
+                urls: vec![cfg_str(
+                    "TURN_URL",
+                    option_env!("TURN_URL"),
+                    "turn:localhost:3478?transport=udp",
+                )],
+                username: Some(cfg_str(
+                    "TURN_USERNAME",
+                    option_env!("TURN_USERNAME"),
+                    "room",
+                )),
+                credential: Some(cfg_str(
+                    "TURN_PASSWORD",
+                    option_env!("TURN_PASSWORD"),
+                    "room-secret",
+                )),
             },
         ],
     }
 }
 
-fn env_or(key: &str, fallback: &str) -> String {
-    env::var(key)
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| fallback.to_string())
+fn cfg_str(key: &str, baked: Option<&'static str>, fallback: &str) -> String {
+    if let Some(v) = env::var(key).ok().filter(|s| !s.is_empty()) {
+        return v;
+    }
+    if let Some(v) = baked.filter(|s| !s.is_empty()) {
+        return v.to_string();
+    }
+    fallback.to_string()
 }
 
-fn env_or_int(key: &str, fallback: i32) -> i32 {
+fn cfg_int(key: &str, baked: Option<&'static str>, fallback: i32) -> i32 {
     env::var(key)
         .ok()
-        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|s| !s.is_empty())
+        .or_else(|| baked.filter(|s| !s.is_empty()).map(String::from))
+        .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(fallback)
+}
+
+fn cfg_opt(key: &str, baked: Option<&'static str>) -> Option<String> {
+    env::var(key)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| baked.filter(|s| !s.is_empty()).map(String::from))
 }
 
 pub fn run() {

@@ -29,6 +29,24 @@ jobs:
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2.0" --locked
 
+      - name: Bake prod config into binary
+        shell: bash
+        env:
+          PROD_ENV: ${{ secrets.PROD_ENV }}
+        run: |
+          # extract APP_HOSTNAME, ROOM_ID, ROOM_PIN, TURN_USERNAME, TURN_PASSWORD from PROD_ENV
+          host=$(printf '%s\n' "$PROD_ENV" | grep '^APP_HOSTNAME=' | cut -d= -f2-)
+          if [ -z "$host" ]; then
+            echo "ERROR: APP_HOSTNAME not in PROD_ENV" >&2
+            exit 1
+          fi
+          {
+            echo "JANUS_WS_URL=wss://$host/janus-ws"
+            echo "STUN_URL=stun:$host:3478"
+            echo "TURN_URL=turn:$host:3478?transport=udp"
+            printf '%s\n' "$PROD_ENV" | grep -E '^(ROOM_ID|ROOM_PIN|TURN_USERNAME|TURN_PASSWORD)='
+          } >> "$GITHUB_ENV"
+
       - name: Build
         working-directory: src-tauri
         run: cargo tauri build --target x86_64-pc-windows-msvc
