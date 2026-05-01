@@ -27,6 +27,17 @@ export function App() {
   // Track peerId imperatively (also stored in store via participants).
   const peerIdRef = useRef<string | null>(null);
 
+  // Reconnect state. micGraph is preserved across attempts so we don't re-acquire mic.
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef<number>(0);
+  const userLeavingRef = useRef<boolean>(false);
+  const lastDisplayNameRef = useRef<string>("");
+  const scheduleReconnectRef = useRef<() => void>(() => {
+    /* set after scheduleReconnect is defined */
+  });
+
+  const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000];
+
   // Display name local state (synced to localStorage).
   const [displayName, setDisplayName] = useState<string>(
     () => localStorage.getItem("voice-hub.display-name") ?? "",
@@ -121,6 +132,124 @@ export function App() {
 
   useGlobalShortcut(handleToggleSelfMute);
 
+  // ---- Reconnect ----
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  // Connect (or reconnect) the SFU client using an already-built mic graph.
+  // Reused by initial join and by the reconnect path so we don't re-acquire mic.
+  const connectSfu = useCallback(
+    async (graph: MicGraph, display: string): Promise<void> => {
+      const cfg = configRef.current;
+      if (!cfg) throw new Error("Config not loaded");
+
+      const client = sfu.createClient({
+        onState: (s) => {
+          if (s === "connected") {
+            reconnectAttemptRef.current = 0;
+            store.setStatus("Подключено", false, true);
+          } else if (s === "failed" || s === "closed") {
+            if (
+              useStore.getState().joinState === "joined" &&
+              !userLeavingRef.current
+            ) {
+              scheduleReconnectRef.current();
+            }
+          }
+        },
+        onWelcome: ({ id, peers }) => {
+          peerIdRef.current = id;
+          store.upsertParticipant({ id, display, isSelf: true });
+          for (const p of peers ?? []) {
+            store.upsertParticipant({
+              id: p.id,
+              display: p.displayName ?? `peer-${p.id}`,
+            });
+          }
+        },
+        onPeerJoined: ({ id, displayName: peerDisplay }) => {
+          store.upsertParticipant({
+            id,
+            display: peerDisplay ?? `peer-${id}`,
+          });
+        },
+        onPeerLeft: ({ id }) => {
+          audio.detachRemoteStream(id);
+          store.removeParticipant(id);
+        },
+        onPeerInfo: ({ id, displayName: peerDisplay }) => {
+          if (peerDisplay) {
+            store.updateParticipant(id, { display: peerDisplay });
+          }
+        },
+        onTrack: ({ track, stream, peerId }) => {
+          if (!peerId || track.kind !== "audio") return;
+          store.upsertParticipant({ id: peerId, hasStream: true });
+          audio.attachRemoteStream(peerId, stream);
+        },
+        onError: () => {
+          // onState handles user-visible errors
+        },
+      });
+
+      await client.connect({
+        wsUrl: buildWsUrl(),
+        iceServers: cfg.iceServers,
+        localStream: graph.processedLocalStream,
+        displayName: display,
+      });
+
+      const track = graph.processedLocalStream.getAudioTracks()[0];
+      if (track) track.enabled = !useStore.getState().selfMuted;
+    },
+    [store, audio, sfu],
+  );
+
+  const scheduleReconnect = useCallback(() => {
+    if (userLeavingRef.current) return;
+    if (reconnectTimerRef.current !== null) return;
+    const attempt = reconnectAttemptRef.current;
+    if (attempt >= RECONNECT_DELAYS_MS.length) {
+      store.setStatus("Не удалось переподключиться. Перезайдите вручную.", true, true);
+      return;
+    }
+    const delay = RECONNECT_DELAYS_MS[attempt];
+    reconnectAttemptRef.current = attempt + 1;
+    store.setStatus(
+      `Соединение оборвалось, переподключаюсь (попытка ${attempt + 1})…`,
+      true,
+      true,
+    );
+    reconnectTimerRef.current = window.setTimeout(async () => {
+      reconnectTimerRef.current = null;
+      if (userLeavingRef.current) return;
+      const graph = micGraphRef.current;
+      if (!graph) {
+        reconnectAttemptRef.current = 0;
+        return;
+      }
+      sfu.disconnect();
+      audio.cleanupAllRemote();
+      store.clearParticipants();
+      peerIdRef.current = null;
+      try {
+        await connectSfu(graph, lastDisplayNameRef.current);
+      } catch {
+        scheduleReconnect();
+      }
+    }, delay);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, audio, sfu, connectSfu]);
+
+  useEffect(() => {
+    scheduleReconnectRef.current = scheduleReconnect;
+  }, [scheduleReconnect]);
+
   // ---- Join ----
 
   const handleJoin = useCallback(
@@ -136,6 +265,10 @@ export function App() {
         localStorage.setItem("voice-hub.display-name", name.trim());
       }
 
+      userLeavingRef.current = false;
+      reconnectAttemptRef.current = 0;
+      lastDisplayNameRef.current = display;
+
       store.setJoinState("joining");
       store.setStatus("Запрашиваю микрофон...");
 
@@ -143,67 +276,13 @@ export function App() {
         const graph = await audio.prepareLocalAudio(store.engine);
         micGraphRef.current = graph;
 
-        const client = sfu.createClient({
-          onState: (s) => {
-            if (s === "connected") {
-              store.setStatus("Подключено", false, true);
-            } else if (s === "failed" || s === "closed") {
-              if (store.joinState === "joined") {
-                store.setStatus("Соединение оборвалось", true, true);
-              }
-            }
-          },
-          onWelcome: ({ id, peers }) => {
-            peerIdRef.current = id;
-            store.upsertParticipant({ id, display, isSelf: true });
-            for (const p of peers ?? []) {
-              store.upsertParticipant({
-                id: p.id,
-                display: p.displayName ?? `peer-${p.id}`,
-              });
-            }
-          },
-          onPeerJoined: ({ id, displayName: peerDisplay }) => {
-            store.upsertParticipant({
-              id,
-              display: peerDisplay ?? `peer-${id}`,
-            });
-          },
-          onPeerLeft: ({ id }) => {
-            audio.detachRemoteStream(id);
-            store.removeParticipant(id);
-          },
-          onPeerInfo: ({ id, displayName: peerDisplay }) => {
-            if (peerDisplay) {
-              store.updateParticipant(id, { display: peerDisplay });
-            }
-          },
-          onTrack: ({ track, stream, peerId }) => {
-            if (!peerId || track.kind !== "audio") return;
-            store.upsertParticipant({ id: peerId, hasStream: true });
-            audio.attachRemoteStream(peerId, stream);
-          },
-          onError: () => {
-            // onState handles user-visible errors
-          },
-        });
-
         store.setStatus("Подключаюсь...");
-        await client.connect({
-          wsUrl: buildWsUrl(),
-          iceServers: cfg.iceServers,
-          localStream: graph.processedLocalStream,
-          displayName: display,
-        });
-
-        // Ensure mic track state matches selfMuted.
-        const track = graph.processedLocalStream.getAudioTracks()[0];
-        if (track) track.enabled = !store.selfMuted;
+        await connectSfu(graph, display);
 
         store.setJoinState("joined");
         store.setStatus("Подключено", false, true);
 
-        // Start speaking loop.
+        // Start speaking loop (graph is preserved across reconnects, so this fires once).
         audio.startSpeaking(
           graph,
           () => useStore.getState().selfMuted,
@@ -223,12 +302,15 @@ export function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, audio, sfu],
+    [store, audio, connectSfu],
   );
 
   // ---- Leave ----
 
   const handleLeave = useCallback(() => {
+    userLeavingRef.current = true;
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
     sfu.disconnect();
     audio.fullCleanup();
     micGraphRef.current = null;
@@ -238,7 +320,7 @@ export function App() {
     store.setSelfMuted(false);
     store.setDeafened(false);
     store.setStatus("Отключено");
-  }, [sfu, audio, store]);
+  }, [sfu, audio, store, clearReconnectTimer]);
 
   // ---- Engine switch ----
 
