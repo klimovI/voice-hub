@@ -41,12 +41,16 @@ export function preloadRnnoise(): void {
   void loadRnnoiseModule().catch(() => undefined);
 }
 
-// Gate constants (must match app.js exactly).
-const GATE_OPEN_VAD = 0.55;
+// Gate constants. Tuned so that quiet word-edge phonemes (sibilants /s ʃ f/,
+// soft trailing consonants) don't get clipped: lower open threshold catches
+// softer onsets, longer hold keeps the gate open across short voiceless gaps,
+// and the cap on attenuation makes any residual gating sound like a dip
+// instead of a hard cut.
+const GATE_OPEN_VAD = 0.4;
 const GATE_ATTACK_MS = 5;
 const GATE_RELEASE_MS = 180;
-const GATE_HOLD_MS = 150;
-const GATE_MAX_ATTEN_DB = 36;
+const GATE_HOLD_MS = 300;
+const GATE_MAX_ATTEN_DB = 18;
 
 // Pre-sized scratch ring buffers; large enough to absorb 2048-sample SP blocks
 // plus partial-frame leftovers. Avoids per-callback Float32Array allocations
