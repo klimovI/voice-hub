@@ -11,13 +11,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - image: voice-hub-app
-            file: backend/Dockerfile
-          - image: voice-hub-janus
-            file: deploy/janus/Dockerfile
     steps:
       - uses: actions/checkout@v5
 
@@ -35,13 +28,13 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.file }}
+          file: backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.image }}:latest
-            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.image }}:${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+            ghcr.io/${{ env.OWNER_LC }}/voice-hub-app:latest
+            ghcr.io/${{ env.OWNER_LC }}/voice-hub-app:${{ github.sha }}
+          cache-from: type=gha,scope=voice-hub-app
+          cache-to: type=gha,scope=voice-hub-app,mode=max
 
   deploy:
     needs: build
