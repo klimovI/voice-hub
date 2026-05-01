@@ -6,32 +6,31 @@ import (
 )
 
 type Config struct {
-	Addr          string
-	WebDir        string
-	PublicHost    string
-	StunURL       string
-	TurnURL       string
-	TurnUsername  string
-	TurnPassword  string
-	AuthUser      string
-	AuthPassword  string
-	SessionSecret []byte
-	CookieSecure  bool
+	Addr             string
+	WebDir           string
+	AppHostname      string
+	PublicIP         string
+	TurnSharedSecret string
+	TurnRealm        string
+	AuthUser         string
+	AuthPassword     string
+	SessionSecret    []byte
+	CookieSecure     bool
 }
 
 func Load() Config {
+	hostname := env("APP_HOSTNAME", "localhost")
 	return Config{
-		Addr:          env("APP_ADDR", ":8080"),
-		WebDir:        env("WEB_DIR", "../web"),
-		PublicHost:    env("PUBLIC_HOST", "localhost"),
-		StunURL:       env("STUN_URL", "stun:localhost:3478"),
-		TurnURL:       env("TURN_URL", "turn:localhost:3478?transport=udp"),
-		TurnUsername:  env("TURN_USERNAME", "room"),
-		TurnPassword:  env("TURN_PASSWORD", "room-secret"),
-		AuthUser:      os.Getenv("APP_AUTH_USER"),
-		AuthPassword:  os.Getenv("APP_AUTH_PASSWORD"),
-		SessionSecret: []byte(os.Getenv("APP_SESSION_SECRET")),
-		CookieSecure:  envBool("APP_COOKIE_SECURE", true),
+		Addr:             env("APP_ADDR", ":8080"),
+		WebDir:           env("WEB_DIR", "../web"),
+		AppHostname:      hostname,
+		PublicIP:         os.Getenv("PUBLIC_IP"),
+		TurnSharedSecret: os.Getenv("TURN_SHARED_SECRET"),
+		TurnRealm:        env("TURN_REALM", hostname),
+		AuthUser:         os.Getenv("APP_AUTH_USER"),
+		AuthPassword:     os.Getenv("APP_AUTH_PASSWORD"),
+		SessionSecret:    []byte(os.Getenv("APP_SESSION_SECRET")),
+		CookieSecure:     envBool("APP_COOKIE_SECURE", true),
 	}
 }
 

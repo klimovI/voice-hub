@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -15,9 +14,12 @@ import (
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/config"
 	"voice-hub/backend/internal/sfu"
+	turnsrv "voice-hub/backend/internal/turn"
 
 	"github.com/pion/webrtc/v4"
 )
+
+const turnCredsTTL = 6 * time.Hour
 
 const sessionTTL = 30 * 24 * time.Hour
 
@@ -47,12 +49,15 @@ func main() {
 
 	limiter := newAuthLimiter(10, 15*time.Minute)
 
+	stunURL := "stun:" + cfg.AppHostname + ":3478"
+	turnURL := "turn:" + cfg.AppHostname + ":3478?transport=udp"
+
 	var natIPs []string
-	if ip := os.Getenv("PUBLIC_IP"); ip != "" {
-		natIPs = []string{ip}
+	if cfg.PublicIP != "" {
+		natIPs = []string{cfg.PublicIP}
 	}
 	room, err := sfu.NewRoom(sfu.Config{
-		ICEServers: []webrtc.ICEServer{{URLs: []string{cfg.StunURL}}},
+		ICEServers: []webrtc.ICEServer{{URLs: []string{stunURL}}},
 		NAT1To1IPs: natIPs,
 		UDPPortMin: 10000,
 		UDPPortMax: 10100,
@@ -60,6 +65,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("sfu init: %v", err)
 	}
+
+	if cfg.TurnSharedSecret == "" {
+		log.Fatal("TURN_SHARED_SECRET must be set")
+	}
+	if cfg.PublicIP == "" {
+		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
+	}
+	turnServer, err := turnsrv.Start(turnsrv.Config{
+		Realm:        cfg.TurnRealm,
+		SharedSecret: cfg.TurnSharedSecret,
+		PublicIP:     cfg.PublicIP,
+		ListenAddr:   "0.0.0.0:3478",
+		MinRelayPort: 49160,
+		MaxRelayPort: 49200,
+	})
+	if err != nil {
+		log.Fatalf("turn init: %v", err)
+	}
+	defer turnServer.Close()
 
 	mux := http.NewServeMux()
 	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
@@ -81,13 +105,14 @@ func main() {
 			return
 		}
 
+		username, credential := turnsrv.GenerateCredentials(cfg.TurnSharedSecret, "u", turnCredsTTL)
 		response := appConfigResponse{
 			ICEServers: []iceServer{
-				{URLs: []string{cfg.StunURL}},
+				{URLs: []string{stunURL}},
 				{
-					URLs:       []string{cfg.TurnURL},
-					Username:   cfg.TurnUsername,
-					Credential: cfg.TurnPassword,
+					URLs:       []string{turnURL},
+					Username:   username,
+					Credential: credential,
 				},
 			},
 		}
