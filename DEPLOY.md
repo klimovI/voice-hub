@@ -1,108 +1,93 @@
 # Deploy
 
-> ⚠️ Репо публичный. Никаких реальных IP, хостов, паролей, токенов — только плейсхолдеры. Секреты живут в GitHub Secrets и `/opt/audio-room/.env`.
+> ⚠️ Репо публичный. Никаких реальных IP, хостов, паролей, токенов — только плейсхолдеры. Секреты живут в GitHub Secrets и `/opt/audio-room/.env` на сервере.
 
-Контекст: 3 человека, **set-once-and-forget**. Два варианта на столе. Решение откладываем.
+Прод-стек: VPS + GitHub Actions. CI собирает образы, пушит в `ghcr.io`, по SSH деплоит на сервер. На самом сервере крутится только compose-стек (Caddy + app + Janus + coturn) — никаких сорсов, никаких билдов.
 
----
-
-## Вариант A — VPS
-
-Сервер у провайдера, всё крутится там, friends заходят по ссылке.
-
-### Стек
+## Архитектура
 
 ```
-internet ──HTTPS/WSS──▶ Caddy (auto-TLS) ──▶ app + janus WS
-internet ──UDP─────────▶ Janus RTP
-internet ──UDP/TCP─────▶ coturn
+internet ──HTTPS/WSS──▶ Caddy (auto-TLS) ──▶ app  (8080)
+                                         └──▶ janus (8188 ws, /janus-ws)
+internet ──UDP 10000-10100──▶ Janus RTP
+internet ──UDP 3478, 49160-49200──▶ coturn
 ```
 
-Caddy фронтит signaling. Медиа идёт напрямую в Janus по UDP. Стандартная схема для WebRTC-SFU.
+- Caddy фронтит signaling по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
+- WebRTC media идёт напрямую в Janus/coturn по UDP, в обход Caddy
+- coturn нужен как TURN-relay для клиентов за симметричным NAT
 
-### Что нужно
+## Требования
 
-- любой VPS у нормального провайдера (Hetzner, Contabo и т.п.)
-- домен (бесплатно через DuckDNS, или свой)
-- карта что работает у провайдера
+- VPS: 1 vCPU, 1 ГБ RAM, 15 ГБ — хватает для 3-5 юзеров audio-only
+- Debian/Ubuntu, доступ root по SSH
+- Домен с forward A на IP (DuckDNS работает, но иногда флапает CAA-таймаутами; платный домен на ~200₽/год надёжнее)
+- Открытый исходящий UDP на сервере и у клиентов
 
-### Что добавить в репо
-
-- `docker-compose.prod.yml` со стеком + Caddy
-- `Caddyfile` с auto-TLS
-- `.env.example` с доменом, публичным IP, паролем TURN
-- entrypoint для Janus, чтобы подставлял публичный IP в `nat_1_1_mapping`
-- `deploy.sh` — rsync + docker compose up
-
-### Запуск
-
-Один раз на VPS:
+## Bootstrap сервера (один раз)
 
 ```bash
-git clone <repo> && cd voice-hub
-cp .env.example .env && nano .env
-docker compose -f docker-compose.prod.yml up -d
+# swap, чтобы 1 ГБ не упирался в OOM
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo "/swapfile none swap sw 0 0" >> /etc/fstab
+
+# Docker + log rotation
+curl -fsSL https://get.docker.com | sh
+mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
+{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+EOF
+systemctl restart docker
+
+# Non-root deploy user в группе docker
+useradd -m -s /bin/bash -G docker deploy
+
+# SSH: только по ключу, root login по ключу (паролем — нет)
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl reload ssh
+
+# Каталог под compose-стек
+mkdir -p /opt/audio-room/deploy && chown -R deploy:deploy /opt/audio-room
 ```
 
-Caddy сам получит сертификат и будет авто-обновлять. Никаких cron, никакого ручного renew.
+Сгенерируй deploy SSH key (отдельный от личного), pubkey в `/home/deploy/.ssh/authorized_keys`, privkey пойдёт в GitHub Secret.
 
-### Плюсы
+## `/opt/audio-room/.env`
 
-- Всегда онлайн. Friends заходят когда хотят.
-- Один URL, никаких "запусти у себя".
-- Реально set-once: после настройки можно забыть.
+```
+APP_HOSTNAME=your-host.example.com
+PUBLIC_IP=0.0.0.0
+ROOM_ID=1001
+ROOM_PIN=
+TURN_USERNAME=room
+TURN_PASSWORD=<сгенерируй: openssl rand -base64 24>
+```
 
-### Минусы
+`chmod 600 /opt/audio-room/.env`. Этот файл не трогается CI — секреты живут только тут.
 
-- Стоит денег (немного, но стоит).
-- Один раз нужно настроить.
+## GitHub Actions secrets
 
----
+| Secret | Значение |
+|---|---|
+| `DEPLOY_HOST` | IP или домен сервера |
+| `DEPLOY_SSH_KEY` | приватный ключ deploy-пользователя (целиком, с BEGIN/END) |
 
-## Вариант B — Local-hosted
+После первого успешного `build` — на github.com/<owner>?tab=packages для `voice-hub-app` и `voice-hub-janus` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
 
-Стек крутится на твоём ПК, friends подключаются к тебе.
+## Workflow
 
-### Главная проблема
+`.github/workflows/deploy.yml` запускается на push в master:
 
-Браузер требует HTTPS для микрофона с любого не-localhost адреса. Плюс домашний роутер блокирует входящий UDP для Janus media.
+1. Build matrix: app + janus → `ghcr.io/<owner>/voice-hub-{app,janus}:{latest,sha}`
+2. Deploy: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/audio-room/`, `docker compose pull && up -d`
 
-### Подварианты
+Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.
 
-**B1. Tailscale.** Каждый ставит Tailscale, заходит в твой tailnet, ходит по `100.x.x.x`. Caddy с self-signed cert. Бесплатно, медиа напрямую через Tailscale, NAT решён.
-*Минус:* friends ставят клиент и регистрируются в твоём tailnet.
+## DNS гайд
 
-**B2. Cloudflare Tunnel + публичный TURN.** Tunnel несёт signaling до твоего стека, медиа идёт через сторонний бесплатный TURN. URL Cloudflare публичный, ничего ставить не надо.
-*Минус:* зависимость от чужого TURN, лаг ~100 мс, URL может меняться.
+Для домена нужна forward A-запись на IP сервера. Cloudflare работает в режиме **DNS only** (grey cloud). Orange cloud (proxy) ломает TLS-ALPN-01 challenge и UDP для TURN — для WebRTC бесполезен без CF Spectrum (платно). Для friends-scale — DNS only, защитой от DDoS не заморачиваемся.
 
-**B3. Port forwarding.** На роутере пробрасываешь порты на свой комп, Caddy получает Let's Encrypt cert на DuckDNS-домен. Это буквально Вариант A, только дома.
-*Минус:* провайдер может выдавать CGNAT (нет публичного IP), статический IP не у всех.
+DuckDNS работает, но его NS периодически таймаутят CAA-запросы Let's Encrypt — Caddy ретраит, но cert может выпускаться 10-30 минут.
 
-### Плюсы
+## Local-hosted альтернативы (не используем)
 
-- Бесплатно.
-- Полный контроль.
-
-### Минусы
-
-- Твой комп должен быть включён.
-- "Забыть и не возвращаться" — нет, придётся периодически вмешиваться.
-- Friends что-то ставят (Tailscale) или зависят от стороннего сервиса.
-
----
-
-## Сравнение
-
-| | A (VPS) | B1 (Tailscale) | B2 (Tunnel) | B3 (Port FW) |
-|---|---|---|---|---|
-| Платно | да | нет | нет | нет |
-| Always-on | ✅ | ❌ твой комп | ❌ | ❌ |
-| Friends ставят что-то | нет | Tailscale | нет | нет |
-| Latency для медиа | нормально | минимально | через TURN | минимально |
-| "Забыть и не возвращаться" | да | средне | плохо | средне |
-
-## Открытые вопросы
-
-- Какой вариант берём
-- Если VPS — у кого, где, какой домен
-- Нужен ли basic-auth поверх (закрыть от случайных людей если URL утечёт)
+Когда-то рассматривали Tailscale / Cloudflare Tunnel / port forwarding с домашнего ПК. Все требуют friends что-то ставить или принимают деградацию latency через сторонний TURN. Для always-on не подходит — нужен включённый ПК. Решили: VPS дешевле (~200₽/мес) и набивно проще.

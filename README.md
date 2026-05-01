@@ -7,25 +7,48 @@ Self-hosted голосовая комната для маленьких комп
 - два движка денойза на выбор, переключение без переподключения
 - весь стейт в браузере — никаких аккаунтов
 
-## Quick start
+## Local dev
 
 ```bash
 docker compose up -d --build
 ```
 
-Открыть `http://localhost:8080`.
+Открыть `http://localhost:8080`. Стоп: `docker compose down`. Логи: `docker compose logs -f app janus`.
 
-Стоп: `docker compose down`. Логи: `docker compose logs -f app janus`.
+## Production
+
+VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер. Детали в [DEPLOY.md](DEPLOY.md).
+
+## Desktop (Tauri)
+
+Desktop-обёртка на Tauri 2 в `src-tauri/`. Использует `web/` как frontend, конфиг получает через Rust-команду `get_app_config` (читает env), а не через `/api/config` Go-бэкенда.
+
+**Требования:** Rust toolchain, `cargo install tauri-cli --version '^2'`, системные зависимости Tauri.
+
+**Запуск из исходников:**
+
+```bash
+cd src-tauri
+cargo tauri dev
+```
+
+**Кросс-сборка под Windows из Linux** через `cargo-xwin` — детали в [TAURI_WINDOWS_BUILD_PLAN.md](TAURI_WINDOWS_BUILD_PLAN.md). Артефакт — NSIS-установщик.
+
+Env переменные — `JANUS_WS_URL`, `ROOM_ID`, `ROOM_PIN`, `STUN_URL`, `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD`. Дефолты в `src-tauri/src/lib.rs` указывают на `localhost` — для прод-сборки либо заменить дефолты, либо передать env в момент запуска.
+
+Hotkey в Tauri пока оконный, не глобальный системный.
 
 ## Структура
 
 ```
 backend/   Go HTTP-сервер: статика + /api/config
 web/       vanilla JS клиент (WebRTC, аудиограф, UI)
-deploy/    конфиги Janus и coturn
+src-tauri/ desktop-обёртка на Tauri 2
+deploy/    Caddyfile + конфиги Janus
+.github/   CI: build & push в ghcr.io, deploy по SSH
 ```
 
-Дальше: [DEPLOY.md](DEPLOY.md) — как поднять на сервере · [ROADMAP.md](ROADMAP.md) — что сделано и что дальше.
+Дальше: [DEPLOY.md](DEPLOY.md) — прод на VPS · [ROADMAP.md](ROADMAP.md) — что сделано и что дальше.
 
 ---
 

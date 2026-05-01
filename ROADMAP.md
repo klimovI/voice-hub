@@ -25,10 +25,12 @@
 ### Infra
 - [x] `docker-compose.yml` для локального dev
 - [x] Backend с health-check и room-конфигом
+- [x] Production deploy на VPS — Caddy auto-TLS, GitHub Actions build & push в ghcr.io, SSH deploy под non-root user. Подробнее в [DEPLOY.md](DEPLOY.md)
+- [x] Tauri 2 desktop-обёртка для Windows, кросс-сборка из Linux через cargo-xwin, NSIS installer
 
 ## In progress
 
-- [ ] **Production deploy** — план в [DEPLOY.md](DEPLOY.md), решение откладываем
+_(пусто)_
 
 ## Next
 
