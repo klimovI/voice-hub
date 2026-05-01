@@ -16,6 +16,8 @@ type Config struct {
 	TurnURL      string
 	TurnUsername string
 	TurnPassword string
+	AuthUser     string
+	AuthPassword string
 }
 
 func Load() Config {
@@ -30,6 +32,8 @@ func Load() Config {
 		TurnURL:      env("TURN_URL", "turn:localhost:3478?transport=udp"),
 		TurnUsername: env("TURN_USERNAME", "room"),
 		TurnPassword: env("TURN_PASSWORD", "room-secret"),
+		AuthUser:     os.Getenv("APP_AUTH_USER"),
+		AuthPassword: os.Getenv("APP_AUTH_PASSWORD"),
 	}
 }
 

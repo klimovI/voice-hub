@@ -12,7 +12,8 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
     displayName: "audio-room-mvp.display-name",
   };
 
-  const DTLN_ASSET_BASE = "/vendor/dtln/";
+  const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
+  const tauriInvoke = window.__TAURI__?.core?.invoke ?? null;
   const ENGINES = ["off", "rnnoise", "dtln"];
   const DEFAULT_ENGINE = "dtln";
 
@@ -111,18 +112,26 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
   });
 
   async function init() {
-    const response = await fetch("/api/config");
-    if (!response.ok) {
-      throw new Error("Не удалось получить конфиг комнаты");
-    }
-
-    state.config = await response.json();
+    state.config = await loadAppConfig();
 
     bindUI();
     applyPersistedControls();
     renderShortcut();
     renderParticipants();
     setStatus("Ready");
+  }
+
+  async function loadAppConfig() {
+    if (tauriInvoke) {
+      return tauriInvoke("get_app_config");
+    }
+
+    const response = await fetch("/api/config");
+    if (!response.ok) {
+      throw new Error("Не удалось получить конфиг комнаты");
+    }
+
+    return response.json();
   }
 
   function bindUI() {
@@ -1449,6 +1458,9 @@ import * as Dtln from "./vendor/dtln/dtln.mjs";
 
   function loadNumber(key, fallback) {
     const raw = localStorage.getItem(key);
+    if (raw === null || raw === "") {
+      return fallback;
+    }
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : fallback;
   }

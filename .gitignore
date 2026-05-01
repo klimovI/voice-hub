@@ -2,4 +2,8 @@
 bin/
 tmp/
 *.log
+.env
+.env.local
 backend/.env
+src-tauri/target/
+src-tauri/gen/schemas/
