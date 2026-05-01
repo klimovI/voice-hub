@@ -26,8 +26,7 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
     if (res.status === 204) {
-      const next = new URLSearchParams(window.location.search).get("next") || "/";
-      window.location.replace(next);
+      window.location.replace("/");
       return;
     }
     if (res.status === 429) {

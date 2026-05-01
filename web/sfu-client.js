@@ -33,7 +33,7 @@ export function createSFUClient(handlers = {}) {
       on.onState(s);
     }
 
-    function connect({ wsUrl, iceServers, localStream }) {
+    function connect({ wsUrl, iceServers, localStream, displayName }) {
       if (ws || pc) {
         throw new Error("sfu-client: already connected");
       }
@@ -77,6 +77,7 @@ export function createSFUClient(handlers = {}) {
 
         ws.onopen = () => {
           setState("connecting");
+          ws.send(JSON.stringify({ event: "hello", data: { displayName: displayName || "" } }));
         };
 
         ws.onerror = (event) => {

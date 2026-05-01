@@ -138,9 +138,30 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
+	// Expect the first message to be `hello { displayName }` so the peer is
+	// added to the room with the correct name and peer-joined broadcasts
+	// don't race a follow-up set-displayname round trip. 10s timeout keeps
+	// idle/probe connections from sticking around.
+	helloCtx, cancelHello := context.WithTimeout(ctx, 10*time.Second)
+	_, raw, err := ws.Read(helloCtx)
+	cancelHello()
+	if err != nil {
+		log.Printf("sfu: ws read hello: %v", err)
+		return
+	}
+	var helloMsg Message
+	if err := json.Unmarshal(raw, &helloMsg); err != nil || helloMsg.Event != "hello" {
+		log.Printf("sfu: expected hello, got %q", helloMsg.Event)
+		return
+	}
+	var hello struct {
+		DisplayName string `json:"displayName"`
+	}
+	_ = json.Unmarshal(helloMsg.Data, &hello)
+
 	p := &peer{
 		id:          newPeerID(),
-		displayName: req.URL.Query().Get("name"),
+		displayName: hello.DisplayName,
 		pc:          pc,
 		ws:          ws,
 		ctx:         ctx,

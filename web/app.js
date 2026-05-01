@@ -356,9 +356,10 @@ import { createSFUClient } from "./sfu-client.js";
 
       setStatus("Подключаюсь...");
       await client.connect({
-        wsUrl: buildWsUrl(display),
+        wsUrl: buildWsUrl(),
         iceServers: state.config.iceServers,
         localStream: state.processedLocalStream,
+        displayName: display,
       });
 
       state.joined = true;
@@ -380,10 +381,9 @@ import { createSFUClient } from "./sfu-client.js";
     setStatus("Отключено");
   }
 
-  function buildWsUrl(name) {
+  function buildWsUrl() {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const q = name ? `?name=${encodeURIComponent(name)}` : "";
-    return `${proto}//${window.location.host}/ws${q}`;
+    return `${proto}//${window.location.host}/ws`;
   }
 
   async function onToggleSelfMute() {

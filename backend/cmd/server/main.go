@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -157,8 +156,7 @@ func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		nextURL := url.QueryEscape(r.URL.RequestURI())
-		http.Redirect(w, r, "/login.html?next="+nextURL, http.StatusSeeOther)
+		http.Redirect(w, r, "/login.html", http.StatusSeeOther)
 	})
 }
 
