@@ -148,7 +148,8 @@ func authenticated(cfg config.Config, r *http.Request) bool {
 
 func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login.html" {
+		// Login page and its assets must be reachable without auth.
+		if r.URL.Path == "/login.html" || r.URL.Path == "/login.js" {
 			next.ServeHTTP(w, r)
 			return
 		}
