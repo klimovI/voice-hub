@@ -139,11 +139,12 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	defer cancel()
 
 	p := &peer{
-		id:     newPeerID(),
-		pc:     pc,
-		ws:     ws,
-		ctx:    ctx,
-		cancel: cancel,
+		id:          newPeerID(),
+		displayName: req.URL.Query().Get("name"),
+		pc:          pc,
+		ws:          ws,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 
 	r.addPeer(p)
@@ -262,7 +263,7 @@ func (r *Room) addPeer(p *peer) {
 	}{ID: p.id, Peers: existing})
 	_ = p.write(Message{Event: "welcome", Data: welcome})
 
-	joined, _ := json.Marshal(PeerInfo{ID: p.id})
+	joined, _ := json.Marshal(PeerInfo{ID: p.id, DisplayName: p.displayName})
 	for _, op := range others {
 		_ = op.write(Message{Event: "peer-joined", Data: joined})
 	}
