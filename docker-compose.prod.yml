@@ -11,6 +11,8 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - app
       - janus
@@ -32,6 +34,17 @@ services:
       APP_AUTH_PASSWORD: "${APP_AUTH_PASSWORD:?APP_AUTH_PASSWORD is required}"
     expose:
       - "8080"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - janus
 
@@ -44,6 +57,8 @@ services:
       - "8188"
     ports:
       - "10000-10100:10000-10100/udp"
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - coturn
 
@@ -54,6 +69,8 @@ services:
       - "3478:3478"
       - "3478:3478/udp"
       - "49160-49200:49160-49200/udp"
+    security_opt:
+      - no-new-privileges:true
     command:
       - --log-file=stdout
       - --no-cli
@@ -66,6 +83,28 @@ services:
       - --min-port=49160
       - --max-port=49200
       - --external-ip=${PUBLIC_IP}
+      - --no-multicast-peers
+      - --no-loopback-peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.0.0.0-192.0.0.255
+      - --denied-peer-ip=192.0.2.0-192.0.2.255
+      - --denied-peer-ip=192.88.99.0-192.88.99.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=198.18.0.0-198.19.255.255
+      - --denied-peer-ip=198.51.100.0-198.51.100.255
+      - --denied-peer-ip=203.0.113.0-203.0.113.255
+      - --denied-peer-ip=240.0.0.0-255.255.255.255
+      - --denied-peer-ip=::1
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --total-quota=100
+      - --user-quota=12
+      - --max-bps=2000000
 
 volumes:
   caddy_data:

@@ -4,7 +4,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"audio-room-mvp/backend/internal/config"
 )
@@ -29,8 +33,10 @@ type appConfigResponse struct {
 func main() {
 	cfg := config.Load()
 
+	limiter := newAuthLimiter(10, 15*time.Minute)
+
 	mux := http.NewServeMux()
-	mux.Handle("/", basicAuth(cfg, http.FileServer(http.Dir(cfg.WebDir))))
+	mux.Handle("/", basicAuth(cfg, limiter, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -40,7 +46,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok"})
 	})
-	mux.Handle("/api/config", basicAuth(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/config", basicAuth(cfg, limiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -65,8 +71,12 @@ func main() {
 	})))
 
 	server := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: mux,
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
@@ -79,18 +89,89 @@ func main() {
 	}
 }
 
-func basicAuth(cfg config.Config, next http.Handler) http.Handler {
+func basicAuth(cfg config.Config, limiter *authLimiter, next http.Handler) http.Handler {
 	wantUser := []byte(cfg.AuthUser)
 	wantPass := []byte(cfg.AuthPassword)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		if limiter.blocked(ip) {
+			w.Header().Set("Retry-After", "900")
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
 		user, pass, ok := r.BasicAuth()
 		if !ok ||
 			subtle.ConstantTimeCompare([]byte(user), wantUser) != 1 ||
 			subtle.ConstantTimeCompare([]byte(pass), wantPass) != 1 {
+			limiter.fail(ip)
 			w.Header().Set("WWW-Authenticate", `Basic realm="Voice Hub", charset="UTF-8"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		limiter.success(ip)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		first, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(first)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+type authAttempt struct {
+	count int
+	first time.Time
+}
+
+type authLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]*authAttempt
+	max      int
+	window   time.Duration
+}
+
+func newAuthLimiter(max int, window time.Duration) *authLimiter {
+	return &authLimiter{
+		attempts: make(map[string]*authAttempt),
+		max:      max,
+		window:   window,
+	}
+}
+
+func (l *authLimiter) blocked(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.attempts[ip]
+	if !ok {
+		return false
+	}
+	if time.Since(a.first) > l.window {
+		delete(l.attempts, ip)
+		return false
+	}
+	return a.count >= l.max
+}
+
+func (l *authLimiter) fail(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.attempts[ip]
+	if !ok || time.Since(a.first) > l.window {
+		l.attempts[ip] = &authAttempt{count: 1, first: time.Now()}
+		return
+	}
+	a.count++
+}
+
+func (l *authLimiter) success(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.attempts, ip)
 }
