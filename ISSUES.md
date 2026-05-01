@@ -4,7 +4,7 @@
 
 ## Open
 
-1. **Обрываются слова** — речь рвётся, теряются окончания/начала слов. Случается редко.
+_(empty — see Done for the suspected fix on word cutoffs; needs field verification)_
 
 ## In Progress
 
@@ -14,6 +14,7 @@
 
 ## Done
 
+- **Обрываются слова** (`frontend/src/audio/rnnoise.ts`, suspected — needs field test): RNNoise VAD-gate был слишком плотным — `GATE_OPEN_VAD=0.55`, `GATE_HOLD_MS=150ms`, `GATE_MAX_ATTEN_DB=36`. Тихие фонемы на границах слов (свистящие/шипящие, мягкие согласные) не пробивали 0.55 → gate закрывался через ~150ms hold + 180ms release, отдавая ~25dB attenuation на дефолтном миксе 70%. Релакс: `GATE_OPEN_VAD=0.4`, `GATE_HOLD_MS=300`, `GATE_MAX_ATTEN_DB=18`. SFU-сторона чистая (pion forwards RTP as-is, без DTX/buffering), так что виновник — локальный gate. Если в проде слова всё равно теряются — следующий шаг убрать gate целиком (или вынести его в UI-toggle).
 - **Индикатор говорящего** (`frontend/src/audio/remote.ts`, `frontend/src/hooks/useAudioEngine.ts`): per-participant `AnalyserNode` + единый rAF-цикл с 250ms hold; обновляет `participants[id].speaking` при пересечении RMS-порога. UI уже подсвечивал `speaking`, нужна была только проводка для remote.
 - **Долгий `Запрашиваю микрофон…`** — основная причина: cold-cache fetch `/vendor/rnnoise/rnnoise.js` (4.83MB raw / ~420KB gzip). Меры:
   - `Cache-Control: public, max-age=31536000, immutable` для `/vendor/*` (`deploy/Caddyfile`) — повторные визиты бесплатны.
