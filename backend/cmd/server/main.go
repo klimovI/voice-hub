@@ -149,9 +149,15 @@ func authenticated(cfg config.Config, r *http.Request) bool {
 func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Login page, its assets, and the favicon must be reachable without auth.
+		// /assets/ and /vendor/ are Vite-emitted static bundles and vendor WASM —
+		// no sensitive content, safe to serve unauthenticated.
 		switch r.URL.Path {
 		case "/login.html", "/login.js",
 			"/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png":
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/assets/") || strings.HasPrefix(r.URL.Path, "/vendor/") {
 			next.ServeHTTP(w, r)
 			return
 		}
