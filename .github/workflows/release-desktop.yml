@@ -45,11 +45,11 @@ jobs:
       - name: Build
         working-directory: src-tauri
         env:
-          APP_HOSTNAME: ${{ secrets.DEPLOY_HOST }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         shell: bash
         run: |
           if [ -z "$APP_HOSTNAME" ]; then
-            echo "ERROR: secrets.DEPLOY_HOST not set in repository secrets" >&2
+            echo "ERROR: secrets.APP_HOSTNAME not set in repository secrets" >&2
             exit 1
           fi
           export APP_BASE_URL="https://$APP_HOSTNAME/"

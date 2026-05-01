@@ -55,7 +55,6 @@ jobs:
       - name: Setup SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
         run: |
           mkdir -p ~/.ssh
@@ -72,27 +71,28 @@ jobs:
 
       - name: Sync deploy files
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         run: |
-          ssh "deploy@$DEPLOY_HOST" 'mkdir -p /opt/voice-hub/deploy'
-          scp docker-compose.prod.yml "deploy@$DEPLOY_HOST:/opt/voice-hub/docker-compose.yml"
-          scp deploy/Caddyfile "deploy@$DEPLOY_HOST:/opt/voice-hub/deploy/Caddyfile"
+          ssh "deploy@$APP_HOSTNAME" 'mkdir -p /opt/voice-hub/deploy'
+          scp docker-compose.prod.yml "deploy@$APP_HOSTNAME:/opt/voice-hub/docker-compose.yml"
+          scp deploy/Caddyfile "deploy@$APP_HOSTNAME:/opt/voice-hub/deploy/Caddyfile"
 
       - name: Write .env on host
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          PROD_ENV:    ${{ secrets.PROD_ENV }}
-          IMAGE_TAG:   ${{ github.sha }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
+          PROD_ENV:     ${{ secrets.PROD_ENV }}
+          IMAGE_TAG:    ${{ github.sha }}
         run: |
           umask 077
           printf '%s\n' "$PROD_ENV" > .env.deploy
-          printf 'IMAGE_TAG=%s\n' "$IMAGE_TAG" >> .env.deploy
-          scp .env.deploy "deploy@$DEPLOY_HOST:/opt/voice-hub/.env"
-          ssh "deploy@$DEPLOY_HOST" 'chmod 600 /opt/voice-hub/.env'
+          printf 'APP_HOSTNAME=%s\n' "$APP_HOSTNAME" >> .env.deploy
+          printf 'IMAGE_TAG=%s\n'    "$IMAGE_TAG"    >> .env.deploy
+          scp .env.deploy "deploy@$APP_HOSTNAME:/opt/voice-hub/.env"
+          ssh "deploy@$APP_HOSTNAME" 'chmod 600 /opt/voice-hub/.env'
           rm -f .env.deploy
 
       - name: Pull and restart
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         run: |
-          ssh "deploy@$DEPLOY_HOST" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans'
+          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans'
