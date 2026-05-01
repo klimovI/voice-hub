@@ -27,11 +27,7 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
           </div>
         ) : (
           sorted.map((p) => (
-            <ParticipantRow
-              key={p.id}
-              participant={p}
-              onRemoteGainChange={onRemoteGainChange}
-            />
+            <ParticipantRow key={p.id} participant={p} onRemoteGainChange={onRemoteGainChange} />
           ))
         )}
       </div>

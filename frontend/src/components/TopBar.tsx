@@ -9,9 +9,7 @@ export function TopBar() {
         </div>
         <div>
           <div className="text-[16px]">Voice Hub</div>
-          <div className="text-[12px] font-medium text-muted">
-            Low-latency voice over WebRTC
-          </div>
+          <div className="text-[12px] font-medium text-muted">Low-latency voice over WebRTC</div>
         </div>
       </div>
       <StatusPill />

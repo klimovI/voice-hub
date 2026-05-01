@@ -163,24 +163,64 @@ export function teardownMicGraph(graph: MicGraph): void {
   }
 
   // RNNoise
-  try { graph.rnnoiseProcessorNode?.disconnect(); } catch { /* ignore */ }
+  try {
+    graph.rnnoiseProcessorNode?.disconnect();
+  } catch {
+    /* ignore */
+  }
   resetRnnoiseGraphState(graph.rnnoiseGraphState);
   graph.rnnoiseProcessorNode = null;
 
   // DTLN
-  try { graph.dtln?.dtlnInputSource.disconnect(); } catch { /* ignore */ }
-  try { graph.dtln?.dtlnProcessorNode.disconnect(); } catch { /* ignore */ }
-  try { graph.dtln?.denoisedSourceNode.disconnect(); } catch { /* ignore */ }
+  try {
+    graph.dtln?.dtlnInputSource.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.dtln?.dtlnProcessorNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.dtln?.denoisedSourceNode.disconnect();
+  } catch {
+    /* ignore */
+  }
   void graph.dtln?.dtlnContext.close().catch(() => undefined);
   graph.dtln = null;
 
   // Main chain
-  try { graph.localSourceNode.disconnect(); } catch { /* ignore */ }
-  try { graph.localHighPassNode.disconnect(); } catch { /* ignore */ }
-  try { graph.localLowPassNode.disconnect(); } catch { /* ignore */ }
-  try { graph.localCompressorNode.disconnect(); } catch { /* ignore */ }
-  try { graph.localGainNode.disconnect(); } catch { /* ignore */ }
-  try { graph.localMonitorAnalyser.disconnect(); } catch { /* ignore */ }
+  try {
+    graph.localSourceNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.localHighPassNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.localLowPassNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.localCompressorNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.localGainNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    graph.localMonitorAnalyser.disconnect();
+  } catch {
+    /* ignore */
+  }
 
   graph.processedLocalStream.getTracks().forEach((t) => t.stop());
   void graph.localAudioContext.close().catch(() => undefined);

@@ -101,10 +101,7 @@ export async function createRnnoiseProcessor(
   }
 }
 
-function onRnnoiseProcess(
-  event: AudioProcessingEvent,
-  gs: RnnoiseGraphState,
-): void {
+function onRnnoiseProcess(event: AudioProcessingEvent, gs: RnnoiseGraphState): void {
   const input = event.inputBuffer.getChannelData(0);
   const output = event.outputBuffer.getChannelData(0);
 
@@ -121,8 +118,7 @@ function onRnnoiseProcess(
   const strength = gs.rnnoiseMixRef() / 100;
   const wet = strength;
   const dry = 1 - strength;
-  const floor =
-    strength <= 0 ? 1 : Math.pow(10, -(strength * GATE_MAX_ATTEN_DB) / 20);
+  const floor = strength <= 0 ? 1 : Math.pow(10, -(strength * GATE_MAX_ATTEN_DB) / 20);
 
   const frameSize = gs.rnnoiseFrameSize;
   const inputRing = gs.inputRing;

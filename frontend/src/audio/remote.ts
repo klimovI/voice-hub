@@ -58,9 +58,21 @@ export function setupParticipantAudio(stream: MediaStream): RemoteParticipantAud
 }
 
 export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
-  try { audio.sourceNode?.disconnect(); } catch { /* ignore */ }
-  try { audio.gainNode.disconnect(); } catch { /* ignore */ }
-  try { audio.limiterNode.disconnect(); } catch { /* ignore */ }
+  try {
+    audio.sourceNode?.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    audio.gainNode.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    audio.limiterNode.disconnect();
+  } catch {
+    /* ignore */
+  }
   audio.audioEl.pause();
   audio.audioEl.srcObject = null;
 }

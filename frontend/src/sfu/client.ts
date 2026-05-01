@@ -6,7 +6,13 @@
 //
 // Track ownership: each remote MediaStream's id == publisher peer id.
 
-import type { SFUEnvelope, WelcomeData, PeerJoinedData, PeerLeftData, PeerInfoData } from "../types";
+import type {
+  SFUEnvelope,
+  WelcomeData,
+  PeerJoinedData,
+  PeerLeftData,
+  PeerInfoData,
+} from "../types";
 
 export interface SFUHandlers {
   onState: (state: string) => void;
@@ -33,7 +39,9 @@ export interface SFUClient {
   getId(): string | null;
 }
 
-function noop(): void { /* no-op */ }
+function noop(): void {
+  /* no-op */
+}
 
 export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient {
   const on: SFUHandlers = {
@@ -186,11 +194,19 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   function disconnect(): void {
     stopped = true;
     if (ws) {
-      try { ws.close(); } catch { /* ignore */ }
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
       ws = null;
     }
     if (pc) {
-      try { pc.close(); } catch { /* ignore */ }
+      try {
+        pc.close();
+      } catch {
+        /* ignore */
+      }
       pc = null;
     }
     myId = null;

@@ -73,11 +73,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
           : "bg-muted-2";
 
   const metaTextClass =
-    metaTone === "good"
-      ? "text-good"
-      : metaTone === "danger"
-        ? "text-danger"
-        : "text-muted";
+    metaTone === "good" ? "text-good" : metaTone === "danger" ? "text-danger" : "text-muted";
 
   return (
     <div

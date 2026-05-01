@@ -1,6 +1,11 @@
 import { useRef } from "react";
 import { useStore } from "../store/useStore";
-import { defaultShortcut, formatShortcut, persistShortcut, isModifierOnly } from "../utils/shortcut";
+import {
+  defaultShortcut,
+  formatShortcut,
+  persistShortcut,
+  isModifierOnly,
+} from "../utils/shortcut";
 import type { Shortcut } from "../types";
 
 interface Props {

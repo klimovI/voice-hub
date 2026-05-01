@@ -21,8 +21,7 @@
   --radius-card: 14px;
   --radius-card-lg: 20px;
 
-  --shadow-card: 0 30px 80px -22px rgba(0, 0, 0, 0.75),
-    0 8px 24px -8px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 30px 80px -22px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
 
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
@@ -45,7 +44,8 @@
     line-height: 1.5;
     color: var(--color-text);
     background-color: var(--color-bg-0);
-    background-image: radial-gradient(900px 600px at 12% -10%, rgba(34, 197, 94, 0.1), transparent 60%),
+    background-image:
+      radial-gradient(900px 600px at 12% -10%, rgba(34, 197, 94, 0.1), transparent 60%),
       radial-gradient(700px 500px at 110% 10%, rgba(34, 197, 94, 0.05), transparent 55%),
       radial-gradient(600px 600px at 50% 120%, rgba(34, 197, 94, 0.06), transparent 60%);
     background-attachment: fixed;
@@ -132,7 +132,9 @@
     border-radius: 50%;
     background: var(--color-accent);
     border: 2px solid var(--color-bg-0);
-    box-shadow: 0 0 0 1px var(--color-accent), 0 2px 8px rgba(0, 0, 0, 0.5);
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 2px 8px rgba(0, 0, 0, 0.5);
     cursor: grab;
     transition: transform 0.12s ease;
   }
@@ -145,7 +147,9 @@
     border-radius: 50%;
     background: var(--color-accent);
     border: 2px solid var(--color-bg-0);
-    box-shadow: 0 0 0 1px var(--color-accent), 0 2px 8px rgba(0, 0, 0, 0.5);
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 2px 8px rgba(0, 0, 0, 0.5);
     cursor: grab;
   }
   .vh-range:disabled {
