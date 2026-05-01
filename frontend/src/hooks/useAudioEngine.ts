@@ -48,9 +48,7 @@ export function useAudioEngine() {
 
   const acquireMic = useCallback(async () => {
     const r = refs.current;
-    const haveLiveMic = r.rawLocalStream
-      ?.getAudioTracks()
-      .some((t) => t.readyState === "live");
+    const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === "live");
     if (!haveLiveMic) {
       r.rawLocalStream = await navigator.mediaDevices.getUserMedia({
         audio: {
