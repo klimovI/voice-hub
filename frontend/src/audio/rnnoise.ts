@@ -48,18 +48,20 @@ const GATE_RELEASE_MS = 180;
 const GATE_HOLD_MS = 150;
 const GATE_MAX_ATTEN_DB = 36;
 
-function concatFloat32(left: Float32Array, right: Float32Array): Float32Array {
-  const result = new Float32Array(left.length + right.length);
-  result.set(left, 0);
-  result.set(right, left.length);
-  return result;
-}
+// Pre-sized scratch ring buffers; large enough to absorb 2048-sample SP blocks
+// plus partial-frame leftovers. Avoids per-callback Float32Array allocations
+// (GC pauses on main thread cause ScriptProcessor underruns → audible clicks).
+const RING_CAPACITY = 4096;
 
 export interface RnnoiseGraphState {
   rnnoiseState: RnnoiseState | null;
   rnnoiseFrameSize: number;
-  rnnoiseInputRemainder: Float32Array;
-  rnnoiseOutputRemainder: Float32Array;
+  inputRing: Float32Array;
+  inputRingLen: number;
+  outputRing: Float32Array;
+  outputRingLen: number;
+  scratchFrame: Float32Array;
+  scratchOriginal: Float32Array;
   gateEnv: number;
   gateHold: number;
   gateOpen: boolean;
@@ -79,8 +81,12 @@ export async function createRnnoiseProcessor(
     const mod = await loadRnnoiseModule();
     graphState.rnnoiseState = mod.createDenoiseState();
     graphState.rnnoiseFrameSize = mod.frameSize;
-    graphState.rnnoiseInputRemainder = new Float32Array(0);
-    graphState.rnnoiseOutputRemainder = new Float32Array(0);
+    graphState.inputRing = new Float32Array(RING_CAPACITY);
+    graphState.inputRingLen = 0;
+    graphState.outputRing = new Float32Array(RING_CAPACITY);
+    graphState.outputRingLen = 0;
+    graphState.scratchFrame = new Float32Array(mod.frameSize);
+    graphState.scratchOriginal = new Float32Array(mod.frameSize);
     graphState.gateEnv = 1;
     graphState.gateHold = 0;
     graphState.gateOpen = true;
@@ -118,17 +124,26 @@ function onRnnoiseProcess(
   const floor =
     strength <= 0 ? 1 : Math.pow(10, -(strength * GATE_MAX_ATTEN_DB) / 20);
 
-  const combined = concatFloat32(gs.rnnoiseInputRemainder, input);
-  const fullFrameSamples =
-    Math.floor(combined.length / gs.rnnoiseFrameSize) * gs.rnnoiseFrameSize;
-  const processed = new Float32Array(fullFrameSamples);
+  const frameSize = gs.rnnoiseFrameSize;
+  const inputRing = gs.inputRing;
+  const outputRing = gs.outputRing;
+  const frame = gs.scratchFrame;
+  const originalFrame = gs.scratchOriginal;
 
-  for (let offset = 0; offset < fullFrameSamples; offset += gs.rnnoiseFrameSize) {
-    const frame = combined.slice(offset, offset + gs.rnnoiseFrameSize);
-    const originalFrame = frame.slice();
+  // Append new input samples to inputRing (drop overflow defensively).
+  const inputCapacityLeft = inputRing.length - gs.inputRingLen;
+  const inputAppend = Math.min(input.length, inputCapacityLeft);
+  inputRing.set(input.subarray(0, inputAppend), gs.inputRingLen);
+  gs.inputRingLen += inputAppend;
 
-    for (let i = 0; i < frame.length; i += 1) {
-      frame[i] *= 32768;
+  // Drain whole frames into outputRing.
+  let consumed = 0;
+  while (gs.inputRingLen - consumed >= frameSize) {
+    // Copy frame from ring into scratch, scale to int16 range, save dry copy.
+    for (let i = 0; i < frameSize; i += 1) {
+      const v = inputRing[consumed + i];
+      originalFrame[i] = v;
+      frame[i] = v * 32768;
     }
     const vadProb = gs.rnnoiseState.processFrame(frame);
 
@@ -137,7 +152,9 @@ function onRnnoiseProcess(
       gs.gateHold = holdSamples;
     }
 
-    for (let i = 0; i < frame.length; i += 1) {
+    const outputCapacityLeft = outputRing.length - gs.outputRingLen;
+    const writeCount = Math.min(frameSize, outputCapacityLeft);
+    for (let i = 0; i < writeCount; i += 1) {
       if (gs.gateHold > 0) {
         gs.gateHold -= 1;
         if (gs.gateHold === 0) {
@@ -150,28 +167,40 @@ function onRnnoiseProcess(
 
       const denoised = frame[i] / 32768;
       const mixed = denoised * wet + originalFrame[i] * dry;
-      frame[i] = mixed * gs.gateEnv;
+      outputRing[gs.outputRingLen + i] = mixed * gs.gateEnv;
     }
-    processed.set(frame, offset);
+    gs.outputRingLen += writeCount;
+    consumed += frameSize;
   }
 
-  gs.rnnoiseInputRemainder = combined.slice(fullFrameSamples);
-  const available = concatFloat32(gs.rnnoiseOutputRemainder, processed);
-  const take = Math.min(output.length, available.length);
+  // Shift unconsumed input down to the start of the ring.
+  if (consumed > 0) {
+    const remaining = gs.inputRingLen - consumed;
+    if (remaining > 0) {
+      inputRing.copyWithin(0, consumed, consumed + remaining);
+    }
+    gs.inputRingLen = remaining;
+  }
 
+  // Drain output ring into the SP output block.
+  const take = Math.min(output.length, gs.outputRingLen);
   output.fill(0);
   if (take > 0) {
-    output.set(available.subarray(0, take), 0);
+    output.set(outputRing.subarray(0, take), 0);
+    const remainingOut = gs.outputRingLen - take;
+    if (remainingOut > 0) {
+      outputRing.copyWithin(0, take, take + remainingOut);
+    }
+    gs.outputRingLen = remainingOut;
   }
-  gs.rnnoiseOutputRemainder = available.slice(take);
 }
 
 export function resetRnnoiseGraphState(gs: RnnoiseGraphState): void {
   gs.rnnoiseState?.destroy();
   gs.rnnoiseState = null;
   gs.rnnoiseFrameSize = 0;
-  gs.rnnoiseInputRemainder = new Float32Array(0);
-  gs.rnnoiseOutputRemainder = new Float32Array(0);
+  gs.inputRingLen = 0;
+  gs.outputRingLen = 0;
   gs.gateEnv = 1;
   gs.gateHold = 0;
   gs.gateOpen = true;

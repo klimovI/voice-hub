@@ -16,7 +16,7 @@ export function ensureRemoteAudioContext(): AudioContext {
   const Ctor =
     (window as Window & typeof globalThis).AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  remoteAudioContext = new Ctor();
+  remoteAudioContext = new Ctor({ sampleRate: 48000 });
   void remoteAudioContext.resume().catch(() => undefined);
   return remoteAudioContext;
 }

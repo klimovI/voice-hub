@@ -76,11 +76,16 @@ export async function buildMicGraph(
   localCompressorNode.release.value = 0.1;
 
   // Initialize RNNoise graph state (shared mutable object).
+  // Ring buffers + scratch frames get sized on createRnnoiseProcessor when frameSize is known.
   const rnnoiseGraphState: RnnoiseGraphState = {
     rnnoiseState: null,
     rnnoiseFrameSize: 0,
-    rnnoiseInputRemainder: new Float32Array(0),
-    rnnoiseOutputRemainder: new Float32Array(0),
+    inputRing: new Float32Array(0),
+    inputRingLen: 0,
+    outputRing: new Float32Array(0),
+    outputRingLen: 0,
+    scratchFrame: new Float32Array(0),
+    scratchOriginal: new Float32Array(0),
     gateEnv: 1,
     gateHold: 0,
     gateOpen: true,
