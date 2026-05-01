@@ -29,24 +29,29 @@ export interface MicGraph {
   speakingFrameId: number | null;
 }
 
+export function createLocalAudioContext(): AudioContext {
+  const AudioContextCtor =
+    (window as Window & typeof globalThis).AudioContext ??
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) throw new Error("Browser does not support AudioContext");
+  try {
+    return new AudioContextCtor({ sampleRate: 48000 });
+  } catch {
+    return new AudioContextCtor();
+  }
+}
+
 export async function buildMicGraph(
   rawLocalStream: MediaStream,
   engine: EngineKind,
   rnnoiseMixRef: () => number,
   onStatusMessage: (msg: string, isError?: boolean) => void,
+  prebuiltContext?: AudioContext,
 ): Promise<MicGraph> {
-  const AudioContextCtor =
-    (window as Window & typeof globalThis).AudioContext ??
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) throw new Error("Browser does not support AudioContext");
-
-  let localAudioContext: AudioContext;
-  try {
-    localAudioContext = new AudioContextCtor({ sampleRate: 48000 });
-  } catch {
-    localAudioContext = new AudioContextCtor();
+  const localAudioContext = prebuiltContext ?? createLocalAudioContext();
+  if (localAudioContext.state !== "running") {
+    await localAudioContext.resume();
   }
-  await localAudioContext.resume();
 
   const localSourceNode = localAudioContext.createMediaStreamSource(rawLocalStream);
 

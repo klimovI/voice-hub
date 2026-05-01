@@ -37,6 +37,12 @@ async function ensureDtlnLoaded(assetBase: string): Promise<DtlnModule> {
   return dtlnModule!;
 }
 
+// Fire-and-forget DTLN preload. Mirrors preloadRnnoise: shifts the model
+// fetch + WASM init off the Join critical path.
+export function preloadDtln(assetBase: string): void {
+  void ensureDtlnLoaded(assetBase).catch(() => undefined);
+}
+
 export interface DtlnHandle {
   dtlnContext: AudioContext;
   dtlnInputSource: MediaStreamAudioSourceNode;
