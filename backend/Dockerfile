@@ -1,3 +1,13 @@
+FROM node:20-bookworm-slim AS frontend
+
+WORKDIR /src/frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend ./
+RUN npm run build
+
 FROM golang:1.24-bookworm AS build
 
 WORKDIR /src
@@ -19,7 +29,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=build /out/voice-hub-app /app/voice-hub-app
-COPY web /app/web
+COPY --from=frontend /src/frontend/dist /app/web
 
 ENV APP_ADDR=:8080
 ENV WEB_DIR=/app/web

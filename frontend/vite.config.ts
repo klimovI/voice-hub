@@ -1,18 +1,14 @@
 // Voice Hub — Vite multi-page config
 //
-// Build output: ../web (repo root web/ served by Go + referenced by Tauri)
+// Build output: ./dist (Vite default). Consumed by Go backend (via WEB_DIR
+// env / config default) and by Tauri (frontendDist in tauri.conf.json).
 //
 // Auth whitelist approach:
-//   Vite emits hashed assets under /assets/*.js|css.
-//   We extend Go's requireAuthHTML to pass through any request whose path
-//   starts with "/assets/" or "/vendor/" — both are pure static files with
-//   no sensitive content. That single Go change covers all Vite-generated
-//   bundles including the login page's JS chunk without us needing stable
-//   filenames.
-//
-//   login.html itself is whitelisted by path. Its hashed JS bundle lands
-//   in /assets/ which is now also whitelisted. Result: /login.html +
-//   /assets/login-*.js all reach the browser unauthenticated.
+//   Vite emits hashed assets under /assets/*.js|css. Go's requireAuthHTML
+//   passes through any request whose path starts with "/assets/" or
+//   "/vendor/" — both are pure static files with no sensitive content.
+//   That covers all Vite-generated bundles (including the login page's
+//   JS chunk) without us needing stable filenames.
 
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -24,8 +20,6 @@ export default defineConfig({
   base: "/",
 
   build: {
-    outDir: "../web",
-    emptyOutDir: true,
     sourcemap: false,
 
     rollupOptions: {

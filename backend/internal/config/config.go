@@ -22,7 +22,7 @@ func Load() Config {
 	hostname := env("APP_HOSTNAME", "localhost")
 	return Config{
 		Addr:             env("APP_ADDR", ":8080"),
-		WebDir:           env("WEB_DIR", "../web"),
+		WebDir:           env("WEB_DIR", "../frontend/dist"),
 		AppHostname:      hostname,
 		PublicIP:         os.Getenv("PUBLIC_IP"),
 		TurnSharedSecret: os.Getenv("TURN_SHARED_SECRET"),
