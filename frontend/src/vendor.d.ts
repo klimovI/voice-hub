@@ -23,3 +23,6 @@ declare module "/vendor/dtln/dtln.mjs" {
     opts: { channelCount: number },
   ): AudioNode;
 }
+
+// Side-effect CSS imports (resolved by Vite at build time).
+declare module "*.css";
