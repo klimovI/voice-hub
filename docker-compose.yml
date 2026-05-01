@@ -12,6 +12,8 @@ services:
       TURN_URL: "turn:localhost:3478?transport=udp"
       TURN_USERNAME: "room"
       TURN_PASSWORD: "room-secret"
+      APP_AUTH_USER: "dev"
+      APP_AUTH_PASSWORD: "dev"
     ports:
       - "8080:8080"
     depends_on:

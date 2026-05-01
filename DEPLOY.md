@@ -53,16 +53,23 @@ mkdir -p /opt/audio-room/deploy && chown -R deploy:deploy /opt/audio-room
 
 ## `/opt/audio-room/.env`
 
+Файл провижится workflow'ом из GitHub secret `PROD_ENV` на каждом деплое — вручную трогать не нужно. Формат (single multi-line blob, который кладётся в `PROD_ENV`):
+
 ```
 APP_HOSTNAME=your-host.example.com
 PUBLIC_IP=0.0.0.0
 ROOM_ID=1001
 ROOM_PIN=
-TURN_USERNAME=room
-TURN_PASSWORD=<сгенерируй: openssl rand -base64 24>
+TURN_USERNAME=<уникальное имя, не "room">
+TURN_PASSWORD=<openssl rand -base64 24>
+APP_AUTH_USER=<логин для basic auth>
+APP_AUTH_PASSWORD=<openssl rand -base64 24>
 ```
 
-`chmod 600 /opt/audio-room/.env`. Этот файл не трогается CI — секреты живут только тут.
+- `APP_AUTH_*` — Basic Auth на `/` и `/api/config`. Сервис fail-fast если не заданы (`/healthz` остаётся публичным для health-check'ов).
+- Не используй дефолты из `backend/internal/config/config.go` (например `TURN_USERNAME=room`) — конфиг "из коробки" угадывается.
+- На сервере права `chmod 600` ставит сам workflow.
+- Сохрани копию `PROD_ENV` в менеджер паролей: GitHub UI секреты не показывает после создания.
 
 ## GitHub Actions secrets
 
@@ -70,6 +77,7 @@ TURN_PASSWORD=<сгенерируй: openssl rand -base64 24>
 |---|---|
 | `DEPLOY_HOST` | IP или домен сервера |
 | `DEPLOY_SSH_KEY` | приватный ключ deploy-пользователя (целиком, с BEGIN/END) |
+| `PROD_ENV` | весь `.env` целиком (см. формат выше) |
 
 После первого успешного `build` — на github.com/<owner>?tab=packages для `voice-hub-app` и `voice-hub-janus` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
 
@@ -78,9 +86,13 @@ TURN_PASSWORD=<сгенерируй: openssl rand -base64 24>
 `.github/workflows/deploy.yml` запускается на push в master:
 
 1. Build matrix: app + janus → `ghcr.io/<owner>/voice-hub-{app,janus}:{latest,sha}`
-2. Deploy: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/audio-room/`, `docker compose pull && up -d`
+2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/audio-room/`
+3. Write .env on host: пишет `/opt/audio-room/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
+4. Pull & restart: `docker compose pull && up -d --remove-orphans`
 
 Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.
+
+Поменять одну переменную: обнови `PROD_ENV` в GitHub UI, затем либо запусти workflow вручную (Actions → Deploy → Run workflow), либо подожди следующего пуша.
 
 ## DNS гайд
 

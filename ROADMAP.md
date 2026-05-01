@@ -27,6 +27,8 @@
 - [x] Backend с health-check и room-конфигом
 - [x] Production deploy на VPS — Caddy auto-TLS, GitHub Actions build & push в ghcr.io, SSH deploy под non-root user. Подробнее в [DEPLOY.md](DEPLOY.md)
 - [x] Tauri 2 desktop-обёртка для Windows, кросс-сборка из Linux через cargo-xwin, NSIS installer
+- [x] Basic Auth на `/` и `/api/config`, обязательный на старте (fail-fast без `APP_AUTH_USER`/`APP_AUTH_PASSWORD`); `/healthz` публичный
+- [x] Прод `.env` провижится из GitHub secret `PROD_ENV` на каждом деплое (single source of truth)
 
 ## In progress
 
@@ -46,7 +48,6 @@ _(пусто)_
 
 ### Infra
 - [ ] Persistent room state на бекенде
-- [ ] Опциональный basic-auth перед Caddy
 
 ## Frozen / decided not to do
 

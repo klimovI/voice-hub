@@ -13,7 +13,7 @@ Self-hosted голосовая комната для маленьких комп
 docker compose up -d --build
 ```
 
-Открыть `http://localhost:8080`. Стоп: `docker compose down`. Логи: `docker compose logs -f app janus`.
+Открыть `http://localhost:8080`. Логин/пароль: `dev` / `dev` (basic auth, переопредели через `APP_AUTH_USER` / `APP_AUTH_PASSWORD` в `docker-compose.yml`). Стоп: `docker compose down`. Логи: `docker compose logs -f app janus`.
 
 ## Production
 
