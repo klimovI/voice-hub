@@ -139,17 +139,12 @@ func main() {
 }
 
 func authenticated(cfg config.Config, r *http.Request) bool {
-	if cookie, err := r.Cookie(auth.CookieName); err == nil {
-		if _, err := auth.Decode(cfg.SessionSecret, cookie.Value); err == nil {
-			return true
-		}
+	cookie, err := r.Cookie(auth.CookieName)
+	if err != nil {
+		return false
 	}
-	if user, pass, ok := r.BasicAuth(); ok &&
-		subtle.ConstantTimeCompare([]byte(user), []byte(cfg.AuthUser)) == 1 &&
-		subtle.ConstantTimeCompare([]byte(pass), []byte(cfg.AuthPassword)) == 1 {
-		return true
-	}
-	return false
+	_, err = auth.Decode(cfg.SessionSecret, cookie.Value)
+	return err == nil
 }
 
 func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
