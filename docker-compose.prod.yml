@@ -28,6 +28,8 @@ services:
       TURN_URL: "turn:${APP_HOSTNAME}:3478?transport=udp"
       TURN_USERNAME: "${TURN_USERNAME}"
       TURN_PASSWORD: "${TURN_PASSWORD}"
+      APP_AUTH_USER: "${APP_AUTH_USER:?APP_AUTH_USER is required}"
+      APP_AUTH_PASSWORD: "${APP_AUTH_PASSWORD:?APP_AUTH_PASSWORD is required}"
     expose:
       - "8080"
     depends_on:

@@ -67,6 +67,17 @@ jobs:
           scp docker-compose.prod.yml "deploy@$DEPLOY_HOST:/opt/audio-room/docker-compose.yml"
           scp deploy/Caddyfile "deploy@$DEPLOY_HOST:/opt/audio-room/deploy/Caddyfile"
 
+      - name: Write .env on host
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          PROD_ENV:    ${{ secrets.PROD_ENV }}
+        run: |
+          umask 077
+          printf '%s\n' "$PROD_ENV" > .env.deploy
+          scp .env.deploy "deploy@$DEPLOY_HOST:/opt/audio-room/.env"
+          ssh "deploy@$DEPLOY_HOST" 'chmod 600 /opt/audio-room/.env'
+          rm -f .env.deploy
+
       - name: Pull and restart
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

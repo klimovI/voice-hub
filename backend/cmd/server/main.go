@@ -69,11 +69,10 @@ func main() {
 		Handler: mux,
 	}
 
-	if cfg.AuthUser != "" && cfg.AuthPassword != "" {
-		log.Printf("basic auth enabled (user=%s)", cfg.AuthUser)
-	} else {
-		log.Printf("basic auth DISABLED — set APP_AUTH_USER and APP_AUTH_PASSWORD to enable")
+	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
+		log.Fatal("APP_AUTH_USER and APP_AUTH_PASSWORD must be set")
 	}
+	log.Printf("basic auth enabled (user=%s)", cfg.AuthUser)
 	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
@@ -81,9 +80,6 @@ func main() {
 }
 
 func basicAuth(cfg config.Config, next http.Handler) http.Handler {
-	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
-		return next
-	}
 	wantUser := []byte(cfg.AuthUser)
 	wantPass := []byte(cfg.AuthPassword)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
