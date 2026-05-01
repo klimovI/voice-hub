@@ -1,0 +1,11 @@
+.git
+.github
+.vscode
+**/node_modules
+**/dist
+src-tauri/target
+frontend/dist
+backend/tmp
+*.md
+.env*
+scratch

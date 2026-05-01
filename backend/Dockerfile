@@ -3,21 +3,26 @@ FROM node:20-bookworm-slim AS frontend
 WORKDIR /src/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY frontend ./
-RUN npm run build
+RUN --mount=type=cache,target=/root/.npm npm run build
 
 FROM golang:1.24-bookworm AS build
 
 WORKDIR /src
 
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY backend ./
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
 
 FROM debian:bookworm-slim
 

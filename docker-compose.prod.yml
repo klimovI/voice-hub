@@ -19,7 +19,7 @@ services:
       - app
 
   app:
-    image: ghcr.io/klimovi/voice-hub-app:latest
+    image: ghcr.io/klimovi/voice-hub-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       APP_ADDR: ":8080"
