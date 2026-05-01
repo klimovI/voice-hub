@@ -64,12 +64,12 @@ export function HotkeyCard({ onStatusMessage }: Props) {
   const displayValue = capturingShortcut ? "Press shortcut..." : formatShortcut(shortcut);
 
   return (
-    <section className="card controls">
-      <div className="card-head">
+    <section className="card grid gap-[14px]">
+      <div className="flex items-center justify-between gap-3 mb-2">
         <h2 className="card-title">Hotkey</h2>
         <span className="card-hint">Toggle mute</span>
       </div>
-      <label>
+      <label className="block text-[12px] font-medium text-muted">
         Click input, then press a combo
         <input
           id="shortcut-input"
@@ -81,14 +81,15 @@ export function HotkeyCard({ onStatusMessage }: Props) {
           onClick={armCapture}
           onBlur={cancelCapture}
           onKeyDown={handleKeyDown}
+          className="input-field cursor-pointer"
         />
       </label>
-      <div className="inline-actions">
+      <div className="flex flex-wrap gap-2.5">
         <button
           id="shortcut-reset"
-          className="secondary mini-button"
           type="button"
           onClick={handleReset}
+          className="btn btn-secondary btn-mini"
         >
           Reset to default
         </button>

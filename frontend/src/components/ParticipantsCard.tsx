@@ -16,13 +16,13 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
 
   return (
     <section className="card">
-      <div className="card-head">
+      <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="card-title">Participants</h2>
         <span className="card-hint">Per-user volume &amp; mute</span>
       </div>
-      <div id="participants" className="participant-list">
+      <div id="participants" className="grid gap-2.5">
         {sorted.length === 0 ? (
-          <div className="participant-empty">
+          <div className="p-7 text-center text-muted border border-dashed border-line-strong rounded-[14px] bg-bg-2 text-[13px]">
             No one here yet — share the room link to invite people.
           </div>
         ) : (

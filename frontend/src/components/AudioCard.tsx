@@ -14,6 +14,17 @@ interface Props {
   onReset: () => void;
 }
 
+function SliderHead({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 items-center text-[13px]">
+      <span className="text-muted">{label}</span>
+      <strong className="font-bold tabular-nums text-[12px] px-2 py-0.5 text-accent bg-[rgba(34,197,94,0.16)] border border-accent rounded-full">
+        {value}
+      </strong>
+    </div>
+  );
+}
+
 export function AudioCard({
   onEngineSelect,
   onSendVolumeChange,
@@ -29,48 +40,52 @@ export function AudioCard({
   const outputMuted = useStore((s) => s.outputMuted);
 
   return (
-    <section className="card controls">
-      <div className="card-head">
+    <section className="card grid gap-[14px]">
+      <div className="flex items-center justify-between gap-3 mb-2">
         <h2 className="card-title">Audio</h2>
         <button
           id="audio-reset"
-          className="secondary mini-button"
           type="button"
           onClick={onReset}
+          className="btn btn-secondary btn-mini"
         >
           Reset
         </button>
       </div>
 
-      <div className="engine-row">
-        <span className="engine-label">Denoiser</span>
+      <div className="grid gap-2">
+        <span className="text-[13px] text-muted">Denoiser</span>
         <div
           id="denoiser-engine"
-          className="engine-toggle"
           role="radiogroup"
           aria-label="Denoiser engine"
+          className="grid grid-cols-3 gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
         >
-          {ENGINES.map((eng) => (
-            <button
-              key={eng}
-              type="button"
-              className="engine-opt"
-              data-engine={eng}
-              role="radio"
-              aria-checked={engine === eng ? "true" : "false"}
-              onClick={() => onEngineSelect(eng)}
-            >
-              {formatEngine(eng)}
-            </button>
-          ))}
+          {ENGINES.map((eng) => {
+            const active = engine === eng;
+            return (
+              <button
+                key={eng}
+                type="button"
+                data-engine={eng}
+                role="radio"
+                aria-checked={active ? "true" : "false"}
+                onClick={() => onEngineSelect(eng)}
+                className={`flex justify-center items-center w-full px-2.5 py-2 text-[12px] font-semibold rounded-[10px] cursor-pointer border transition-[background,color,border-color] duration-100 ${
+                  active
+                    ? "bg-accent text-accent-ink border-accent"
+                    : "bg-transparent border-transparent text-muted hover:bg-bg-3 hover:text-text"
+                }`}
+              >
+                {formatEngine(eng)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="slider-row">
-        <div className="slider-head">
-          <span>Suppression strength</span>
-          <strong id="rnnoise-mix-value">{formatRnnoiseMix(rnnoiseMix)}</strong>
-        </div>
+      <div className="grid gap-2">
+        <SliderHead label="Suppression strength" value={formatRnnoiseMix(rnnoiseMix)} />
         <input
           id="rnnoise-mix"
           type="range"
@@ -80,14 +95,12 @@ export function AudioCard({
           value={rnnoiseMix}
           disabled={engine !== "rnnoise"}
           onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
+          className="vh-range"
         />
       </div>
 
-      <div className="slider-row">
-        <div className="slider-head">
-          <span>Mic send volume</span>
-          <strong id="send-volume-value">{sendVolume}%</strong>
-        </div>
+      <div className="grid gap-2">
+        <SliderHead label="Mic send volume" value={`${sendVolume}%`} />
         <input
           id="send-volume"
           type="range"
@@ -96,14 +109,12 @@ export function AudioCard({
           step="5"
           value={sendVolume}
           onChange={(e) => onSendVolumeChange(Number(e.target.value))}
+          className="vh-range"
         />
       </div>
 
-      <div className="slider-row">
-        <div className="slider-head">
-          <span>Master output</span>
-          <strong id="output-volume-value">{outputVolume}%</strong>
-        </div>
+      <div className="grid gap-2">
+        <SliderHead label="Master output" value={`${outputVolume}%`} />
         <input
           id="output-volume"
           type="range"
@@ -112,14 +123,15 @@ export function AudioCard({
           step="5"
           value={outputVolume}
           onChange={(e) => onOutputVolumeChange(Number(e.target.value))}
+          className="vh-range"
         />
-        <div className="inline-actions" style={{ marginTop: 6 }}>
+        <div className="flex flex-wrap gap-2.5 mt-1.5">
           <button
             id="output-mute-button"
-            className="secondary mini-button"
             type="button"
             aria-pressed={outputMuted ? "true" : "false"}
             onClick={onOutputMuteToggle}
+            className={`btn btn-mini ${outputMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
             {outputMuted ? "Unmute Output" : "Mute Output"}
           </button>

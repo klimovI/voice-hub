@@ -42,12 +42,12 @@ export function SessionCard({
 
   return (
     <section className="card">
-      <div className="card-head">
+      <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="card-title">Session</h2>
         <span className="card-hint">Microphone &amp; room</span>
       </div>
-      <form id="join-form" onSubmit={handleSubmit}>
-        <label>
+      <form id="join-form" onSubmit={handleSubmit} className="grid gap-[14px]">
+        <label className="block text-[12px] font-medium text-muted">
           Display name
           <input
             id="display-name"
@@ -57,38 +57,44 @@ export function SessionCard({
             autoComplete="off"
             value={displayName}
             onChange={handleNameChange}
+            className="input-field"
           />
         </label>
-        <div className="actions">
-          <button id="join-button" type="submit" disabled={joining || joined}>
+        <div className="flex flex-wrap gap-2.5">
+          <button
+            id="join-button"
+            type="submit"
+            disabled={joining || joined}
+            className="btn btn-primary"
+          >
             Join Room
           </button>
           <button
             id="self-mute-button"
-            className="secondary"
             type="button"
             disabled={!joined}
             aria-pressed={selfMuted ? "true" : "false"}
             onClick={onToggleSelfMute}
+            className={`btn ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
             {selfMuted ? "Unmute Me" : "Mute Me"}
           </button>
           <button
             id="deafen-button"
-            className="secondary"
             type="button"
             disabled={!joined}
             aria-pressed={deafened ? "true" : "false"}
             onClick={onToggleDeafen}
+            className={`btn ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
           >
             {deafened ? "Undeafen" : "Deafen"}
           </button>
           <button
             id="leave-button"
-            className="danger"
             type="button"
             disabled={!joined}
             onClick={onLeave}
+            className="btn btn-danger"
           >
             Leave
           </button>

@@ -2,12 +2,16 @@ import { StatusPill } from "./StatusPill";
 
 export function TopBar() {
   return (
-    <header className="topbar">
-      <div className="brand">
-        <div className="brand-mark">V</div>
+    <header className="flex items-center justify-between gap-4 p-[14px_18px] border border-line rounded-[20px] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] bg-bg-1 max-[640px]:flex-wrap">
+      <div className="flex items-center gap-3 font-semibold tracking-[-0.01em]">
+        <div className="grid place-items-center w-8 h-8 rounded-[10px] bg-accent text-accent-ink font-extrabold shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]">
+          V
+        </div>
         <div>
-          <div className="brand-title">Voice Hub</div>
-          <div className="brand-sub">Low-latency voice over WebRTC</div>
+          <div className="text-[16px]">Voice Hub</div>
+          <div className="text-[12px] font-medium text-muted">
+            Low-latency voice over WebRTC
+          </div>
         </div>
       </div>
       <StatusPill />

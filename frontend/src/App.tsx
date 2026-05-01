@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import "./styles/app.css";
+import "./styles/main.css";
 import { useStore } from "./store/useStore";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSFU } from "./hooks/useSFU";
@@ -332,10 +332,10 @@ export function App() {
   );
 
   return (
-    <main>
+    <main className="grid w-[min(1180px,100%)] gap-[22px] mx-auto px-5 pt-7 pb-15 max-[640px]:px-3 max-[640px]:pt-4 max-[640px]:pb-10">
       <TopBar />
-      <div className="layout">
-        <div className="stack">
+      <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
+        <div className="grid gap-[22px] content-start">
           <SessionCard
             onJoin={handleJoin}
             onLeave={handleLeave}
@@ -354,7 +354,7 @@ export function App() {
           />
           <HotkeyCard onStatusMessage={handleStatusMessage} />
         </div>
-        <div className="stack">
+        <div className="grid gap-[22px] content-start">
           <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
         </div>
       </div>

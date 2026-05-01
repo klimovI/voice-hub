@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import "./styles/login.css";
+import "./styles/main.css";
 
 export function Login() {
   const [submitting, setSubmitting] = useState(false);
@@ -42,32 +42,53 @@ export function Login() {
   }
 
   return (
-    <main className="card">
-      <div className="brand">
-        <span className="dot" />
+    <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,24px)]">
+      <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
+        <span className="w-2.5 h-2.5 rounded-full bg-accent shadow-[0_0_14px_var(--color-accent)]" />
         Voice Hub
       </div>
-      <h1>Вход</h1>
-      <div className="sub">Введите общий логин и пароль.</div>
+      <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
+      <div className="text-muted text-[13px] mb-5">Введите общий логин и пароль.</div>
       <form id="login-form" ref={formRef} method="post" action="/api/login" onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="user">Логин</label>
-          <input id="user" name="user" autoComplete="username" required autoFocus />
+        <div>
+          <label htmlFor="user" className="block text-[12px] font-medium text-muted mb-1.5">
+            Логин
+          </label>
+          <input
+            id="user"
+            name="user"
+            autoComplete="username"
+            required
+            autoFocus
+            className="input-field !mt-0"
+          />
         </div>
-        <div className="field">
-          <label htmlFor="password">Пароль</label>
+        <div className="mt-3.5">
+          <label htmlFor="password" className="block text-[12px] font-medium text-muted mb-1.5">
+            Пароль
+          </label>
           <input
             id="password"
             name="password"
             type="password"
             autoComplete="current-password"
             required
+            className="input-field !mt-0"
           />
         </div>
-        <button type="submit" id="submit" disabled={submitting}>
+        <button
+          type="submit"
+          id="submit"
+          disabled={submitting}
+          className="btn btn-primary w-full justify-center mt-5 disabled:cursor-progress disabled:opacity-60"
+        >
           Войти
         </button>
-        {error && <div className={`error show`}>{error}</div>}
+        {error && (
+          <div className="mt-3.5 px-3 py-2.5 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
+            {error}
+          </div>
+        )}
       </form>
     </main>
   );
