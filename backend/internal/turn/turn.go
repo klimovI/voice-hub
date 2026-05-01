@@ -59,9 +59,17 @@ func Start(cfg Config) (*Server, error) {
 
 	logger := pionlogging.NewDefaultLoggerFactory().NewLogger("turn")
 
+	// pion defaults AllocationLifetime/ChannelBindTimeout/PermissionTimeout to 10 minutes,
+	// which silently kills any call relaying through TURN at the 10-minute mark. Bump to
+	// 8 hours so a long call doesn't get torn down mid-conversation.
+	const turnAllocationLifetime = 8 * time.Hour
+
 	srv, err := pion.NewServer(pion.ServerConfig{
-		Realm:       cfg.Realm,
-		AuthHandler: pion.LongTermTURNRESTAuthHandler(cfg.SharedSecret, logger),
+		Realm:              cfg.Realm,
+		AuthHandler:        pion.LongTermTURNRESTAuthHandler(cfg.SharedSecret, logger),
+		AllocationLifetime: turnAllocationLifetime,
+		ChannelBindTimeout: turnAllocationLifetime,
+		PermissionTimeout:  turnAllocationLifetime,
 		PacketConnConfigs: []pion.PacketConnConfig{
 			{
 				PacketConn: listener,
