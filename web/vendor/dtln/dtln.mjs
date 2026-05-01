@@ -24036,7 +24036,7 @@ var blockShift = 128;
 var sampleRate = 16e3;
 
 // src/fn.ts
-import FFT from "fft.js";
+import FFT from "./fft.mjs";
 var angle = (complexes) => tidy(() => {
   const reals = squeeze(real(complexes));
   const imags = squeeze(imag(complexes));
