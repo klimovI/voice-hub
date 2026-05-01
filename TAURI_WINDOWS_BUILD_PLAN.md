@@ -1,8 +1,36 @@
-# Tauri Windows Build Plan
+# Tauri Windows Build
 
-Цель: собирать Windows desktop app из Linux/WSL для этого репозитория.
+Сборка Windows desktop app: CI через GitHub Actions (основной путь) + локальная кросс-сборка из Linux/WSL.
 
-## Текущее состояние
+## CI Release (GitHub Actions)
+
+Workflow: `.github/workflows/release-desktop.yml`. Runner — `windows-latest`, нативный MSVC, без xwin. Триггеры:
+
+- `push` тега `v*` → собирает и создаёт Release с `.exe`
+- `workflow_dispatch` → ручной запуск из UI с произвольным тегом (для теста)
+
+### Релиз новой версии
+
+```bash
+# 1. Обновить версию
+$EDITOR src-tauri/tauri.conf.json   # version: "0.1.1"
+git commit -am "bump: 0.1.1"
+git push origin master
+
+# 2. Создать тег и запушить
+git tag -a v0.1.1 -m "Release 0.1.1"
+git push origin v0.1.1
+```
+
+GH Actions подхватит push тега → ~5-10 мин → новый Release на https://github.com/klimovI/voice-hub/releases с приложенным `Audio Room_0.1.1_x64-setup.exe`.
+
+### Стоимость
+
+Repo публичный → unlimited GH Actions minutes. Storage — Releases без ограничений.
+
+## Локальная сборка (Linux/WSL → Windows)
+
+### Текущее состояние
 
 Готово:
 
@@ -16,7 +44,7 @@
   - `src-tauri/target/x86_64-pc-windows-msvc/release/audio-room-desktop.exe` (PE32+ GUI)
   - `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Audio Room_0.1.0_x64-setup.exe`
 
-## Build команда
+### Build команда
 
 ```bash
 cd src-tauri
@@ -26,7 +54,7 @@ CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
   --target x86_64-pc-windows-msvc
 ```
 
-## Что проверить на Windows-машине
+## Что проверить на Windows-машине после сборки
 
 - запуск `audio-room-desktop.exe` показывает окно с фронтендом из `web/`
 - NSIS installer ставит app, ярлык работает

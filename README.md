@@ -23,6 +23,21 @@ VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает о
 
 Desktop-обёртка на Tauri 2 в `src-tauri/`. Использует `web/` как frontend, конфиг получает через Rust-команду `get_app_config` (читает env), а не через `/api/config` Go-бэкенда.
 
+### Скачать готовый билд (Windows)
+
+Готовые NSIS-установщики собираются GitHub Actions и публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest). Качай `Audio Room_<version>_x64-setup.exe`, ставь — ярлык в меню "Пуск".
+
+### Релиз (как собрать новый билд)
+
+Workflow `.github/workflows/release-desktop.yml` запускается:
+
+- **по тегу** — `git tag v0.1.1 && git push origin v0.1.1` создаёт Release с `.exe`
+- **вручную** — Actions → "Release Desktop" → "Run workflow" (без тега, для теста)
+
+Версия в имени `.exe` берётся из `src-tauri/tauri.conf.json` → `version`. Перед тегом обнови это поле, иначе несколько релизов будут собираться с одинаковым именем файла.
+
+### Локальная сборка
+
 **Требования:** Rust toolchain, `cargo install tauri-cli --version '^2'`, системные зависимости Tauri.
 
 **Запуск из исходников:**
@@ -33,6 +48,8 @@ cargo tauri dev
 ```
 
 **Кросс-сборка под Windows из Linux** через `cargo-xwin` — детали в [TAURI_WINDOWS_BUILD_PLAN.md](TAURI_WINDOWS_BUILD_PLAN.md). Артефакт — NSIS-установщик.
+
+### Конфигурация
 
 Env переменные — `JANUS_WS_URL`, `ROOM_ID`, `ROOM_PIN`, `STUN_URL`, `TURN_URL`, `TURN_USERNAME`, `TURN_PASSWORD`. Дефолты в `src-tauri/src/lib.rs` указывают на `localhost` — для прод-сборки либо заменить дефолты, либо передать env в момент запуска.
 
@@ -89,10 +106,10 @@ mic ──▶ [denoiser] ──▶ HPF ──▶ LPF ──▶ compressor ──
 
 ### Денойзеры
 
-| Engine | Сильные стороны | Слабые стороны |
-|---|---|---|
-| **RNNoise** | дёшево по CPU, хорошо на стационарном шуме (фен, кулер) | плохо ловит транзиенты — клики мыши/клавы |
-| **DTLN** | заметно лучше на транзиентах, нейронка нового поколения | тяжелее, инициализация ~9 МБ, чуть выше латентность |
+| Engine      | Сильные стороны                                         | Слабые стороны                                      |
+| ----------- | ------------------------------------------------------- | --------------------------------------------------- |
+| **RNNoise** | дёшево по CPU, хорошо на стационарном шуме (фен, кулер) | плохо ловит транзиенты — клики мыши/клавы           |
+| **DTLN**    | заметно лучше на транзиентах, нейронка нового поколения | тяжелее, инициализация ~9 МБ, чуть выше латентность |
 
 Переключение горячее, через `RTCRtpSender.replaceTrack` — peer'ы не переподключаются.
 
