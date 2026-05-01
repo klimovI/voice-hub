@@ -150,7 +150,8 @@ func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Login page, its assets, and the favicon must be reachable without auth.
 		switch r.URL.Path {
-		case "/login.html", "/login.js", "/favicon.ico", "/favicon.png":
+		case "/login.html", "/login.js",
+			"/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png":
 			next.ServeHTTP(w, r)
 			return
 		}

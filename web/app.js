@@ -15,7 +15,7 @@ import { createSFUClient } from "./sfu-client.js";
 
   const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
   const ENGINES = ["off", "rnnoise", "dtln"];
-  const DEFAULT_ENGINE = "dtln";
+  const DEFAULT_ENGINE = "rnnoise";
 
   const DEFAULT_SEND_VOLUME = 100;
   const DEFAULT_OUTPUT_VOLUME = 50;
