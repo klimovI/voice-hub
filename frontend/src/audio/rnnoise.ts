@@ -17,6 +17,29 @@ interface RnnoiseState {
 
 // Lazy-loaded singleton.
 let cachedModule: RnnoiseModule | null = null;
+let cachedModulePromise: Promise<RnnoiseModule> | null = null;
+
+async function loadRnnoiseModule(): Promise<RnnoiseModule> {
+  if (cachedModule) return cachedModule;
+  if (!cachedModulePromise) {
+    cachedModulePromise = (async () => {
+      const mod = await import("/vendor/rnnoise/rnnoise.js");
+      cachedModule = await mod.Rnnoise.load();
+      return cachedModule;
+    })().catch((err: unknown) => {
+      cachedModulePromise = null;
+      throw err;
+    });
+  }
+  return cachedModulePromise;
+}
+
+// Fire-and-forget preload. Safe to call before user interaction; keeps the Join
+// flow snappy by shifting the ~250 KB rnnoise fetch + WASM init off the
+// critical path.
+export function preloadRnnoise(): void {
+  void loadRnnoiseModule().catch(() => undefined);
+}
 
 // Gate constants (must match app.js exactly).
 const GATE_OPEN_VAD = 0.55;
@@ -53,13 +76,9 @@ export async function createRnnoiseProcessor(
   }
 
   try {
-    if (!cachedModule) {
-      const mod = await import("/vendor/rnnoise/rnnoise.js");
-      cachedModule = await mod.Rnnoise.load();
-    }
-
-    graphState.rnnoiseState = cachedModule.createDenoiseState();
-    graphState.rnnoiseFrameSize = cachedModule.frameSize;
+    const mod = await loadRnnoiseModule();
+    graphState.rnnoiseState = mod.createDenoiseState();
+    graphState.rnnoiseFrameSize = mod.frameSize;
     graphState.rnnoiseInputRemainder = new Float32Array(0);
     graphState.rnnoiseOutputRemainder = new Float32Array(0);
     graphState.gateEnv = 1;

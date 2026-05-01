@@ -7,6 +7,7 @@ import { useGlobalShortcut } from "./hooks/useShortcut";
 import { loadAppConfig, buildWsUrl } from "./config";
 import { clearLegacyStorage } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
+import { preloadRnnoise } from "./audio/rnnoise";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
 
@@ -43,6 +44,11 @@ export function App() {
       .catch((err: unknown) => {
         store.setStatus(err instanceof Error ? err.message : String(err), true);
       });
+    // Warm up RNNoise (default engine) while user enters their name —
+    // shifts wasm fetch + init off the Join critical path.
+    if (useStore.getState().engine === "rnnoise") {
+      preloadRnnoise();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
