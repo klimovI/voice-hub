@@ -5,8 +5,6 @@
 ## Open
 
 1. **Обрываются слова** — речь рвётся, теряются окончания/начала слов. Случается редко.
-2. **Индикатор говорящего** — UI-индикатор, кто из участников сейчас говорит.
-3. **Долгий `Запрашиваю микрофон…`** — статус иногда висит долго на старте join. Возможные причины: медленная инициализация WASM (DTLN/RNNoise preload), задержка `navigator.mediaDevices.getUserMedia` от ОС, прогрев `AudioContext.resume()`. Нужно профилировать `prepareLocalAudio` (`frontend/src/hooks/useAudioEngine.ts`).
 
 ## In Progress
 
@@ -16,6 +14,13 @@
 
 ## Done
 
+- **Индикатор говорящего** (`frontend/src/audio/remote.ts`, `frontend/src/hooks/useAudioEngine.ts`): per-participant `AnalyserNode` + единый rAF-цикл с 250ms hold; обновляет `participants[id].speaking` при пересечении RMS-порога. UI уже подсвечивал `speaking`, нужна была только проводка для remote.
+- **Долгий `Запрашиваю микрофон…`** — основная причина: cold-cache fetch `/vendor/rnnoise/rnnoise.js` (4.83MB raw / ~420KB gzip). Меры:
+  - `Cache-Control: public, max-age=31536000, immutable` для `/vendor/*` (`deploy/Caddyfile`) — повторные визиты бесплатны.
+  - `<link rel="modulepreload" href="/vendor/rnnoise/rnnoise.js">` (`frontend/index.html`) — fetch стартует параллельно с main bundle.
+  - `getUserMedia` теперь идёт параллельно с `new AudioContext` + `resume()` (`useAudioEngine.prepareLocalAudio`).
+  - `preloadEngine()` вызывается на mount и в `handleEngineSelect`, не только для RNNoise.
+  - Промежуточный статус `Загрузка шумоподавителя…` после готовности микрофона, чтобы пользователь видел что ждёт именно WASM, не мик.
 - **Вылет через ~10 мин** (`backend/internal/turn/turn.go`): причина — pion/turn дефолтит `AllocationLifetime`/`ChannelBindTimeout`/`PermissionTimeout` в 10 минут. Бамп на 8 часов.
 - **Потрескивания — фаза 2** (`frontend/src/audio/remote.ts`): на remote-стороне стоял brick-wall лимитер DynamicsCompressor (`threshold=-1, knee=0, ratio=20, attack=1ms, release=50ms`). Web Audio compressor с 1мс атакой и hard knee даёт IM-искажения на транзиентах речи. Смягчили до `-6/6/8/5ms/100ms`.
 - **Авто-переподключение фронта** (`frontend/src/App.tsx`): при `failed`/`closed` PC/WS — backoff-реконнект (1, 2, 4, 8, 15, 30, 30 s, 7 попыток); сохраняем mic graph (без повторного getUserMedia); чистим remote-аудио и participants перед каждой попыткой; ручной leave прерывает реконнект.
