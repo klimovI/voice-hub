@@ -17,6 +17,8 @@ import {
   teardownParticipantAudio,
   applyParticipantGain,
   closeRemoteAudioContext,
+  startRemoteSpeakingLoop,
+  stopRemoteSpeakingLoop,
   type RemoteParticipantAudio,
 } from "../audio/remote";
 
@@ -149,6 +151,15 @@ export function useAudioEngine() {
       const audio = setupParticipantAudio(stream);
       r.remoteAudio.set(participantId, audio);
       applyAllRemoteGains();
+      startRemoteSpeakingLoop(
+        () => refs.current.remoteAudio,
+        (id, speaking) => {
+          const current = useStore.getState().participants.get(id);
+          if (current && current.speaking !== speaking) {
+            useStore.getState().updateParticipant(id, { speaking });
+          }
+        },
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -180,6 +191,7 @@ export function useAudioEngine() {
 
   const cleanupAllRemote = useCallback(() => {
     const r = refs.current;
+    stopRemoteSpeakingLoop();
     for (const audio of r.remoteAudio.values()) {
       teardownParticipantAudio(audio);
     }

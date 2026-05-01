@@ -2,12 +2,20 @@
 // <audio> element is muted and used only to keep the stream alive.
 // Volume can exceed 100% (WebAudio gain).
 
+import { detectLevel, SPEAKING_THRESHOLD } from "./level-detect";
+
 export interface RemoteParticipantAudio {
   audioEl: HTMLAudioElement;
   gainNode: GainNode;
   limiterNode: DynamicsCompressorNode;
   sourceNode: MediaStreamAudioSourceNode | null;
+  analyser: AnalyserNode;
+  monitorData: Uint8Array<ArrayBuffer>;
+  speaking: boolean;
+  speakingHoldUntil: number;
 }
+
+const SPEAKING_HOLD_MS = 250;
 
 let remoteAudioContext: AudioContext | null = null;
 
@@ -49,15 +57,30 @@ export function setupParticipantAudio(stream: MediaStream): RemoteParticipantAud
   gainNode.connect(limiterNode);
   limiterNode.connect(ctx.destination);
 
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0;
+  const monitorData = new Uint8Array(analyser.fftSize) as Uint8Array<ArrayBuffer>;
+
   let sourceNode: MediaStreamAudioSourceNode | null = null;
   try {
     sourceNode = ctx.createMediaStreamSource(stream);
     sourceNode.connect(gainNode);
+    sourceNode.connect(analyser);
   } catch {
     sourceNode = null;
   }
 
-  return { audioEl, gainNode, limiterNode, sourceNode };
+  return {
+    audioEl,
+    gainNode,
+    limiterNode,
+    sourceNode,
+    analyser,
+    monitorData,
+    speaking: false,
+    speakingHoldUntil: 0,
+  };
 }
 
 export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
@@ -76,8 +99,46 @@ export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
   } catch {
     /* ignore */
   }
+  try {
+    audio.analyser.disconnect();
+  } catch {
+    /* ignore */
+  }
   audio.audioEl.pause();
   audio.audioEl.srcObject = null;
+}
+
+let remoteSpeakingFrameId: number | null = null;
+
+export function startRemoteSpeakingLoop(
+  getMap: () => Map<string, RemoteParticipantAudio>,
+  onChange: (participantId: string, speaking: boolean) => void,
+): void {
+  if (remoteSpeakingFrameId !== null) return;
+  const tick = () => {
+    const now = performance.now();
+    const map = getMap();
+    for (const [id, audio] of map) {
+      const level = detectLevel(audio.analyser, audio.monitorData);
+      if (level > SPEAKING_THRESHOLD) {
+        audio.speakingHoldUntil = now + SPEAKING_HOLD_MS;
+      }
+      const speakingNow = audio.speakingHoldUntil > now;
+      if (speakingNow !== audio.speaking) {
+        audio.speaking = speakingNow;
+        onChange(id, speakingNow);
+      }
+    }
+    remoteSpeakingFrameId = requestAnimationFrame(tick);
+  };
+  remoteSpeakingFrameId = requestAnimationFrame(tick);
+}
+
+export function stopRemoteSpeakingLoop(): void {
+  if (remoteSpeakingFrameId !== null) {
+    cancelAnimationFrame(remoteSpeakingFrameId);
+    remoteSpeakingFrameId = null;
+  }
 }
 
 export function applyParticipantGain(
