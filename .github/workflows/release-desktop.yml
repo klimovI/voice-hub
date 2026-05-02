@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -50,6 +51,41 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build changelog
+        id: changelog
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          PREV=$(git tag --sort=-v:refname | grep -v "^${TAG}\$" | head -1 || true)
+          if [ -z "$PREV" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV}..HEAD"
+          fi
+
+          LOG=$(git log --no-merges --format='%s' $RANGE \
+            | grep -vE '^chore\(desktop\): bump' \
+            | grep -vE '\[skip ci\]' || true)
+
+          feats=$(echo "$LOG"  | grep -E  '^feat[!(:]'        | sed 's/^/- /' || true)
+          fixes=$(echo "$LOG"  | grep -E  '^(fix|perf)[!(:]'  | sed 's/^/- /' || true)
+          others=$(echo "$LOG" | grep -vE '^(feat|fix|perf)[!(:]' | sed 's/^/- /' || true)
+
+          {
+            echo 'body<<CHANGELOG_EOF'
+            if [ -n "$feats"  ]; then echo '## Features';    echo "$feats";  echo; fi
+            if [ -n "$fixes"  ]; then echo '## Fixes';       echo "$fixes";  echo; fi
+            if [ -n "$others" ]; then echo '## Other';       echo "$others"; echo; fi
+            if [ -n "$PREV" ]; then
+              echo "**Full changelog**: https://github.com/${REPO}/compare/${PREV}...${TAG}"
+            fi
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Inject hostname into IPC capability
         shell: bash
         env:
@@ -71,6 +107,7 @@ jobs:
           projectPath: src-tauri
           tagName: ${{ steps.tag.outputs.tag }}
           releaseName: ${{ steps.tag.outputs.tag }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
