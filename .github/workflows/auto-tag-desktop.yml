@@ -53,6 +53,23 @@ jobs:
           jq --arg v "$NEW" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
           mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
           sed -i -E "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$NEW\"/}" src-tauri/Cargo.toml
+          sed -i -E '/^name = "voice-hub-desktop"$/{n;s/^version = ".*"/version = "'"$NEW"'"/}' src-tauri/Cargo.lock
+
+      - name: Verify version consistency
+        env:
+          EXPECTED: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          TOML_JSON=$(jq -r '.version' src-tauri/tauri.conf.json)
+          TOML_CARGO=$(grep -m1 -E '^version = ' src-tauri/Cargo.toml | sed -E 's/^version = "(.*)"$/\1/')
+          LOCK=$(awk '/^name = "voice-hub-desktop"$/{getline; sub(/^version = "/, ""); sub(/"$/, ""); print; exit}' src-tauri/Cargo.lock)
+          if [ "$TOML_JSON" != "$EXPECTED" ] || [ "$TOML_CARGO" != "$EXPECTED" ] || [ "$LOCK" != "$EXPECTED" ]; then
+            echo "ERROR: version mismatch (expected $EXPECTED)" >&2
+            echo "  tauri.conf.json: $TOML_JSON" >&2
+            echo "  Cargo.toml:      $TOML_CARGO" >&2
+            echo "  Cargo.lock:      $LOCK" >&2
+            exit 1
+          fi
 
       - name: Verify tag does not exist
         env:
@@ -75,7 +92,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$MODE" = "bump" ]; then
-            git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
+            git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
             git commit -m "chore(desktop): bump $CURRENT → $NEW"
             git push origin master
           fi

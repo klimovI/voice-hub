@@ -31,7 +31,9 @@ cargo install tauri-cli --version "^2" --locked   # если ещё нет
 cargo tauri signer generate -w ~/.tauri/voice-hub.key
 ```
 
-Команда спросит password — задай и сохрани в менеджер паролей. Получишь два файла:
+Когда команда спросит password — оставь пустым (просто Enter). CI использует
+только `TAURI_SIGNING_PRIVATE_KEY`; если ключ зашифрован паролем, сборка упадёт
+на этапе подписи. Получишь два файла:
 - `~/.tauri/voice-hub.key` — приватный ключ (СЕКРЕТ)
 - `~/.tauri/voice-hub.key.pub` — публичный ключ
 
