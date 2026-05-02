@@ -20,7 +20,6 @@ pub struct ListenerState {
     pub mode: Mode,
     pub pressed: HashSet<Key>,
     pub last_fire: Option<Instant>,
-    pub pending: Option<InputBinding>,
 }
 
 impl ListenerState {
@@ -30,7 +29,6 @@ impl ListenerState {
             mode: Mode::Normal,
             pressed: HashSet::new(),
             last_fire: None,
-            pending: None,
         }
     }
 }
@@ -153,10 +151,8 @@ fn matches_mouse(current: Option<&InputBinding>, btn: &Button) -> bool {
 
 // ---- Capturing mode ----
 
-// Keyboard capture is incremental: each non-modifier press updates `pending`
-// and emits live preview. Final commit happens when frontend invokes
-// `stop_capture`. Mouse capture commits immediately (no way to click "Stop"
-// without generating another mouse event).
+// Both keyboard and mouse commit immediately on first non-modifier press.
+// Modifier-only combos cannot be bound (avoids accidental fires).
 
 fn try_capture_keyboard(state: &mut ListenerState, app: &AppHandle, k: Key) {
     if is_modifier(&k) {
@@ -181,9 +177,7 @@ fn try_capture_keyboard(state: &mut ListenerState, app: &AppHandle, k: Key) {
     }
     keys.push(label);
 
-    let binding = InputBinding::Keyboard { keys };
-    state.pending = Some(binding.clone());
-    let _ = app.emit("capture-progress", binding);
+    finalize_capture(state, app, InputBinding::Keyboard { keys });
 }
 
 fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
@@ -199,7 +193,6 @@ pub fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: Inp
         eprintln!("save shortcut: {err}");
     }
     state.current = Some(binding.clone());
-    state.pending = None;
     state.pressed.clear();
     state.mode = Mode::Normal;
     state.last_fire = Some(Instant::now()); // suppress retrigger from same press

@@ -2,15 +2,6 @@
 
 export type EngineKind = "off" | "rnnoise" | "dtln";
 
-export interface Shortcut {
-  code: string;
-  key: string;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
-  metaKey: boolean;
-}
-
 export interface AppConfig {
   iceServers: RTCIceServer[];
 }

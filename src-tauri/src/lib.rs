@@ -1,7 +1,6 @@
 mod commands;
 mod listener;
 mod shortcut;
-mod tray;
 mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +24,6 @@ pub fn run() {
             commands::set_shortcut,
             commands::clear_shortcut,
             commands::start_capture,
-            commands::stop_capture,
             commands::cancel_capture,
             updater::check_for_update,
             updater::apply_update,
@@ -60,8 +58,6 @@ pub fn run() {
                 .min_inner_size(1100.0, 760.0)
                 .resizable(true)
                 .build()?;
-
-            tray::init(app)?;
 
             let handle = app.handle().clone();
 

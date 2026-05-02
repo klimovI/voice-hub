@@ -2,12 +2,12 @@
 // Audio nodes are NOT stored here — they live in imperative refs inside useAudioEngine.
 
 import { create } from "zustand";
-import type { EngineKind, ParticipantUI, Shortcut } from "../types";
+import type { EngineKind, ParticipantUI } from "../types";
+import type { InputBinding } from "../utils/binding";
+import { loadBinding } from "../utils/binding";
 import { loadBoolean, loadNumber, loadPercentage } from "../utils/storage";
-import { loadShortcut } from "../utils/shortcut";
 
 const STORAGE_KEYS = {
-  shortcut: "voice-hub.shortcut",
   outputVolume: "voice-hub.output-volume",
   outputMuted: "voice-hub.output-muted",
   sendVolume: "voice-hub.send-volume",
@@ -55,8 +55,8 @@ export interface AppState {
   setEngine: (e: EngineKind) => void;
 
   // Shortcut
-  shortcut: Shortcut;
-  setShortcut: (s: Shortcut) => void;
+  shortcut: InputBinding | null;
+  setShortcut: (s: InputBinding | null) => void;
   capturingShortcut: boolean;
   setCapturingShortcut: (v: boolean) => void;
 
@@ -121,7 +121,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Shortcut
-  shortcut: loadShortcut(),
+  shortcut: loadBinding(),
   setShortcut: (s) => set({ shortcut: s }),
   capturingShortcut: false,
   setCapturingShortcut: (v) => set({ capturingShortcut: v }),

@@ -1,128 +1,171 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store/useStore";
 import {
-  defaultShortcut,
-  formatShortcut,
-  persistShortcut,
-  isModifierOnly,
-} from "../utils/shortcut";
-import {
+  bindingFromKeyboardEvent,
   defaultBinding,
   formatBinding,
+  isModifierOnly,
+  saveBinding,
   type InputBinding,
 } from "../utils/binding";
 import { isTauri } from "../utils/tauri";
-import type { Shortcut } from "../types";
 
 interface Props {
   onStatusMessage: (msg: string) => void;
 }
 
-export function HotkeyCard({ onStatusMessage }: Props) {
-  if (isTauri()) return <TauriHotkeyCard onStatusMessage={onStatusMessage} />;
-  return <WebHotkeyCard onStatusMessage={onStatusMessage} />;
+interface HotkeyApi {
+  binding: InputBinding | null;
+  capturing: boolean;
+  start: () => void;
+  cancel: () => void;
+  clear: () => void;
+  reset: () => void;
+  // Web only — keyboard capture lives in the input element.
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
-// ---- Web (browser) path: existing in-window keydown capture ----
+export function HotkeyCard({ onStatusMessage }: Props) {
+  return isTauri() ? (
+    <TauriCard onStatusMessage={onStatusMessage} />
+  ) : (
+    <WebCard onStatusMessage={onStatusMessage} />
+  );
+}
 
-function WebHotkeyCard({ onStatusMessage }: Props) {
-  const shortcut = useStore((s) => s.shortcut);
-  const setShortcut = useStore((s) => s.setShortcut);
-  const capturingShortcut = useStore((s) => s.capturingShortcut);
-  const setCapturingShortcut = useStore((s) => s.setCapturingShortcut);
-  const inputRef = useRef<HTMLInputElement>(null);
+function WebCard({ onStatusMessage }: Props) {
+  const api = useWebHotkey(onStatusMessage);
+  return <CardView api={api} />;
+}
 
-  function armCapture() {
-    setCapturingShortcut(true);
-    if (inputRef.current) inputRef.current.value = "Press shortcut...";
-  }
+function TauriCard({ onStatusMessage }: Props) {
+  const api = useTauriHotkey(onStatusMessage);
+  return <CardView api={api} />;
+}
 
-  function cancelCapture() {
-    setCapturingShortcut(false);
-    if (inputRef.current) inputRef.current.value = formatShortcut(shortcut);
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    e.preventDefault();
-    if (e.key === "Escape") {
-      cancelCapture();
-      return;
-    }
-    if (e.key === "Backspace" || e.key === "Delete") {
-      const def = defaultShortcut();
-      setShortcut(def);
-      persistShortcut(def);
-      cancelCapture();
-      return;
-    }
-    if (isModifierOnly(e.nativeEvent)) return;
-
-    const newShortcut: Shortcut = {
-      code: e.code,
-      key: e.key,
-      ctrlKey: e.ctrlKey,
-      shiftKey: e.shiftKey,
-      altKey: e.altKey,
-      metaKey: e.metaKey,
-    };
-    setShortcut(newShortcut);
-    persistShortcut(newShortcut);
-    cancelCapture();
-    onStatusMessage(`Горячая клавиша: ${formatShortcut(newShortcut)}`);
-  }
-
-  function handleReset() {
-    const def = defaultShortcut();
-    setShortcut(def);
-    persistShortcut(def);
-    if (inputRef.current) inputRef.current.value = formatShortcut(def);
-    onStatusMessage(`Горячая клавиша сброшена: ${formatShortcut(def)}`);
-  }
-
-  const displayValue = capturingShortcut ? "Press shortcut..." : formatShortcut(shortcut);
+function CardView({ api }: { api: HotkeyApi }) {
+  const display = api.capturing ? "Press a combo…" : formatBinding(api.binding);
 
   return (
-    <CardShell hint="Toggle mute">
+    <section className="card grid gap-[14px]">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <h2 className="card-title">Hotkey</h2>
+        <span className="card-hint">Toggle mute</span>
+      </div>
       <label className="block text-[12px] font-medium text-muted">
         Click input, then press a combo
-        <input
-          id="shortcut-input"
-          ref={inputRef}
-          type="text"
-          readOnly
-          defaultValue={displayValue}
-          onFocus={armCapture}
-          onClick={armCapture}
-          onBlur={cancelCapture}
-          onKeyDown={handleKeyDown}
-          className="input-field cursor-pointer"
-        />
+        <div className="relative">
+          <input
+            id="shortcut-input"
+            type="text"
+            readOnly
+            value={display}
+            onClick={api.start}
+            onBlur={api.cancel}
+            onKeyDown={api.onKeyDown}
+            className="input-field cursor-pointer pr-9"
+          />
+          {api.binding && !api.capturing ? (
+            <button
+              id="shortcut-clear"
+              type="button"
+              aria-label="Clear binding"
+              title="Clear"
+              onMouseDown={(e) => {
+                // Prevent input blur from cancelling before click fires.
+                e.preventDefault();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                api.clear();
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded text-muted hover:text-fg hover:bg-white/10 flex items-center justify-center"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       </label>
       <div className="flex flex-wrap gap-2.5">
         <button
           id="shortcut-reset"
           type="button"
-          onClick={handleReset}
+          onClick={api.reset}
+          disabled={api.capturing}
           className="btn btn-secondary btn-mini"
         >
           Reset to default
         </button>
       </div>
-    </CardShell>
+    </section>
   );
 }
 
-// ---- Tauri (desktop) path: rdev-based global capture ----
+// ---- Web (browser) ----
 
-function TauriHotkeyCard({ onStatusMessage }: Props) {
-  // null until first get_shortcut resolves (or user cleared).
-  const [binding, setBinding] = useState<InputBinding | null>(() => defaultBinding());
-  const [pending, setPending] = useState<InputBinding | null>(null);
+function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
+  const binding = useStore((s) => s.shortcut);
+  const setShortcut = useStore((s) => s.setShortcut);
+  const capturing = useStore((s) => s.capturingShortcut);
+  const setCapturing = useStore((s) => s.setCapturingShortcut);
+
+  const start = useCallback(() => {
+    if (!capturing) setCapturing(true);
+  }, [capturing, setCapturing]);
+
+  const cancel = useCallback(() => {
+    if (capturing) setCapturing(false);
+  }, [capturing, setCapturing]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!capturing) return;
+      e.preventDefault();
+      if (e.key === "Escape") {
+        setCapturing(false);
+        return;
+      }
+      if (isModifierOnly(e.nativeEvent)) return;
+
+      const next = bindingFromKeyboardEvent(e.nativeEvent);
+      if (!next) return;
+      setShortcut(next);
+      saveBinding(next);
+      setCapturing(false);
+      onStatusMessage(`Hotkey: ${formatBinding(next)}`);
+    },
+    [capturing, setCapturing, setShortcut, onStatusMessage],
+  );
+
+  const clear = useCallback(() => {
+    setShortcut(null);
+    saveBinding(null);
+    onStatusMessage("Hotkey cleared");
+  }, [setShortcut, onStatusMessage]);
+
+  const reset = useCallback(() => {
+    const def = defaultBinding();
+    setShortcut(def);
+    saveBinding(def);
+    onStatusMessage(`Hotkey reset: ${formatBinding(def)}`);
+  }, [setShortcut, onStatusMessage]);
+
+  return { binding, capturing, start, cancel, clear, reset, onKeyDown };
+}
+
+// ---- Tauri (desktop) ----
+
+function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
+  const [binding, setBinding] = useState<InputBinding | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const capturingRef = useRef(false);
 
   useEffect(() => {
-    let unlistenCaptured: (() => void) | undefined;
-    let unlistenProgress: (() => void) | undefined;
+    capturingRef.current = capturing;
+  }, [capturing]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
     let cancelled = false;
 
     void (async () => {
@@ -138,35 +181,25 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
         console.error("get_shortcut failed", err);
       }
 
-      const offCaptured = await listen<InputBinding>("input-captured", (event) => {
+      const off = await listen<InputBinding>("input-captured", (event) => {
         setBinding(event.payload);
-        setPending(null);
         setCapturing(false);
-        onStatusMessage(`Горячая клавиша: ${formatBinding(event.payload)}`);
-      });
-      const offProgress = await listen<InputBinding>("capture-progress", (event) => {
-        setPending(event.payload);
+        onStatusMessage(`Hotkey: ${formatBinding(event.payload)}`);
       });
 
-      if (cancelled) {
-        offCaptured();
-        offProgress();
-      } else {
-        unlistenCaptured = offCaptured;
-        unlistenProgress = offProgress;
-      }
+      if (cancelled) off();
+      else unlisten = off;
     })();
 
     return () => {
       cancelled = true;
-      unlistenCaptured?.();
-      unlistenProgress?.();
+      unlisten?.();
     };
   }, [onStatusMessage]);
 
-  const cancelCapture = useCallback(async () => {
+  const cancel = useCallback(async () => {
+    if (!capturingRef.current) return;
     setCapturing(false);
-    setPending(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("cancel_capture");
@@ -175,23 +208,21 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
     }
   }, []);
 
-  // Esc cancels capture without commit. Window-level listener so the user
-  // doesn't need an input focused.
+  // Esc cancels even when input loses focus.
   useEffect(() => {
     if (!capturing) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        void cancelCapture();
+        void cancel();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [capturing, cancelCapture]);
+  }, [capturing, cancel]);
 
-  async function startRecording() {
-    if (capturing) return;
-    setPending(null);
+  const start = useCallback(async () => {
+    if (capturingRef.current) return;
     setCapturing(true);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -200,121 +231,30 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
       console.error("start_capture failed", err);
       setCapturing(false);
     }
-  }
+  }, []);
 
-  async function stopRecording() {
+  const clear = useCallback(async () => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("stop_capture");
+      await invoke("clear_shortcut");
+      setBinding(null);
+      onStatusMessage("Hotkey cleared");
     } catch (err) {
-      console.error("stop_capture failed", err);
+      console.error("clear_shortcut failed", err);
     }
-    // If pending was empty, backend just exits Capturing without emitting
-    // input-captured — sync UI state manually.
-    if (!pending) {
-      setCapturing(false);
-    }
-  }
+  }, [onStatusMessage]);
 
-  async function handleReset() {
+  const reset = useCallback(async () => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const def = defaultBinding();
       await invoke("set_shortcut", { binding: def });
       setBinding(def);
-      onStatusMessage(`Горячая клавиша сброшена: ${formatBinding(def)}`);
+      onStatusMessage(`Hotkey reset: ${formatBinding(def)}`);
     } catch (err) {
       console.error("set_shortcut failed", err);
     }
-  }
+  }, [onStatusMessage]);
 
-  async function handleClear() {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("clear_shortcut");
-      setBinding(null);
-      onStatusMessage("Горячая клавиша удалена");
-    } catch (err) {
-      console.error("clear_shortcut failed", err);
-    }
-  }
-
-  const displayValue = capturing
-    ? pending
-      ? formatBinding(pending)
-      : "Нажмите клавишу или кнопку мыши..."
-    : formatBinding(binding);
-
-  return (
-    <CardShell hint="Global mute toggle">
-      <label className="block text-[12px] font-medium text-muted">
-        Current binding
-        <input
-          id="shortcut-input"
-          type="text"
-          readOnly
-          value={displayValue}
-          onChange={() => {
-            /* controlled */
-          }}
-          className="input-field"
-        />
-      </label>
-      <p className="text-[11px] text-muted leading-tight">
-        Click <b>Record</b>, press any combo, then click <b>Stop</b>. Mouse buttons commit
-        instantly. Esc cancels.
-      </p>
-      <div className="flex flex-wrap gap-2.5">
-        {capturing ? (
-          <button
-            id="shortcut-stop"
-            type="button"
-            onClick={stopRecording}
-            className="btn btn-primary btn-mini"
-          >
-            Stop Recording
-          </button>
-        ) : (
-          <button
-            id="shortcut-record"
-            type="button"
-            onClick={startRecording}
-            className="btn btn-primary btn-mini"
-          >
-            Record Keybind
-          </button>
-        )}
-        <button
-          id="shortcut-clear"
-          type="button"
-          onClick={handleClear}
-          disabled={capturing || !binding}
-          className="btn btn-secondary btn-mini"
-        >
-          Clear
-        </button>
-        <button
-          id="shortcut-reset"
-          type="button"
-          onClick={handleReset}
-          disabled={capturing}
-          className="btn btn-secondary btn-mini"
-        >
-          Reset to default
-        </button>
-      </div>
-    </CardShell>
-  );
-}
-
-function CardShell({ hint, children }: { hint: string; children: React.ReactNode }) {
-  return (
-    <section className="card grid gap-[14px]">
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <h2 className="card-title">Hotkey</h2>
-        <span className="card-hint">{hint}</span>
-      </div>
-      {children}
-    </section>
-  );
+  return { binding, capturing, start, cancel, clear, reset };
 }

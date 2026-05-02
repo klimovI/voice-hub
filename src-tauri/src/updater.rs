@@ -1,10 +1,13 @@
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+use crate::QuitFlag;
 
 const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
@@ -147,25 +150,35 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(app.default_window_icon().cloned().expect("default icon"))
         .tooltip("Voice Hub")
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
             }
         })
         .build(app)?;
     Ok(())
 }
 
+fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn base_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Открыть Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Проверить обновления", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
+    let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Выход", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
     MenuBuilder::new(app)
         .item(&show)
         .item(&check)
@@ -175,13 +188,13 @@ fn base_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 }
 
 fn update_tray_for_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
-    let label = format!("Установить v{version}");
+    let label = format!("Install v{version}");
     let apply = MenuItem::with_id(app, ITEM_UPDATE, &label, true, None::<&str>)?;
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Открыть Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Проверить обновления", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
+    let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Выход", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
         .item(&apply)
         .item(&sep1)
@@ -193,20 +206,14 @@ fn update_tray_for_available(app: &AppHandle, version: &str) -> tauri::Result<()
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
-        tray.set_tooltip(Some(format!("Voice Hub — доступна v{version}")))?;
+        tray.set_tooltip(Some(format!("Voice Hub — v{version} available")))?;
     }
     Ok(())
 }
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id.as_ref() {
-        ITEM_SHOW => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-        }
+        ITEM_SHOW => show_main(app),
         ITEM_CHECK => {
             let h = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -222,6 +229,9 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             });
         }
         ITEM_QUIT => {
+            if let Some(flag) = app.try_state::<QuitFlag>() {
+                flag.0.store(true, Ordering::SeqCst);
+            }
             app.exit(0);
         }
         _ => {}

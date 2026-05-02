@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store/useStore";
-import { matchesShortcut } from "../utils/shortcut";
+import { matchesBinding } from "../utils/binding";
 import { isTauri } from "../utils/tauri";
 
 // In-window keydown listener for the mute toggle.
@@ -14,10 +14,11 @@ export function useGlobalShortcut(onTrigger: () => void): void {
 
   useEffect(() => {
     if (isTauri()) return;
+    if (!shortcut) return;
     const handler = (event: KeyboardEvent) => {
       if (event.repeat || capturingShortcut) return;
       if (joinState !== "joined") return;
-      if (!matchesShortcut(event, shortcut)) return;
+      if (!matchesBinding(event, shortcut)) return;
       event.preventDefault();
       onTrigger();
     };
