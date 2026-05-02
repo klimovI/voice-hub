@@ -10,27 +10,24 @@ type Config struct {
 	WebDir           string
 	AppHostname      string
 	PublicIP         string
-	TurnSharedSecret string
 	TurnRealm        string
-	AuthUser         string
-	AuthPassword     string
-	SessionSecret    []byte
+	AdminPassword    string
 	CookieSecure     bool
+	// Populated by main from disk after Load(); not env-backed.
+	SessionSecret    []byte
+	TurnSharedSecret string
 }
 
 func Load() Config {
 	hostname := env("APP_HOSTNAME", "localhost")
 	return Config{
-		Addr:             env("APP_ADDR", ":8080"),
-		WebDir:           env("WEB_DIR", "../frontend/dist"),
-		AppHostname:      hostname,
-		PublicIP:         os.Getenv("PUBLIC_IP"),
-		TurnSharedSecret: os.Getenv("TURN_SHARED_SECRET"),
-		TurnRealm:        env("TURN_REALM", hostname),
-		AuthUser:         os.Getenv("APP_AUTH_USER"),
-		AuthPassword:     os.Getenv("APP_AUTH_PASSWORD"),
-		SessionSecret:    []byte(os.Getenv("APP_SESSION_SECRET")),
-		CookieSecure:     envBool("APP_COOKIE_SECURE", true),
+		Addr:          env("APP_ADDR", ":8080"),
+		WebDir:        env("WEB_DIR", "../frontend/dist"),
+		AppHostname:   hostname,
+		PublicIP:      os.Getenv("PUBLIC_IP"),
+		TurnRealm:     env("TURN_REALM", hostname),
+		AdminPassword: os.Getenv("APP_ADMIN_PASSWORD"),
+		CookieSecure:  envBool("APP_COOKIE_SECURE", true),
 	}
 }
 

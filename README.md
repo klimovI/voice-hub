@@ -25,7 +25,7 @@ NSIS-установщик: ярлыки в "Пуске", запись в "Progra
 docker compose up -d --build
 ```
 
-Открыть `http://localhost:8080`, зайти как `dev` / `dev` (login-форма; переопредели через `APP_AUTH_USER` / `APP_AUTH_PASSWORD` в `docker-compose.yml`). Стоп: `docker compose down`. Логи: `docker compose logs -f app`.
+Открыть `http://localhost:8080`, зайти паролем `dev` (admin; переопредели через `APP_ADMIN_PASSWORD` в `docker-compose.yml`). После входа: шестерёнка-ключ в правом верхнем углу → **Создать пароль** — это и есть «connection password» для остальных пользователей. Стоп: `docker compose down`. Логи: `docker compose logs -f app`.
 
 ### Разработка фронта (бэк в докере, фронт локально с HMR)
 

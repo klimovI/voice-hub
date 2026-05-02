@@ -12,14 +12,24 @@ import (
 
 const CookieName = "vh_session"
 
+// Role identifies the privilege level encoded in the session cookie.
+type Role string
+
+const (
+	RoleAdmin Role = "admin"
+	RoleUser  Role = "user"
+)
+
 type Session struct {
-	User    string
-	Expires time.Time
+	Role       Role
+	Generation uint64 // ConnPass generation at issue time; user sessions are invalidated when this drifts.
+	Expires    time.Time
 }
 
-func Encode(secret []byte, user string, ttl time.Duration) string {
+// Encode serializes a session as "<exp>:<role>:<gen>.<sig>".
+func Encode(secret []byte, role Role, gen uint64, ttl time.Duration) string {
 	exp := time.Now().Add(ttl).Unix()
-	payload := strconv.FormatInt(exp, 10) + ":" + user
+	payload := strconv.FormatInt(exp, 10) + ":" + string(role) + ":" + strconv.FormatUint(gen, 10)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
@@ -38,17 +48,25 @@ func Decode(secret []byte, value string) (Session, error) {
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return Session{}, errors.New("bad signature")
 	}
-	expStr, user, ok := strings.Cut(payload, ":")
-	if !ok {
+	parts := strings.SplitN(payload, ":", 3)
+	if len(parts) != 3 {
 		return Session{}, errors.New("malformed payload")
 	}
-	expUnix, err := strconv.ParseInt(expStr, 10, 64)
+	expUnix, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return Session{}, errors.New("bad expiry")
+	}
+	role := Role(parts[1])
+	if role != RoleAdmin && role != RoleUser {
+		return Session{}, errors.New("bad role")
+	}
+	gen, err := strconv.ParseUint(parts[2], 10, 64)
+	if err != nil {
+		return Session{}, errors.New("bad generation")
 	}
 	expires := time.Unix(expUnix, 0)
 	if time.Now().After(expires) {
 		return Session{}, errors.New("expired")
 	}
-	return Session{User: user, Expires: expires}, nil
+	return Session{Role: role, Generation: gen, Expires: expires}, nil
 }

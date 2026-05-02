@@ -26,16 +26,15 @@ services:
       WEB_DIR: "/app/web"
       APP_HOSTNAME: "${APP_HOSTNAME:?APP_HOSTNAME is required}"
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
-      TURN_SHARED_SECRET: "${TURN_SHARED_SECRET:?TURN_SHARED_SECRET is required}"
-      APP_AUTH_USER: "${APP_AUTH_USER:?APP_AUTH_USER is required}"
-      APP_AUTH_PASSWORD: "${APP_AUTH_PASSWORD:?APP_AUTH_PASSWORD is required}"
-      APP_SESSION_SECRET: "${APP_SESSION_SECRET:?APP_SESSION_SECRET is required (>=16 bytes random)}"
+      APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
     expose:
       - "8080"
     ports:
       - "3478:3478/udp"
       - "10000-10100:10000-10100/udp"
       - "49160-49200:49160-49200/udp"
+    volumes:
+      - app_data:/app/data
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -51,3 +50,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  app_data:

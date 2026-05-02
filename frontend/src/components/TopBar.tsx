@@ -1,3 +1,4 @@
+import { AdminKeyButton } from "./AdminKeyButton";
 import { StatusPill } from "./StatusPill";
 
 export function TopBar() {
@@ -14,7 +15,10 @@ export function TopBar() {
           <div className="text-[12px] font-medium text-muted">Low-latency voice over WebRTC</div>
         </div>
       </div>
-      <StatusPill />
+      <div className="flex items-center gap-2">
+        <StatusPill />
+        <AdminKeyButton />
+      </div>
     </header>
   );
 }

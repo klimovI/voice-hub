@@ -38,10 +38,18 @@ type iceServer struct {
 
 type appConfigResponse struct {
 	ICEServers []iceServer `json:"iceServers"`
+	Role       string      `json:"role"`
 }
 
 type versionResponse struct {
 	Version string `json:"version"`
+}
+
+type rotateResponse struct {
+	Host       string    `json:"host"`
+	Password   string    `json:"password"`
+	Generation uint64    `json:"generation"`
+	RotatedAt  time.Time `json:"rotated_at"`
 }
 
 // frontendVersion fingerprints the deployed frontend by hashing index.html.
@@ -60,11 +68,28 @@ func frontendVersion(webDir string) string {
 func main() {
 	cfg := config.Load()
 
-	if cfg.AuthUser == "" || cfg.AuthPassword == "" {
-		log.Fatal("APP_AUTH_USER and APP_AUTH_PASSWORD must be set")
+	if cfg.AdminPassword == "" {
+		log.Fatal("APP_ADMIN_PASSWORD must be set")
 	}
-	if len(cfg.SessionSecret) < 16 {
-		log.Fatal("APP_SESSION_SECRET must be set (>= 16 bytes)")
+
+	const dataDir = "/app/data"
+
+	// Auto-bootstrap server-only secrets. Persisted across restarts via the
+	// /app/data volume; if wiped, all sessions invalidate (acceptable).
+	sessionSecret, err := auth.LoadOrCreateSecret(dataDir, "session.secret", 32)
+	if err != nil {
+		log.Fatalf("session secret: %v", err)
+	}
+	turnSecret, err := auth.LoadOrCreateSecret(dataDir, "turn.secret", 32)
+	if err != nil {
+		log.Fatalf("turn secret: %v", err)
+	}
+	cfg.SessionSecret = sessionSecret
+	cfg.TurnSharedSecret = hex.EncodeToString(turnSecret)
+
+	connPass, err := auth.LoadConnPassStore(dataDir)
+	if err != nil {
+		log.Fatalf("connpass store: %v", err)
 	}
 
 	limiter := newAuthLimiter(10, 15*time.Minute)
@@ -86,9 +111,6 @@ func main() {
 		log.Fatalf("sfu init: %v", err)
 	}
 
-	if cfg.TurnSharedSecret == "" {
-		log.Fatal("TURN_SHARED_SECRET must be set")
-	}
 	if cfg.PublicIP == "" {
 		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
 	}
@@ -109,7 +131,7 @@ func main() {
 	log.Printf("frontend version: %s", version)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
+	mux.Handle("/", requireAuthHTML(cfg, connPass, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -128,15 +150,16 @@ func main() {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(versionResponse{Version: version})
 	})
-	mux.HandleFunc("/api/login", loginHandler(cfg, limiter))
+	mux.HandleFunc("/api/login", loginHandler(cfg, connPass, limiter))
 	mux.HandleFunc("/api/logout", logoutHandler(cfg))
-	mux.Handle("/ws", requireAuthAPI(cfg, http.HandlerFunc(room.ServeWS)))
-	mux.Handle("/api/config", requireAuthAPI(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/ws", requireAuthAPI(cfg, connPass, http.HandlerFunc(room.ServeWS)))
+	mux.Handle("/api/config", requireAuthAPI(cfg, connPass, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
+		sess, _ := sessionFromRequest(cfg, r)
 		username, credential := turnsrv.GenerateCredentials(cfg.TurnSharedSecret, "u", turnCredsTTL)
 		response := appConfigResponse{
 			ICEServers: []iceServer{
@@ -147,10 +170,53 @@ func main() {
 					Credential: credential,
 				},
 			},
+			Role: string(sess.Role),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
+	})))
+	mux.Handle("/api/admin/connection-password", requireAdmin(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(connPass.Status())
+	})))
+	mux.Handle("/api/admin/connection-password/rotate", requireAdmin(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		plain, err := connPass.Rotate()
+		if err != nil {
+			log.Printf("connpass rotate: %v", err)
+			http.Error(w, "rotate failed", http.StatusInternalServerError)
+			return
+		}
+		status := connPass.Status()
+		resp := rotateResponse{
+			Host:       cfg.AppHostname,
+			Password:   plain,
+			Generation: status.Generation,
+			RotatedAt:  status.RotatedAt,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(resp)
+	})))
+	mux.Handle("/api/admin/connection-password/revoke", requireAdmin(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := connPass.Revoke(); err != nil {
+			log.Printf("connpass revoke: %v", err)
+			http.Error(w, "revoke failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})))
 
 	server := &http.Server{
@@ -163,23 +229,39 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	log.Printf("auth enabled (user=%s, cookie_secure=%v)", cfg.AuthUser, cfg.CookieSecure)
+	log.Printf("auth enabled (cookie_secure=%v, connpass_present=%v)", cfg.CookieSecure, connPass.Status().Exists)
 	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
 
-func authenticated(cfg config.Config, r *http.Request) bool {
+func sessionFromRequest(cfg config.Config, r *http.Request) (auth.Session, bool) {
 	cookie, err := r.Cookie(auth.CookieName)
 	if err != nil {
-		return false
+		return auth.Session{}, false
 	}
-	_, err = auth.Decode(cfg.SessionSecret, cookie.Value)
-	return err == nil
+	sess, err := auth.Decode(cfg.SessionSecret, cookie.Value)
+	if err != nil {
+		return auth.Session{}, false
+	}
+	return sess, true
 }
 
-func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
+// authenticated reports whether the request carries a valid session.
+// User sessions whose sp_gen is stale (after a rotate/revoke) are rejected.
+func authenticated(cfg config.Config, connPass *auth.ConnPassStore, r *http.Request) bool {
+	sess, ok := sessionFromRequest(cfg, r)
+	if !ok {
+		return false
+	}
+	if sess.Role == auth.RoleUser && sess.Generation != connPass.Generation() {
+		return false
+	}
+	return true
+}
+
+func requireAuthHTML(cfg config.Config, connPass *auth.ConnPassStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Login page, its assets, and the favicon must be reachable without auth.
 		// /assets/ and /vendor/ are Vite-emitted static bundles and vendor WASM —
@@ -194,7 +276,7 @@ func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if authenticated(cfg, r) {
+		if authenticated(cfg, connPass, r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -202,9 +284,9 @@ func requireAuthHTML(cfg config.Config, next http.Handler) http.Handler {
 	})
 }
 
-func requireAuthAPI(cfg config.Config, next http.Handler) http.Handler {
+func requireAuthAPI(cfg config.Config, connPass *auth.ConnPassStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if authenticated(cfg, r) {
+		if authenticated(cfg, connPass, r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -212,9 +294,21 @@ func requireAuthAPI(cfg config.Config, next http.Handler) http.Handler {
 	})
 }
 
-func loginHandler(cfg config.Config, limiter *authLimiter) http.HandlerFunc {
-	wantUser := []byte(cfg.AuthUser)
-	wantPass := []byte(cfg.AuthPassword)
+// requireAdmin gates a handler behind a valid admin session.
+// Admin sessions don't depend on connpass generation, so it's not threaded here.
+func requireAdmin(cfg config.Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := sessionFromRequest(cfg, r)
+		if !ok || sess.Role != auth.RoleAdmin {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func loginHandler(cfg config.Config, connPass *auth.ConnPassStore, limiter *authLimiter) http.HandlerFunc {
+	wantAdmin := []byte(cfg.AdminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -230,17 +324,31 @@ func loginHandler(cfg config.Config, limiter *authLimiter) http.HandlerFunc {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		user := r.PostFormValue("user")
 		pass := r.PostFormValue("password")
-		if subtle.ConstantTimeCompare([]byte(user), wantUser) != 1 ||
-			subtle.ConstantTimeCompare([]byte(pass), wantPass) != 1 {
+		if pass == "" {
 			limiter.fail(ip)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		limiter.success(ip)
-		setSessionCookie(w, cfg, user)
-		w.WriteHeader(http.StatusNoContent)
+
+		// Admin first; constant-time compare to avoid timing leak on length.
+		if subtle.ConstantTimeCompare([]byte(pass), wantAdmin) == 1 {
+			limiter.success(ip)
+			setSessionCookie(w, cfg, auth.RoleAdmin, 0)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Then connection password.
+		if connPass.Verify(pass) {
+			limiter.success(ip)
+			setSessionCookie(w, cfg, auth.RoleUser, connPass.Generation())
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		limiter.fail(ip)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 }
 
@@ -263,8 +371,8 @@ func logoutHandler(cfg config.Config) http.HandlerFunc {
 	}
 }
 
-func setSessionCookie(w http.ResponseWriter, cfg config.Config, user string) {
-	value := auth.Encode(cfg.SessionSecret, user, sessionTTL)
+func setSessionCookie(w http.ResponseWriter, cfg config.Config, role auth.Role, spGen uint64) {
+	value := auth.Encode(cfg.SessionSecret, role, spGen, sessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.CookieName,
 		Value:    value,

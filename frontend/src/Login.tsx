@@ -12,10 +12,8 @@ export function Login() {
     setSubmitting(true);
 
     const form = e.currentTarget;
-    const body = new URLSearchParams();
-    const userInput = form.elements.namedItem("user") as HTMLInputElement;
     const passwordInput = form.elements.namedItem("password") as HTMLInputElement;
-    body.set("user", userInput.value);
+    const body = new URLSearchParams();
     body.set("password", passwordInput.value);
 
     try {
@@ -33,7 +31,7 @@ export function Login() {
         setError("Слишком много попыток. Подождите 15 минут.");
         return;
       }
-      setError("Неверный логин или пароль.");
+      setError("Неверный пароль.");
     } catch (err) {
       setError("Сетевая ошибка: " + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -52,22 +50,9 @@ export function Login() {
         Voice Hub
       </div>
       <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
-      <div className="text-muted text-[13px] mb-5">Введите общий логин и пароль.</div>
+      <div className="text-muted text-[13px] mb-5">Введите пароль доступа.</div>
       <form id="login-form" ref={formRef} method="post" action="/api/login" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="user" className="block text-[12px] font-medium text-muted mb-1.5">
-            Логин
-          </label>
-          <input
-            id="user"
-            name="user"
-            autoComplete="username"
-            required
-            autoFocus
-            className="input-field !mt-0"
-          />
-        </div>
-        <div className="mt-3.5">
           <label htmlFor="password" className="block text-[12px] font-medium text-muted mb-1.5">
             Пароль
           </label>
@@ -77,6 +62,7 @@ export function Login() {
             type="password"
             autoComplete="current-password"
             required
+            autoFocus
             className="input-field !mt-0"
           />
         </div>

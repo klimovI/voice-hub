@@ -36,6 +36,9 @@ WORKDIR /app
 COPY --from=build /out/voice-hub-app /app/voice-hub-app
 COPY --from=frontend /src/frontend/dist /app/web
 
+# Persistent state (connection-password hash). Mounted as a volume in compose.
+RUN mkdir -p /app/data && chown app:app /app/data
+
 ENV APP_ADDR=:8080
 ENV WEB_DIR=/app/web
 

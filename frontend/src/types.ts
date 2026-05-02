@@ -2,8 +2,11 @@
 
 export type EngineKind = "off" | "rnnoise" | "dtln";
 
+export type Role = "admin" | "user";
+
 export interface AppConfig {
   iceServers: RTCIceServer[];
+  role: Role;
 }
 
 // UI-only participant state stored in zustand.

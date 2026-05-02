@@ -54,20 +54,32 @@ mkdir -p /opt/voice-hub/deploy && chown -R deploy:deploy /opt/voice-hub
 Файл провижится workflow'ом из GitHub secret `PROD_ENV` на каждом деплое — вручную трогать не нужно. Формат (single multi-line blob, который кладётся в `PROD_ENV`):
 
 ```
-APP_HOSTNAME=your-host.example.com
 PUBLIC_IP=<внешний IP сервера для TURN>
-TURN_SHARED_SECRET=<openssl rand -base64 32>
-APP_AUTH_USER=<логин для входа>
-APP_AUTH_PASSWORD=<openssl rand -base64 24>
-APP_SESSION_SECRET=<openssl rand -base64 32, минимум 16 байт>
+APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 ```
 
-- `APP_AUTH_*` — креды для login form (cookie-session). Сервис fail-fast если не заданы (`/healthz` остаётся публичным для health-check'ов).
-- `APP_SESSION_SECRET` — HMAC-ключ для подписи session cookie. Ротация = разлогинивает всех.
-- `TURN_SHARED_SECRET` — HMAC-ключ для генерации short-term TURN creds на `/api/ice-config`. Cleartext в клиент НЕ попадает.
+`APP_HOSTNAME` хранится в **отдельном** GH-секрете (`APP_HOSTNAME`) — workflow конкатенирует его в итоговый `.env` на сервере. В `PROD_ENV` его класть не нужно.
+
+- `APP_ADMIN_PASSWORD` — пароль администратора. С ним заходит **только админ**, в UI генерит/ротирует connection password, который раздаёт пользователям. Утечка лечится одним кликом ротации, а не редеплоем.
 - `PUBLIC_IP` — нужен pion/turn для генерации SDP с правильным relay-адресом.
 - На сервере права `chmod 600` ставит сам workflow.
 - Сохрани копию `PROD_ENV` в менеджер паролей: GitHub UI секреты не показывает после создания.
+
+### Auto-managed секреты на сервере
+
+Бэкенд сам генерит и хранит в volume `app_data` (`/app/data/`):
+
+- `session.secret` — HMAC-ключ для подписи session cookie. Удаление файла = разлогинивает всех.
+- `turn.secret` — HMAC-ключ для short-term TURN creds. Cleartext в клиент НЕ попадает.
+- `connection-password.json` — argon2id-хеш connection password (плейн нигде не хранится).
+
+Файлы создаются на первом старте, режим `0600`. Backup-ить смысла нет: потеря volume = все перелогинятся, админ переротирует connection password — больше ничего не теряется.
+
+## Миграция со старой схемы (`APP_AUTH_USER`/`APP_AUTH_PASSWORD`)
+
+1. В `PROD_ENV`: убери `APP_AUTH_USER` и `APP_AUTH_PASSWORD`, добавь `APP_ADMIN_PASSWORD=<значение>`.
+2. Деплой. Все существующие сессии станут невалидны (формат cookie сменился) — все перелогинятся.
+3. Зайди как админ → шестерёнка-ключ в правом верхнем углу → **Создать пароль** → скопируй блок «Сервер: … / Пароль: …» → раздай команде.
 
 ## GitHub Actions secrets
 

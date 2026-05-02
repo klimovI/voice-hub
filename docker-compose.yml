@@ -10,11 +10,10 @@ services:
       WEB_DIR: "/app/web"
       APP_HOSTNAME: "localhost"
       PUBLIC_IP: "127.0.0.1"
-      TURN_SHARED_SECRET: "dev-turn-shared-secret-change-me"
-      APP_AUTH_USER: "dev"
-      APP_AUTH_PASSWORD: "dev"
-      APP_SESSION_SECRET: "dev-session-secret-32-bytes-long!"
+      APP_ADMIN_PASSWORD: "dev"
       APP_COOKIE_SECURE: "false"
+    volumes:
+      - ./data:/app/data
     ports:
       - "8080:8080"
       - "3478:3478/udp"
