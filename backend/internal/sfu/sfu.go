@@ -267,6 +267,18 @@ func (r *Room) handleClientMessage(p *peer, msg Message) {
 	}
 }
 
+// Peers returns a snapshot of the current peers for read-only consumers
+// (e.g. the lobby/preview HTTP endpoint).
+func (r *Room) Peers() []PeerInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]PeerInfo, 0, len(r.peers))
+	for _, p := range r.peers {
+		out = append(out, PeerInfo{ID: p.id, DisplayName: p.displayName})
+	}
+	return out
+}
+
 func (r *Room) addPeer(p *peer) {
 	r.mu.Lock()
 	existing := make([]PeerInfo, 0, len(r.peers))
