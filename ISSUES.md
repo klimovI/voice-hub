@@ -8,11 +8,11 @@ _(empty — see Done for the suspected fix on word cutoffs; needs field verifica
 
 ## In Progress
 
-- **Потрещивания микрофона** — фаза 2 закрыта (remote limiter). Замечено: щелчки приходят **только при включённом RNNoise-движке** (DTLN/off — чисто). Это указывает на ScriptProcessor RNNoise как источник, даже после zero-alloc-фикса (главный поток всё равно может стопориться на React-рендерах/zustand-обновлениях). После деплоя фазы 2 нужно перетестировать; если потрескивания всё ещё ловятся в RNNoise-режиме — переходим к:
-  - debounce SFU renegotiation в `backend/internal/sfu/sfu.go:358-369` (щелчки на join/leave — независимо от движка)
-  - полный AudioWorklet port RNNoise (требует патча vendor `frontend/public/vendor/rnnoise/rnnoise.js` — emscripten env-check)
+_(empty)_
 
 ## Done
+
+- **Потрескивания микрофона** — закрыто фазой 1 (zero-alloc RNNoise hot path, нативный 48kHz pipeline) + фазой 2 (smoothed remote DynamicsCompressor). Полевая проверка: чисто на всех движках. Если вернётся в RNNoise-режиме — следующий шаг debounce SFU renegotiation в `backend/internal/sfu/sfu.go:358-369` или AudioWorklet port (требует патча vendor rnnoise.js под emscripten env-check).
 
 - **Обрываются слова** (`frontend/src/audio/rnnoise.ts`, suspected — needs field test): RNNoise VAD-gate был слишком плотным — `GATE_OPEN_VAD=0.55`, `GATE_HOLD_MS=150ms`, `GATE_MAX_ATTEN_DB=36`. Тихие фонемы на границах слов (свистящие/шипящие, мягкие согласные) не пробивали 0.55 → gate закрывался через ~150ms hold + 180ms release, отдавая ~25dB attenuation на дефолтном миксе 70%. Релакс: `GATE_OPEN_VAD=0.4`, `GATE_HOLD_MS=300`, `GATE_MAX_ATTEN_DB=18`. SFU-сторона чистая (pion forwards RTP as-is, без DTX/buffering), так что виновник — локальный gate. Если в проде слова всё равно теряются — следующий шаг убрать gate целиком (или вынести его в UI-toggle).
 - **Индикатор говорящего** (`frontend/src/audio/remote.ts`, `frontend/src/hooks/useAudioEngine.ts`): per-participant `AnalyserNode` + единый rAF-цикл с 250ms hold; обновляет `participants[id].speaking` при пересечении RMS-порога. UI уже подсвечивал `speaking`, нужна была только проводка для remote.
