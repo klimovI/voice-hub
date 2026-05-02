@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use tauri::{AppHandle, State};
 
-use crate::listener::{Mode, SharedState};
+use crate::listener::{self, Mode, SharedState};
 use crate::shortcut::{self, InputBinding};
 
 #[tauri::command]
@@ -16,9 +16,21 @@ pub fn set_shortcut(
     state: State<'_, SharedState>,
     binding: InputBinding,
 ) -> Result<(), String> {
-    shortcut::save(&app, &binding)?;
+    shortcut::save(&app, Some(&binding))?;
     let mut s = state.lock().map_err(|e| format!("lock: {e}"))?;
     s.current = Some(binding);
+    s.last_fire = Some(Instant::now());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_shortcut(app: AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
+    shortcut::save(&app, None)?;
+    let mut s = state.lock().map_err(|e| format!("lock: {e}"))?;
+    s.current = None;
+    s.pending = None;
+    s.mode = Mode::Normal;
+    s.pressed.clear();
     s.last_fire = Some(Instant::now());
     Ok(())
 }
@@ -28,6 +40,20 @@ pub fn start_capture(state: State<'_, SharedState>) {
     if let Ok(mut s) = state.lock() {
         s.mode = Mode::Capturing;
         s.pressed.clear();
+        s.pending = None;
+    }
+}
+
+#[tauri::command]
+pub fn stop_capture(app: AppHandle, state: State<'_, SharedState>) {
+    let Ok(mut s) = state.lock() else {
+        return;
+    };
+    if let Some(binding) = s.pending.clone() {
+        listener::finalize_capture(&mut s, &app, binding);
+    } else {
+        s.mode = Mode::Normal;
+        s.pressed.clear();
     }
 }
 
@@ -36,5 +62,6 @@ pub fn cancel_capture(state: State<'_, SharedState>) {
     if let Ok(mut s) = state.lock() {
         s.mode = Mode::Normal;
         s.pressed.clear();
+        s.pending = None;
     }
 }

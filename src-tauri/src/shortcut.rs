@@ -28,14 +28,20 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("shortcut.json"))
 }
 
-pub fn load(app: &tauri::AppHandle) -> Option<InputBinding> {
+/// Load persisted binding choice.
+///
+/// Returns:
+/// - `None` — file missing or unparseable (treat as first run)
+/// - `Some(None)` — user explicitly cleared the binding
+/// - `Some(Some(b))` — user-set binding
+pub fn load(app: &tauri::AppHandle) -> Option<Option<InputBinding>> {
     let path = config_path(app).ok()?;
     let raw = fs::read(&path).ok()?;
-    serde_json::from_slice::<InputBinding>(&raw).ok()
+    serde_json::from_slice::<Option<InputBinding>>(&raw).ok()
 }
 
-pub fn save(app: &tauri::AppHandle, binding: &InputBinding) -> Result<(), String> {
+pub fn save(app: &tauri::AppHandle, binding: Option<&InputBinding>) -> Result<(), String> {
     let path = config_path(app)?;
-    let json = serde_json::to_vec_pretty(binding).map_err(|e| format!("serialize: {e}"))?;
+    let json = serde_json::to_vec_pretty(&binding).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))
 }

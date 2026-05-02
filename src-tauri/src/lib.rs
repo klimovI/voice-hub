@@ -19,7 +19,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_shortcut,
             commands::set_shortcut,
+            commands::clear_shortcut,
             commands::start_capture,
+            commands::stop_capture,
             commands::cancel_capture,
             updater::check_for_update,
             updater::apply_update,
@@ -42,7 +44,16 @@ pub fn run() {
 
             let handle = app.handle().clone();
 
-            let initial = shortcut::load(&handle).or_else(|| Some(shortcut::InputBinding::default_combo()));
+            // First run (no config file) → seed default and persist.
+            // Existing file (even with `null`) → respect user's choice.
+            let initial = match shortcut::load(&handle) {
+                Some(opt) => opt,
+                None => {
+                    let default = shortcut::InputBinding::default_combo();
+                    let _ = shortcut::save(&handle, Some(&default));
+                    Some(default)
+                }
+            };
             let state = Arc::new(Mutex::new(ListenerState::new(initial)));
             app.manage(state.clone());
 

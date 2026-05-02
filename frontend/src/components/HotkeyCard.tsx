@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store/useStore";
 import {
   defaultShortcut,
@@ -115,14 +115,14 @@ function WebHotkeyCard({ onStatusMessage }: Props) {
 // ---- Tauri (desktop) path: rdev-based global capture ----
 
 function TauriHotkeyCard({ onStatusMessage }: Props) {
-  // Pre-populate with default to avoid "Not set" flicker before get_shortcut resolves.
+  // null until first get_shortcut resolves (or user cleared).
   const [binding, setBinding] = useState<InputBinding | null>(() => defaultBinding());
+  const [pending, setPending] = useState<InputBinding | null>(null);
   const [capturing, setCapturing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Initial load + capture event subscription.
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let unlistenCaptured: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
     let cancelled = false;
 
     void (async () => {
@@ -138,26 +138,60 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
         console.error("get_shortcut failed", err);
       }
 
-      const off = await listen<InputBinding>("input-captured", (event) => {
+      const offCaptured = await listen<InputBinding>("input-captured", (event) => {
         setBinding(event.payload);
+        setPending(null);
         setCapturing(false);
         onStatusMessage(`Горячая клавиша: ${formatBinding(event.payload)}`);
       });
+      const offProgress = await listen<InputBinding>("capture-progress", (event) => {
+        setPending(event.payload);
+      });
+
       if (cancelled) {
-        off();
+        offCaptured();
+        offProgress();
       } else {
-        unlisten = off;
+        unlistenCaptured = offCaptured;
+        unlistenProgress = offProgress;
       }
     })();
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlistenCaptured?.();
+      unlistenProgress?.();
     };
   }, [onStatusMessage]);
 
-  async function armCapture() {
+  const cancelCapture = useCallback(async () => {
+    setCapturing(false);
+    setPending(null);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("cancel_capture");
+    } catch (err) {
+      console.error("cancel_capture failed", err);
+    }
+  }, []);
+
+  // Esc cancels capture without commit. Window-level listener so the user
+  // doesn't need an input focused.
+  useEffect(() => {
+    if (!capturing) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        void cancelCapture();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [capturing, cancelCapture]);
+
+  async function startRecording() {
     if (capturing) return;
+    setPending(null);
     setCapturing(true);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -168,14 +202,17 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
     }
   }
 
-  async function cancelCapture() {
-    if (!capturing) return;
-    setCapturing(false);
+  async function stopRecording() {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("cancel_capture");
+      await invoke("stop_capture");
     } catch (err) {
-      console.error("cancel_capture failed", err);
+      console.error("stop_capture failed", err);
+    }
+    // If pending was empty, backend just exits Capturing without emitting
+    // input-captured — sync UI state manually.
+    if (!pending) {
+      setCapturing(false);
     }
   }
 
@@ -191,44 +228,76 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      void cancelCapture();
-      inputRef.current?.blur();
+  async function handleClear() {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("clear_shortcut");
+      setBinding(null);
+      onStatusMessage("Горячая клавиша удалена");
+    } catch (err) {
+      console.error("clear_shortcut failed", err);
     }
   }
 
-  const displayValue = capturing ? "Нажмите клавишу или кнопку мыши..." : formatBinding(binding);
+  const displayValue = capturing
+    ? pending
+      ? formatBinding(pending)
+      : "Нажмите клавишу или кнопку мыши..."
+    : formatBinding(binding);
 
   return (
     <CardShell hint="Global mute toggle">
       <label className="block text-[12px] font-medium text-muted">
-        Click input, then press any key combo or mouse button
+        Current binding
         <input
           id="shortcut-input"
-          ref={inputRef}
           type="text"
           readOnly
           value={displayValue}
-          onFocus={armCapture}
-          onBlur={cancelCapture}
-          onKeyDown={handleKeyDown}
           onChange={() => {
             /* controlled */
           }}
-          className="input-field cursor-pointer"
+          className="input-field"
         />
       </label>
       <p className="text-[11px] text-muted leading-tight">
-        Solo letters/digits disabled — use modifier (Ctrl/Shift/Alt) or function/lock keys.
-        Mouse: Right, Middle, Side buttons.
+        Click <b>Record</b>, press any combo, then click <b>Stop</b>. Mouse buttons commit
+        instantly. Esc cancels.
       </p>
       <div className="flex flex-wrap gap-2.5">
+        {capturing ? (
+          <button
+            id="shortcut-stop"
+            type="button"
+            onClick={stopRecording}
+            className="btn btn-primary btn-mini"
+          >
+            Stop Recording
+          </button>
+        ) : (
+          <button
+            id="shortcut-record"
+            type="button"
+            onClick={startRecording}
+            className="btn btn-primary btn-mini"
+          >
+            Record Keybind
+          </button>
+        )}
+        <button
+          id="shortcut-clear"
+          type="button"
+          onClick={handleClear}
+          disabled={capturing || !binding}
+          className="btn btn-secondary btn-mini"
+        >
+          Clear
+        </button>
         <button
           id="shortcut-reset"
           type="button"
           onClick={handleReset}
+          disabled={capturing}
           className="btn btn-secondary btn-mini"
         >
           Reset to default

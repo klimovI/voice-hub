@@ -20,6 +20,7 @@ pub struct ListenerState {
     pub mode: Mode,
     pub pressed: HashSet<Key>,
     pub last_fire: Option<Instant>,
+    pub pending: Option<InputBinding>,
 }
 
 impl ListenerState {
@@ -29,6 +30,7 @@ impl ListenerState {
             mode: Mode::Normal,
             pressed: HashSet::new(),
             last_fire: None,
+            pending: None,
         }
     }
 }
@@ -151,6 +153,11 @@ fn matches_mouse(current: Option<&InputBinding>, btn: &Button) -> bool {
 
 // ---- Capturing mode ----
 
+// Keyboard capture is incremental: each non-modifier press updates `pending`
+// and emits live preview. Final commit happens when frontend invokes
+// `stop_capture`. Mouse capture commits immediately (no way to click "Stop"
+// without generating another mouse event).
+
 fn try_capture_keyboard(state: &mut ListenerState, app: &AppHandle, k: Key) {
     if is_modifier(&k) {
         return;
@@ -172,16 +179,11 @@ fn try_capture_keyboard(state: &mut ListenerState, app: &AppHandle, k: Key) {
     if has_meta(&state.pressed) {
         keys.push("Meta".into());
     }
-
-    let has_modifier = !keys.is_empty();
-    if !has_modifier && !is_solo_allowed(&label) {
-        // Disallow solo letters/digits/space — too easy to mis-trigger while typing.
-        return;
-    }
     keys.push(label);
 
     let binding = InputBinding::Keyboard { keys };
-    finalize_capture(state, app, binding);
+    state.pending = Some(binding.clone());
+    let _ = app.emit("capture-progress", binding);
 }
 
 fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
@@ -192,43 +194,16 @@ fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
     finalize_capture(state, app, binding);
 }
 
-fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
-    if let Err(err) = shortcut::save(app, &binding) {
+pub fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
+    if let Err(err) = shortcut::save(app, Some(&binding)) {
         eprintln!("save shortcut: {err}");
     }
     state.current = Some(binding.clone());
+    state.pending = None;
+    state.pressed.clear();
     state.mode = Mode::Normal;
     state.last_fire = Some(Instant::now()); // suppress retrigger from same press
     let _ = app.emit("input-captured", binding);
-}
-
-// ---- Allowlist for solo (no-modifier) keys ----
-
-fn is_solo_allowed(label: &str) -> bool {
-    matches!(
-        label,
-        "Pause"
-            | "Insert"
-            | "Home"
-            | "End"
-            | "PageUp"
-            | "PageDown"
-            | "ScrollLock"
-            | "NumLock"
-            | "PrintScreen"
-            | "F1"
-            | "F2"
-            | "F3"
-            | "F4"
-            | "F5"
-            | "F6"
-            | "F7"
-            | "F8"
-            | "F9"
-            | "F10"
-            | "F11"
-            | "F12"
-    )
 }
 
 // ---- Modifier helpers ----
