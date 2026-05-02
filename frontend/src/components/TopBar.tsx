@@ -9,12 +9,9 @@ export function TopBar() {
         <img
           src="/favicon.svg"
           alt="Voice Hub"
-          className="w-8 h-8 rounded-[10px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
+          className="w-11 h-11 rounded-[12px] shadow-[0_8px_26px_-8px_rgba(34,197,94,0.6)]"
         />
-        <div>
-          <div className="text-[16px]">Voice Hub</div>
-          <div className="text-[12px] font-medium text-muted">Low-latency voice over WebRTC</div>
-        </div>
+        <div className="text-[22px] leading-none">Voice Hub</div>
       </div>
       <div className="flex items-center gap-2">
         <StatusPill />
