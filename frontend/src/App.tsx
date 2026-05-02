@@ -9,6 +9,7 @@ import { clearLegacyStorage } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
 import { preloadEngine, isEngineReady } from "./hooks/useAudioEngine";
 import { isTauri } from "./utils/tauri";
+import { consumeRejoinFlag } from "./utils/rejoin";
 import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
@@ -18,6 +19,7 @@ import { SessionCard } from "./components/SessionCard";
 import { AudioCard } from "./components/AudioCard";
 import { HotkeyCard } from "./components/HotkeyCard";
 import { ParticipantsCard } from "./components/ParticipantsCard";
+import { UpdateBanner } from "./components/UpdateBanner";
 
 export function App() {
   const store = useStore();
@@ -37,6 +39,8 @@ export function App() {
   const scheduleReconnectRef = useRef<() => void>(() => {
     /* set after scheduleReconnect is defined */
   });
+  // Auto-rejoin after reload triggered by UpdateBanner. Set after handleJoin is defined.
+  const handleJoinRef = useRef<((name: string) => Promise<void>) | null>(null);
 
   const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000];
 
@@ -48,11 +52,16 @@ export function App() {
   // Initialize config and legacy storage on mount.
   useEffect(() => {
     clearLegacyStorage();
+    const shouldRejoin = consumeRejoinFlag();
     loadAppConfig()
       .then((cfg) => {
         // Store config for use at join time.
         configRef.current = cfg;
         store.setStatus("Ready");
+        if (shouldRejoin) {
+          const name = localStorage.getItem("voice-hub.display-name") ?? "";
+          void handleJoinRef.current?.(name);
+        }
       })
       .catch((err: unknown) => {
         store.setStatus(err instanceof Error ? err.message : String(err), true);
@@ -185,10 +194,7 @@ export function App() {
             reconnectAttemptRef.current = 0;
             store.setStatus("Подключено", false, true);
           } else if (s === "failed" || s === "closed") {
-            if (
-              useStore.getState().joinState === "joined" &&
-              !userLeavingRef.current
-            ) {
+            if (useStore.getState().joinState === "joined" && !userLeavingRef.current) {
               scheduleReconnectRef.current();
             }
           }
@@ -251,11 +257,7 @@ export function App() {
     }
     const delay = RECONNECT_DELAYS_MS[attempt];
     reconnectAttemptRef.current = attempt + 1;
-    store.setStatus(
-      `Соединение оборвалось, переподключаюсь (попытка ${attempt + 1})…`,
-      true,
-      true,
-    );
+    store.setStatus(`Соединение оборвалось, переподключаюсь (попытка ${attempt + 1})…`, true, true);
     reconnectTimerRef.current = window.setTimeout(async () => {
       reconnectTimerRef.current = null;
       if (userLeavingRef.current) return;
@@ -394,6 +396,10 @@ export function App() {
     [store, audio, connectSfu],
   );
 
+  useEffect(() => {
+    handleJoinRef.current = handleJoin;
+  }, [handleJoin]);
+
   // ---- Leave ----
 
   const handleLeave = useCallback(() => {
@@ -507,6 +513,7 @@ export function App() {
   return (
     <main className="grid w-[min(1180px,100%)] gap-[22px] mx-auto px-5 pt-7 pb-15 max-[640px]:px-3 max-[640px]:pt-4 max-[640px]:pb-10">
       <TopBar />
+      <UpdateBanner />
       <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
         <div className="grid gap-[22px] content-start">
           <SessionCard

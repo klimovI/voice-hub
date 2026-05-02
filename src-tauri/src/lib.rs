@@ -1,11 +1,11 @@
 mod commands;
 mod listener;
 mod shortcut;
+mod updater;
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_updater::UpdaterExt;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::listener::ListenerState;
 
@@ -21,7 +21,17 @@ pub fn run() {
             commands::set_shortcut,
             commands::start_capture,
             commands::cancel_capture,
+            updater::check_for_update,
+            updater::apply_update,
         ])
+        .on_window_event(|window, event| {
+            if matches!(event, WindowEvent::Focused(true)) && window.label() == "main" {
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    updater::check_on_focus(app).await;
+                });
+            }
+        })
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Voice Hub")
@@ -38,23 +48,10 @@ pub fn run() {
 
             listener::start(handle.clone(), state);
 
-            tauri::async_runtime::spawn(async move {
-                if let Err(err) = check_for_update(handle).await {
-                    eprintln!("updater: {err}");
-                }
-            });
+            updater::init(&handle)?;
 
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-async fn check_for_update(handle: tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(update) = handle.updater()?.check().await? else {
-        return Ok(());
-    };
-
-    update.download_and_install(|_, _| {}, || {}).await?;
-    handle.restart();
 }

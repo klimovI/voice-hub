@@ -15,5 +15,14 @@
 	@vendor path /vendor/*
 	header @vendor Cache-Control "public, max-age=31536000, immutable"
 
+	# Vite-emitted assets carry content hashes in filenames; safe to pin.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# HTML entry points must always revalidate so version-poll banner can
+	# detect new deploys without users hard-refreshing.
+	@html path / /index.html /login.html
+	header @html Cache-Control "no-cache"
+
 	reverse_proxy app:8080
 }

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +38,23 @@ type iceServer struct {
 
 type appConfigResponse struct {
 	ICEServers []iceServer `json:"iceServers"`
+}
+
+type versionResponse struct {
+	Version string `json:"version"`
+}
+
+// frontendVersion fingerprints the deployed frontend by hashing index.html.
+// Vite injects content-hashed asset URLs into index.html, so any rebuild
+// shifts the hash. Used by the version-poll banner to detect stale tabs.
+func frontendVersion(webDir string) string {
+	data, err := os.ReadFile(filepath.Join(webDir, "index.html"))
+	if err != nil {
+		log.Printf("version: cannot read index.html: %v", err)
+		return "unknown"
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func main() {
@@ -84,6 +105,9 @@ func main() {
 	}
 	defer turnServer.Close()
 
+	version := frontendVersion(cfg.WebDir)
+	log.Printf("frontend version: %s", version)
+
 	mux := http.NewServeMux()
 	mux.Handle("/", requireAuthHTML(cfg, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +118,15 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok"})
+	})
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(versionResponse{Version: version})
 	})
 	mux.HandleFunc("/api/login", loginHandler(cfg, limiter))
 	mux.HandleFunc("/api/logout", logoutHandler(cfg))

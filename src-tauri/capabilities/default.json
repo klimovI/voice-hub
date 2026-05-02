@@ -7,6 +7,7 @@
   },
   "permissions": [
     "core:default",
-    "allow-shortcut"
+    "allow-shortcut",
+    "allow-updater-app"
   ]
 }
