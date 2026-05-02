@@ -456,6 +456,20 @@ export function App() {
           () => sfu.getPeerConnection(),
         );
         micGraphRef.current = graph;
+        // Old graph's speaking loop was cancelled in teardown — restart on the new graph.
+        audio.startSpeaking(
+          graph,
+          () => useStore.getState().selfMuted,
+          () => peerIdRef.current,
+          (speaking) => {
+            const pid = peerIdRef.current;
+            if (!pid) return;
+            const current = useStore.getState().participants.get(pid);
+            if (current && current.speaking !== speaking) {
+              store.updateParticipant(pid, { speaking });
+            }
+          },
+        );
         store.setStatus(`Denoiser: ${engine}`, false, true);
       } catch (err) {
         store.setStatus(
