@@ -14,6 +14,7 @@ import (
 	"maps"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -74,11 +75,12 @@ func (p *peer) write(msg Message) error {
 
 // Room holds the live state of all peers and forwarded tracks.
 type Room struct {
-	mu     sync.Mutex
-	peers  map[string]*peer
-	tracks map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
-	cfg    Config
-	api    *webrtc.API
+	mu       sync.Mutex
+	peers    map[string]*peer
+	tracks   map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
+	cfg      Config
+	api      *webrtc.API
+	closed   atomic.Bool
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -112,6 +114,10 @@ func NewRoom(cfg Config) (*Room, error) {
 
 // ServeWS upgrades the request to a WebSocket and runs one peer session.
 func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
+	if r.closed.Load() {
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	ws, err := websocket.Accept(w, req, &websocket.AcceptOptions{
 		OriginPatterns: []string{"*"},
 	})
@@ -288,7 +294,10 @@ func (r *Room) addPeer(p *peer) {
 		others = append(others, op)
 	}
 	r.peers[p.id] = p
+	count := len(r.peers)
 	r.mu.Unlock()
+
+	log.Printf("sfu: peer joined id=%s name=%q peers=%d", p.id, p.displayName, count)
 
 	welcome, _ := json.Marshal(struct {
 		ID    string     `json:"id"`
@@ -315,11 +324,14 @@ func (r *Room) removePeer(id string) {
 	for _, op := range r.peers {
 		others = append(others, op)
 	}
+	count := len(r.peers)
 	r.mu.Unlock()
 
 	if p.cancel != nil {
 		p.cancel()
 	}
+
+	log.Printf("sfu: peer left id=%s peers=%d", id, count)
 
 	left, _ := json.Marshal(PeerInfo{ID: id})
 	for _, op := range others {
@@ -327,6 +339,27 @@ func (r *Room) removePeer(id string) {
 	}
 
 	r.signalPeerConnections()
+}
+
+// Close stops accepting new peers and tears down all active sessions.
+// Safe to call multiple times. Used during graceful shutdown.
+func (r *Room) Close() {
+	if !r.closed.CompareAndSwap(false, true) {
+		return
+	}
+	r.mu.Lock()
+	peers := make([]*peer, 0, len(r.peers))
+	for _, p := range r.peers {
+		peers = append(peers, p)
+	}
+	r.mu.Unlock()
+
+	for _, p := range peers {
+		if p.cancel != nil {
+			p.cancel()
+		}
+		_ = p.ws.Close(websocket.StatusGoingAway, "server shutting down")
+	}
 }
 
 func (r *Room) setDisplayName(id, name string) {

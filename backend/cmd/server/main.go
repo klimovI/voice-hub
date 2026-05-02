@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"voice-hub/backend/internal/auth"
@@ -125,7 +129,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("turn init: %v", err)
 	}
-	defer turnServer.Close()
 
 	version := frontendVersion(cfg.WebDir)
 	log.Printf("frontend version: %s", version)
@@ -232,7 +235,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           accessLog(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
 		// WebSocket and per-request timeouts would terminate it. Auth gates
@@ -242,9 +245,66 @@ func main() {
 
 	log.Printf("auth enabled (cookie_secure=%v, connpass_present=%v)", cfg.CookieSecure, connPass.Status().Exists)
 	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			srvErr <- err
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-srvErr:
+		log.Fatalf("http server: %v", err)
+	case sig := <-stop:
+		log.Printf("shutdown: received %s, draining...", sig)
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: http: %v", err)
+	}
+	room.Close()
+	if err := turnServer.Close(); err != nil {
+		log.Printf("shutdown: turn: %v", err)
+	}
+	log.Printf("shutdown: done")
+}
+
+// statusRecorder captures the response status code so the access log can
+// report it. WriteHeader is the only http.ResponseWriter method that observes
+// the status; we keep the default 200 if a handler writes the body without
+// an explicit WriteHeader call.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// accessLog wraps a handler with one info-level log line per request.
+// Skips /healthz (docker healthcheck spam every 30s) and /ws (WebSocket
+// upgrade hijacks the connection — wrapping breaks Hijacker; sfu logs the
+// peer lifecycle separately).
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/ws" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		log.Printf("http %s %s %d %s ip=%s",
+			r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), clientIP(r))
+	})
 }
 
 func sessionFromRequest(cfg config.Config, r *http.Request) (auth.Session, bool) {
