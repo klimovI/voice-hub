@@ -111,7 +111,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
               <input
                 type="range"
                 min="0"
-                max="500"
+                max="300"
                 step="5"
                 value={participant.localVolume}
                 onChange={handleVolumeChange}

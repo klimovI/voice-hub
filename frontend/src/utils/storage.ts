@@ -17,7 +17,7 @@ export function loadPercentage(key: string, fallback: number): number {
 
 export function clampPercentage(value: number | string): number {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 70; // DEFAULT_RNNOISE_MIX
+  if (!Number.isFinite(numeric)) return 90; // DEFAULT_RNNOISE_MIX
   return Math.min(100, Math.max(0, Math.round(numeric)));
 }
 

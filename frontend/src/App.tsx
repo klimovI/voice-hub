@@ -481,8 +481,10 @@ export function App() {
 
   const handleAudioReset = useCallback(() => {
     store.setSendVolume(100);
-    store.setRnnoiseMix(70);
+    store.setRnnoiseMix(90);
+    store.setOutputVolume(100);
     audio.updateSendGain();
+    audio.applyAllRemoteGains();
 
     if (store.joinState === "joined") {
       store.setStatus("Audio tuning reset. Reconnect to apply mic path changes.", false, true);

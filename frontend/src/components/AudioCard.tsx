@@ -119,7 +119,7 @@ export function AudioCard({
           id="output-volume"
           type="range"
           min="0"
-          max="200"
+          max="300"
           step="5"
           value={outputVolume}
           onChange={(e) => onOutputVolumeChange(Number(e.target.value))}

@@ -102,12 +102,12 @@ export const useStore = create<AppState>((set, get) => ({
     localStorage.setItem(STORAGE_KEYS.sendVolume, String(v));
     set({ sendVolume: v });
   },
-  rnnoiseMix: loadPercentage(STORAGE_KEYS.rnnoiseMix, 70),
+  rnnoiseMix: loadPercentage(STORAGE_KEYS.rnnoiseMix, 90),
   setRnnoiseMix: (v) => {
     localStorage.setItem(STORAGE_KEYS.rnnoiseMix, String(v));
     set({ rnnoiseMix: v });
   },
-  outputVolume: loadNumber(STORAGE_KEYS.outputVolume, 50),
+  outputVolume: loadNumber(STORAGE_KEYS.outputVolume, 100),
   setOutputVolume: (v) => {
     localStorage.setItem(STORAGE_KEYS.outputVolume, String(v));
     set({ outputVolume: v });
