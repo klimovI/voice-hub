@@ -1,0 +1,11 @@
+"$schema" = "../gen/schemas/desktop-schema.json"
+
+[[permission]]
+identifier = "allow-shortcut"
+description = "Allow Voice Hub shortcut commands (get/set/start_capture/cancel_capture)."
+commands.allow = [
+    "get_shortcut",
+    "set_shortcut",
+    "start_capture",
+    "cancel_capture",
+]

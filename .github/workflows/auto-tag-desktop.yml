@@ -23,48 +23,67 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bump patch version
-        id: bump
+      - name: Resolve target version
+        id: ver
         run: |
           set -euo pipefail
 
-          OLD=$(jq -r '.version' src-tauri/tauri.conf.json)
-          IFS='.' read -r MAJ MIN PAT <<< "$OLD"
-          NEW="${MAJ}.${MIN}.$((PAT + 1))"
-          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          CURRENT=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse --verify --quiet "refs/tags/v$CURRENT" >/dev/null; then
+            IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+            NEW="${MAJ}.${MIN}.$((PAT + 1))"
+            echo "mode=bump" >> "$GITHUB_OUTPUT"
+          else
+            NEW="$CURRENT"
+            echo "mode=use-current" >> "$GITHUB_OUTPUT"
+          fi
+
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEW" >> "$GITHUB_OUTPUT"
 
+      - name: Bump files (only when patch-bumping)
+        if: steps.ver.outputs.mode == 'bump'
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
           jq --arg v "$NEW" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
           mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
-
           sed -i -E "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$NEW\"/}" src-tauri/Cargo.toml
 
       - name: Verify tag does not exist
         env:
-          TAG: ${{ steps.bump.outputs.tag }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "ERROR: tag $TAG already exists" >&2
             exit 1
           fi
 
-      - name: Commit, tag, push
+      - name: Commit (if bumped), tag, push
         env:
-          OLD: ${{ steps.bump.outputs.old }}
-          NEW: ${{ steps.bump.outputs.new }}
-          TAG: ${{ steps.bump.outputs.tag }}
+          MODE: ${{ steps.ver.outputs.mode }}
+          CURRENT: ${{ steps.ver.outputs.current }}
+          NEW: ${{ steps.ver.outputs.new }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
-          git commit -m "chore(desktop): bump $OLD → $NEW"
+
+          if [ "$MODE" = "bump" ]; then
+            git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
+            git commit -m "chore(desktop): bump $CURRENT → $NEW"
+            git push origin master
+          fi
+
           git tag "$TAG"
-          git push origin master
           git push origin "$TAG"
 
       - name: Trigger release-desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.bump.outputs.tag }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: gh workflow run release-desktop.yml -f tag="$TAG"

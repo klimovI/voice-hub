@@ -8,6 +8,8 @@ import { loadAppConfig, buildWsUrl } from "./config";
 import { clearLegacyStorage } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
 import { preloadEngine, isEngineReady } from "./hooks/useAudioEngine";
+import { isTauri } from "./utils/tauri";
+import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
 
@@ -99,7 +101,10 @@ export function App() {
       localStorage.setItem("voice-hub.output-muted", String(store.preDeafenOutputMuted));
       audio.applyAllRemoteGains();
     }
-    setSelfMuted(!store.selfMuted);
+    const nextMuted = !store.selfMuted;
+    setSelfMuted(nextMuted);
+    if (nextMuted) playMuteSound();
+    else playUnmuteSound();
   }, [store, audio, setSelfMuted]);
 
   const handleToggleOutputMute = useCallback(() => {
@@ -129,6 +134,34 @@ export function App() {
   }, [store, audio, setSelfMuted]);
 
   useGlobalShortcut(handleToggleSelfMute);
+
+  // ---- Tauri global hotkey bridge ----
+  // OS-level listener (rdev) emits "toggle-mute" regardless of window focus.
+  // The handler is captured via ref so the Tauri listener registers exactly
+  // once across renders instead of churning on every store change.
+  const toggleHandlerRef = useRef(handleToggleSelfMute);
+  useEffect(() => {
+    toggleHandlerRef.current = handleToggleSelfMute;
+  }, [handleToggleSelfMute]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("toggle-mute", () => {
+        if (useStore.getState().joinState !== "joined") return;
+        toggleHandlerRef.current();
+      }).then((off) => {
+        if (cancelled) off();
+        else unlisten = off;
+      }),
+    );
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // ---- Reconnect ----
 
