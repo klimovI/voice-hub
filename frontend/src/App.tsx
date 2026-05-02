@@ -7,7 +7,7 @@ import { useGlobalShortcut } from "./hooks/useShortcut";
 import { loadAppConfig, buildWsUrl } from "./config";
 import { clearLegacyStorage } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
-import { preloadEngine } from "./hooks/useAudioEngine";
+import { preloadEngine, isEngineReady } from "./hooks/useAudioEngine";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
 
@@ -270,9 +270,21 @@ export function App() {
       store.setJoinState("joining");
       store.setStatus("Запрашиваю микрофон...");
 
+      // Hot-swap path: if WASM denoiser isn't loaded yet (cold first visit on
+      // a slow link), join with engine=off so the user gets into the room
+      // immediately, then rebuild the graph with the selected engine when
+      // WASM finishes loading in the background. Avoids holding Join behind
+      // a multi-MB vendor fetch.
+      const targetEngine = store.engine;
+      const denoiserReady = isEngineReady(targetEngine);
+      const initialEngine: EngineKind = denoiserReady ? targetEngine : "off";
+      if (!denoiserReady) {
+        void preloadEngine(targetEngine);
+      }
+
       try {
-        const graph = await audio.prepareLocalAudio(store.engine, (stage) => {
-          if (stage === "mic-ready" && store.engine !== "off") {
+        const graph = await audio.prepareLocalAudio(initialEngine, (stage) => {
+          if (stage === "mic-ready" && initialEngine !== "off") {
             store.setStatus("Загрузка шумоподавителя…");
           }
         });
@@ -282,7 +294,49 @@ export function App() {
         await connectSfu(graph, display);
 
         store.setJoinState("joined");
-        store.setStatus("Подключено", false, true);
+        if (!denoiserReady) {
+          store.setStatus("Подключено. Шумоподавитель грузится…", false, true);
+        } else {
+          store.setStatus("Подключено", false, true);
+        }
+
+        if (!denoiserReady) {
+          void preloadEngine(targetEngine).then(async () => {
+            const s = useStore.getState();
+            if (s.joinState !== "joined") return;
+            if (s.engine !== targetEngine) return;
+            try {
+              const upgraded = await audio.rebuildLocalAudio(
+                targetEngine,
+                s.selfMuted,
+                peerIdRef.current,
+                () => sfu.getPeerConnection(),
+              );
+              micGraphRef.current = upgraded;
+              // Old graph's speaking loop was cancelled in teardown — restart on the new graph.
+              audio.startSpeaking(
+                upgraded,
+                () => useStore.getState().selfMuted,
+                () => peerIdRef.current,
+                (speaking) => {
+                  const pid = peerIdRef.current;
+                  if (!pid) return;
+                  const current = useStore.getState().participants.get(pid);
+                  if (current && current.speaking !== speaking) {
+                    store.updateParticipant(pid, { speaking });
+                  }
+                },
+              );
+              store.setStatus(`Шумоподавитель: ${targetEngine}`, false, true);
+            } catch (err) {
+              store.setStatus(
+                `Не удалось включить ${targetEngine}: ${err instanceof Error ? err.message : String(err)}`,
+                true,
+                true,
+              );
+            }
+          });
+        }
 
         // Start speaking loop (graph is preserved across reconnects, so this fires once).
         audio.startSpeaking(

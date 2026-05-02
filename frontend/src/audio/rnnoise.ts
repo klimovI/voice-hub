@@ -34,11 +34,15 @@ async function loadRnnoiseModule(): Promise<RnnoiseModule> {
   return cachedModulePromise;
 }
 
-// Fire-and-forget preload. Safe to call before user interaction; keeps the Join
+// Preload. Safe to call before user interaction; keeps the Join
 // flow snappy by shifting the ~250 KB rnnoise fetch + WASM init off the
-// critical path.
-export function preloadRnnoise(): void {
-  void loadRnnoiseModule().catch(() => undefined);
+// critical path. Resolves once the module is ready (or rejects on failure).
+export function preloadRnnoise(): Promise<void> {
+  return loadRnnoiseModule().then(() => undefined);
+}
+
+export function isRnnoiseReady(): boolean {
+  return cachedModule !== null;
 }
 
 // Gate constants. Tuned so that quiet word-edge phonemes (sibilants /s ʃ f/,

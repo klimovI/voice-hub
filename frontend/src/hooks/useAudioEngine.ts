@@ -22,13 +22,21 @@ import {
   stopRemoteSpeakingLoop,
   type RemoteParticipantAudio,
 } from "../audio/remote";
-import { preloadRnnoise } from "../audio/rnnoise";
-import { preloadDtln } from "../audio/dtln";
+import { preloadRnnoise, isRnnoiseReady } from "../audio/rnnoise";
+import { preloadDtln, isDtlnReady } from "../audio/dtln";
 import { DTLN_ASSET_BASE } from "../config";
 
-export function preloadEngine(engine: EngineKind): void {
-  if (engine === "rnnoise") preloadRnnoise();
-  else if (engine === "dtln") preloadDtln(DTLN_ASSET_BASE);
+export function preloadEngine(engine: EngineKind): Promise<void> {
+  if (engine === "rnnoise") return preloadRnnoise();
+  if (engine === "dtln") return preloadDtln(DTLN_ASSET_BASE);
+  return Promise.resolve();
+}
+
+export function isEngineReady(engine: EngineKind): boolean {
+  if (engine === "off") return true;
+  if (engine === "rnnoise") return isRnnoiseReady();
+  if (engine === "dtln") return isDtlnReady();
+  return true;
 }
 
 export interface AudioEngineRef {
@@ -103,7 +111,7 @@ export function useAudioEngine() {
   const prepareLocalAudio = useCallback(
     async (engine: EngineKind, onProgress?: (stage: "mic-ready") => void) => {
       // Kick off engine WASM warm-up in parallel with mic+context creation.
-      preloadEngine(engine);
+      void preloadEngine(engine);
       // AudioContext creation+resume runs in parallel with getUserMedia.
       // Both gate buildMicGraph; serializing them was needless waiting.
       const ctxPromise = (async () => {

@@ -37,10 +37,14 @@ async function ensureDtlnLoaded(assetBase: string): Promise<DtlnModule> {
   return dtlnModule!;
 }
 
-// Fire-and-forget DTLN preload. Mirrors preloadRnnoise: shifts the model
-// fetch + WASM init off the Join critical path.
-export function preloadDtln(assetBase: string): void {
-  void ensureDtlnLoaded(assetBase).catch(() => undefined);
+// DTLN preload. Mirrors preloadRnnoise: shifts the model fetch + WASM init
+// off the Join critical path. Resolves once ready (or rejects on failure).
+export function preloadDtln(assetBase: string): Promise<void> {
+  return ensureDtlnLoaded(assetBase).then(() => undefined);
+}
+
+export function isDtlnReady(): boolean {
+  return dtlnReady;
 }
 
 export interface DtlnHandle {
