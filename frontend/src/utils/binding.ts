@@ -164,24 +164,3 @@ export function canonicalizeKeys(keys: string[]): string[] {
   return [...mods, ...rest];
 }
 
-export function matchesBinding(event: KeyboardEvent, binding: InputBinding): boolean {
-  if (binding.kind !== "keyboard") return false;
-  const want = new Set(binding.keys);
-  if (want.has("Ctrl") !== event.ctrlKey) return false;
-  if (want.has("Shift") !== event.shiftKey) return false;
-  if (want.has("Alt") !== event.altKey) return false;
-  if (want.has("Meta") !== event.metaKey) return false;
-  const label = labelFromCode(event.code);
-  if (!label) return false;
-  const nonModifier = binding.keys.find(
-    (k) => k !== "Ctrl" && k !== "Shift" && k !== "Alt" && k !== "Meta",
-  );
-  if (nonModifier) {
-    // Trigger key must be the bound non-modifier — otherwise typing while
-    // holding the modifier set would fire on every keystroke.
-    return label === nonModifier;
-  }
-  // Modifier-only binding: fire when the trigger key itself is one of the
-  // bound modifiers (and the rest are already held, checked above).
-  return want.has(label);
-}
