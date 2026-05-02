@@ -21,6 +21,8 @@ services:
   app:
     image: ghcr.io/klimovi/voice-hub-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    mem_limit: 384m
+    mem_reservation: 128m
     environment:
       APP_ADDR: ":8080"
       WEB_DIR: "/app/web"
