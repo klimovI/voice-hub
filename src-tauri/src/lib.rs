@@ -1,13 +1,17 @@
 mod commands;
 mod listener;
 mod shortcut;
+mod tray;
 mod updater;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::listener::ListenerState;
+
+pub struct QuitFlag(pub AtomicBool);
 
 pub fn run() {
     let base_url = option_env!("APP_BASE_URL").unwrap_or("http://localhost:8080/");
@@ -27,20 +31,37 @@ pub fn run() {
             updater::apply_update,
         ])
         .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::Focused(true)) && window.label() == "main" {
-                let app = window.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    updater::check_on_focus(app).await;
-                });
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Focused(true) => {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        updater::check_on_focus(app).await;
+                    });
+                }
+                WindowEvent::CloseRequested { api, .. } => {
+                    let flag = window.state::<QuitFlag>();
+                    if !flag.0.load(Ordering::SeqCst) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                _ => {}
             }
         })
         .setup(move |app| {
+            app.manage(QuitFlag(AtomicBool::new(false)));
+
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Voice Hub")
                 .inner_size(1440.0, 980.0)
                 .min_inner_size(1100.0, 760.0)
                 .resizable(true)
                 .build()?;
+
+            tray::init(app)?;
 
             let handle = app.handle().clone();
 

@@ -44,7 +44,11 @@ export function Login() {
   return (
     <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,24px)]">
       <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
-        <span className="w-2.5 h-2.5 rounded-full bg-accent shadow-[0_0_14px_var(--color-accent)]" />
+        <img
+          src="/favicon.svg"
+          alt=""
+          className="w-7 h-7 rounded-[8px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
+        />
         Voice Hub
       </div>
       <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
