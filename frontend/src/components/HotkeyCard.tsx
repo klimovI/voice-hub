@@ -54,37 +54,16 @@ function CardView({ api }: { api: HotkeyApi }) {
       </div>
       <label className="block text-[12px] font-medium text-muted">
         Click input, then press a combo
-        <div className="relative">
-          <input
-            id="shortcut-input"
-            type="text"
-            readOnly
-            value={display}
-            onClick={api.start}
-            onBlur={api.cancel}
-            onKeyDown={api.onKeyDown}
-            className="input-field cursor-pointer pr-9"
-          />
-          {api.binding && !api.capturing ? (
-            <button
-              id="shortcut-clear"
-              type="button"
-              aria-label="Clear binding"
-              title="Clear"
-              onMouseDown={(e) => {
-                // Prevent input blur from cancelling before click fires.
-                e.preventDefault();
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                api.clear();
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded text-muted hover:text-fg hover:bg-white/10 flex items-center justify-center"
-            >
-              ×
-            </button>
-          ) : null}
-        </div>
+        <input
+          id="shortcut-input"
+          type="text"
+          readOnly
+          value={display}
+          onClick={api.start}
+          onBlur={api.cancel}
+          onKeyDown={api.onKeyDown}
+          className="input-field cursor-pointer"
+        />
       </label>
       <div className="flex flex-wrap gap-2.5">
         <button
@@ -95,6 +74,15 @@ function CardView({ api }: { api: HotkeyApi }) {
           className="btn btn-secondary btn-mini"
         >
           Reset to default
+        </button>
+        <button
+          id="shortcut-clear"
+          type="button"
+          onClick={api.clear}
+          disabled={api.capturing || !api.binding}
+          className="btn btn-danger btn-mini"
+        >
+          Clear
         </button>
       </div>
     </section>
