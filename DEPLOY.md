@@ -87,7 +87,9 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 |---|---|
 | `DEPLOY_HOST` | IP или домен сервера |
 | `DEPLOY_SSH_KEY` | приватный ключ deploy-пользователя (целиком, с BEGIN/END) |
-| `PROD_ENV` | весь `.env` целиком (см. формат выше) |
+| `APP_HOSTNAME` | публичный домен. Используется только backend-deploy (Caddy + `APP_HOSTNAME` env). Desktop-релиз больше его не читает — бинарь generic, host вводит пользователь. |
+| `PROD_ENV` | остальной `.env` целиком (см. формат выше) |
+| `TAURI_SIGNING_PRIVATE_KEY` | приватный ключ для подписи desktop-релизов |
 
 После первого успешного `build` — на github.com/<owner>?tab=packages для `voice-hub-app` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
 

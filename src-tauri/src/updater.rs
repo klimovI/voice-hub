@@ -7,6 +7,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+use crate::connection;
 use crate::QuitFlag;
 
 const INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -16,6 +17,8 @@ const TRAY_ID: &str = "main";
 const ITEM_UPDATE: &str = "update_apply";
 const ITEM_CHECK: &str = "update_check";
 const ITEM_SHOW: &str = "show_window";
+const ITEM_CHANGE_SERVER: &str = "change_server";
+const ITEM_DISCONNECT: &str = "disconnect";
 const ITEM_QUIT: &str = "quit";
 
 pub struct UpdaterState {
@@ -175,25 +178,38 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn base_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let connected = connection::load_host().is_some();
     let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
     let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
+    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
+    let disconnect =
+        MenuItem::with_id(app, ITEM_DISCONNECT, "Disconnect", connected, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
     MenuBuilder::new(app)
         .item(&show)
         .item(&check)
-        .item(&sep)
+        .item(&sep1)
+        .item(&change)
+        .item(&disconnect)
+        .item(&sep2)
         .item(&quit)
         .build()
 }
 
 fn update_tray_for_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
+    let connected = connection::load_host().is_some();
     let label = format!("Install v{version}");
     let apply = MenuItem::with_id(app, ITEM_UPDATE, &label, true, None::<&str>)?;
     let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
     let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
+    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
+    let disconnect =
+        MenuItem::with_id(app, ITEM_DISCONNECT, "Disconnect", connected, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
         .item(&apply)
@@ -201,6 +217,9 @@ fn update_tray_for_available(app: &AppHandle, version: &str) -> tauri::Result<()
         .item(&show)
         .item(&check)
         .item(&sep2)
+        .item(&change)
+        .item(&disconnect)
+        .item(&sep3)
         .item(&quit)
         .build()?;
 
@@ -227,6 +246,18 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                     eprintln!("updater: apply failed: {err}");
                 }
             });
+        }
+        ITEM_CHANGE_SERVER => {
+            show_main(app);
+            if let Err(err) = connection::change_server(app.clone()) {
+                eprintln!("change_server: {err}");
+            }
+        }
+        ITEM_DISCONNECT => {
+            show_main(app);
+            if let Err(err) = connection::disconnect(app.clone()) {
+                eprintln!("disconnect: {err}");
+            }
         }
         ITEM_QUIT => {
             if let Some(flag) = app.try_state::<QuitFlag>() {

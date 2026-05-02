@@ -42,7 +42,7 @@ VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает о
 
 ## Desktop (Tauri)
 
-Desktop-обёртка на Tauri 2 в `src-tauri/`. Грузит remote URL (`APP_BASE_URL`, по умолчанию `http://localhost:8080/`) через `WebviewUrl::External` — webview сам сохраняет cookie между запусками, login один раз. В бинаре только hostname, никаких секретов.
+Desktop-обёртка на Tauri 2 в `src-tauri/`. Бинарь generic — никаких host'ов или секретов. При первом запуске показывает локальный экран `connect.html` для ввода адреса сервера; host сохраняется в OS keychain. Смена сервера через трей: `Change server` / `Disconnect`.
 
 Глобальный hotkey (toggle-mute, по умолчанию `Ctrl+Shift+M`) работает системно через `rdev` — слышит нажатие даже когда окно не в фокусе.
 
@@ -78,7 +78,7 @@ CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
 
 ### Конфигурация
 
-Build-time env: `APP_BASE_URL` (например `https://your-host.example.com/`). Бейкается в бинарь через `option_env!`. Дефолт — `http://localhost:8080/`. Никаких секретов в бинаре: ICE-конфиг и signaling клиент тянет из бэкенда после login.
+Никаких build-time env. Бинарь generic, host вводится пользователем при первом запуске и хранится в OS keychain (`keyring` crate). ICE/TURN-конфиг и signaling клиент тянет из бэкенда после login.
 
 ## Структура
 

@@ -1,13 +1,14 @@
 {
   "identifier": "default",
-  "description": "Default desktop capability for the main window",
+  "description": "Default desktop capability for the main window. Allows the local connect screen and any HTTPS Voice Hub instance the user enters.",
   "windows": ["main"],
   "remote": {
-    "urls": ["https://__APP_HOSTNAME__/**"]
+    "urls": ["https://**", "http://localhost/**", "http://127.0.0.1/**"]
   },
   "permissions": [
     "core:default",
     "allow-shortcut",
-    "allow-updater-app"
+    "allow-updater-app",
+    "allow-connection"
   ]
 }

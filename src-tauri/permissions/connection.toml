@@ -1,0 +1,11 @@
+"$schema" = "../gen/schemas/desktop-schema.json"
+
+[[permission]]
+identifier = "allow-connection"
+description = "Allow Voice Hub connection commands (get_state/set_host/disconnect/change_server)."
+commands.allow = [
+    "get_state",
+    "set_host",
+    "disconnect",
+    "change_server",
+]

@@ -263,6 +263,13 @@ func authenticated(cfg config.Config, connPass *auth.ConnPassStore, r *http.Requ
 
 func requireAuthHTML(cfg config.Config, connPass *auth.ConnPassStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// connect.html is bundled into frontend/dist for the Tauri desktop app
+		// only — it has no purpose in a browser (Tauri-only `invoke()` calls).
+		// Hide it from backend consumers entirely.
+		if r.URL.Path == "/connect.html" {
+			http.NotFound(w, r)
+			return
+		}
 		// Login page, its assets, and the favicon must be reachable without auth.
 		// /assets/ and /vendor/ are Vite-emitted static bundles and vendor WASM —
 		// no sensitive content, safe to serve unauthenticated.

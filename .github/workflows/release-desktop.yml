@@ -94,22 +94,9 @@ jobs:
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Inject hostname into IPC capability
-        shell: bash
-        env:
-          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
-        run: |
-          set -euo pipefail
-          if [ -z "$APP_HOSTNAME" ]; then
-            echo "ERROR: secrets.APP_HOSTNAME not set" >&2
-            exit 1
-          fi
-          sed -i "s|__APP_HOSTNAME__|$APP_HOSTNAME|g" src-tauri/capabilities/default.json
-
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_BASE_URL: https://${{ secrets.APP_HOSTNAME }}/
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           projectPath: src-tauri

@@ -1,4 +1,5 @@
 mod commands;
+mod connection;
 mod listener;
 mod shortcut;
 mod updater;
@@ -13,8 +14,15 @@ use crate::listener::ListenerState;
 pub struct QuitFlag(pub AtomicBool);
 
 pub fn run() {
-    let base_url = option_env!("APP_BASE_URL").unwrap_or("http://localhost:8080/");
-    let url: tauri::Url = base_url.parse().expect("invalid APP_BASE_URL");
+    // Pick the initial URL from the saved host (if any). With no host, load
+    // the local connect.html screen — the user enters their server there.
+    let initial_url = match connection::load_host() {
+        Some(host) => match connection::normalize_host(&host) {
+            Ok(url) => WebviewUrl::External(url),
+            Err(_) => WebviewUrl::App("connect.html".into()),
+        },
+        None => WebviewUrl::App("connect.html".into()),
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -25,6 +33,10 @@ pub fn run() {
             commands::clear_shortcut,
             commands::start_capture,
             commands::cancel_capture,
+            connection::get_state,
+            connection::set_host,
+            connection::disconnect,
+            connection::change_server,
             updater::check_for_update,
             updater::apply_update,
         ])
@@ -52,7 +64,7 @@ pub fn run() {
         .setup(move |app| {
             app.manage(QuitFlag(AtomicBool::new(false)));
 
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            WebviewWindowBuilder::new(app, "main", initial_url)
                 .title("Voice Hub")
                 .inner_size(1440.0, 980.0)
                 .min_inner_size(1100.0, 760.0)

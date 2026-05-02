@@ -21,7 +21,7 @@
 
 ## Безопасность
 
-- Бинарь Tauri **не должен содержать секретов** — только `APP_HOSTNAME`. ICE/TURN credentials и signaling URL приходят с бэкенда после login.
+- Бинарь Tauri **не должен содержать секретов или хардкоженных host'ов**. Host вводит пользователь при первом запуске, хранится в OS keychain. ICE/TURN credentials и signaling URL приходят с бэкенда после login.
 - Приватный ключ подписи updater'а (`~/.tauri/voice-hub.key`) — только в GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`, никогда в репо.
 - При работе с `tauri.conf.json` → `plugins.updater.pubkey`: это публичный ключ, его раскрытие безопасно (на то он и публичный).
 
