@@ -21,6 +21,8 @@
 - [x] Deafen mode (mute mic + output одной кнопкой)
 - [x] Расширенные диапазоны слайдеров громкости
 - [x] Hotkey toggle-mute (по умолчанию Ctrl+Shift+M)
+- [x] Глобальный hotkey в Tauri через `rdev` (срабатывает когда окно не в фокусе)
+- [x] Minimize-to-tray (Discord-style) — окно сворачивается в трей вместо закрытия
 
 ### Infra
 - [x] `docker-compose.yml` для локального dev
@@ -45,7 +47,6 @@ _(пусто)_
 - [ ] Migration на AudioWorklet (ScriptProcessorNode deprecated)
 
 ### UX
-- [ ] **Глобальный hotkey** в Tauri через `tauri-plugin-global-shortcut` (web-страница не может, в desktop-обёртке — может)
 - [ ] Push-to-talk режим
 - [ ] Speaking-индикатор для чужих (server-side VAD в pion SFU)
 
@@ -54,5 +55,4 @@ _(пусто)_
 
 ## Frozen / decided not to do
 
-- ❌ **Каскад DTLN+RNNoise.** Двойное нейронное подавление даёт musical-noise артефакты. Один движок за раз.
 - ❌ **Аккаунты / много комнат.** Не нужно для 3 человек.

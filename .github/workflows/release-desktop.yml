@@ -75,8 +75,16 @@ jobs:
           fixes=$(echo "$LOG"  | grep -E  '^(fix|perf)[!(:]'  | sed 's/^/- /' || true)
           others=$(echo "$LOG" | grep -vE '^(feat|fix|perf)[!(:]' | sed 's/^/- /' || true)
 
+          VERSION="${TAG#v}"
+          INSTALLER="Voice.Hub_${VERSION}_x64-setup.exe"
+          INSTALLER_URL="https://github.com/${REPO}/releases/download/${TAG}/${INSTALLER}"
+
           {
             echo 'body<<CHANGELOG_EOF'
+            echo '## Download'
+            echo
+            echo "**Windows:** [\`${INSTALLER}\`](${INSTALLER_URL})"
+            echo
             if [ -n "$feats"  ]; then echo '## Features';    echo "$feats";  echo; fi
             if [ -n "$fixes"  ]; then echo '## Fixes';       echo "$fixes";  echo; fi
             if [ -n "$others" ]; then echo '## Other';       echo "$others"; echo; fi

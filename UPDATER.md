@@ -78,7 +78,7 @@ git push origin master --tags
 - Фронт делает feature-detect через `try/catch` на `invoke()` — для мелочи.
 - Для критичного — добавить в фронт чек версии shell через `getVersion()` из `@tauri-apps/api/app`, и блокировать UI с message "Обнови приложение" если меньше требуемой.
 
-Сейчас shell не экспортит ни одной custom команды (`lib.rs` только окно создаёт), так что несовместимости нет.
+Сейчас shell экспортит несколько IPC-команд для hotkey UI (`get_shortcut`, `set_shortcut`, `clear_shortcut`, `start_capture`, `cancel_capture`). Если фронт начнёт вызывать новую команду — добавь её сначала в shell, выпусти релиз, потом катай фронт.
 
 ## Troubleshooting
 

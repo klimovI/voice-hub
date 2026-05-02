@@ -1,5 +1,9 @@
 # voice-hub
 
+[![Latest release](https://img.shields.io/github/v/release/klimovI/voice-hub?label=release&color=blue)](https://github.com/klimovI/voice-hub/releases/latest)
+[![Release Desktop](https://github.com/klimovI/voice-hub/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/klimovI/voice-hub/actions/workflows/release-desktop.yml)
+[![License](https://img.shields.io/github/license/klimovI/voice-hub)](LICENSE)
+
 Self-hosted голосовая комната для маленьких компаний. Заточена под игры: фокус на чистом звуке и низкой задержке.
 
 - одна постоянная комната, 3–10 человек
@@ -7,13 +11,30 @@ Self-hosted голосовая комната для маленьких комп
 - два движка денойза на выбор, переключение без переподключения
 - весь стейт в браузере — никаких аккаунтов
 
+## Скачать (Windows)
+
+⬇ **[Последний релиз](https://github.com/klimovI/voice-hub/releases/latest)** → `Voice.Hub_<version>_x64-setup.exe`.
+
+NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует. Auto-update встроен.
+
 ## Local dev
+
+Полный стек в Docker:
 
 ```bash
 docker compose up -d --build
 ```
 
-Открыть `http://localhost:8080`. Логин/пароль: `dev` / `dev` (basic auth, переопредели через `APP_AUTH_USER` / `APP_AUTH_PASSWORD` в `docker-compose.yml`). Стоп: `docker compose down`. Логи: `docker compose logs -f app janus`.
+Открыть `http://localhost:8080`, зайти как `dev` / `dev` (login-форма; переопредели через `APP_AUTH_USER` / `APP_AUTH_PASSWORD` в `docker-compose.yml`). Стоп: `docker compose down`. Логи: `docker compose logs -f app`.
+
+### Разработка фронта (бэк в докере, фронт локально с HMR)
+
+```bash
+docker compose up -d app                  # бэк на :8080
+cd frontend && npm install && npm run dev # vite на :5173
+```
+
+Открыть `http://localhost:5173`. Vite проксирует `/api` и `/ws` на бэк (см. `frontend/vite.config.ts`), так что login и WebRTC работают как из обычного :8080.
 
 ## Production
 
@@ -23,51 +44,53 @@ VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает о
 
 Desktop-обёртка на Tauri 2 в `src-tauri/`. Грузит remote URL (`APP_BASE_URL`, по умолчанию `http://localhost:8080/`) через `WebviewUrl::External` — webview сам сохраняет cookie между запусками, login один раз. В бинаре только hostname, никаких секретов.
 
-### Скачать готовый билд (Windows)
+Глобальный hotkey (toggle-mute, по умолчанию `Ctrl+Shift+M`) работает системно через `rdev` — слышит нажатие даже когда окно не в фокусе.
 
-Билды собираются GitHub Actions, публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest):
+### Релиз
 
-- **`Voice Hub_<version>_x64-setup.exe`** — NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует. Поддерживает auto-update через `tauri-plugin-updater` (детали в [UPDATER.md](UPDATER.md)).
+Авто-релиз: push изменений в `src-tauri/**` в master → `auto-tag-desktop.yml` бампит patch → тег `v*` → `release-desktop.yml` собирает + подписывает + публикует в GitHub Releases. Изменения только в `frontend/**` или `backend/**` шелл-релиз не требуют — фронт обновляется через backend deploy.
 
-### Релиз (как собрать новый билд)
+Ручной запуск: Actions → "Release Desktop" → "Run workflow".
 
-Авто-релиз: push изменений в `src-tauri/**` в master → `auto-tag-desktop.yml` бампит patch версию → тег `v*` → `release-desktop.yml` собирает + подписывает + публикует. Изменения в `frontend/**` или `backend/**` шелл-релиз не требуют — фронт обновляется через backend deploy сам по себе.
-
-Ручной запуск (если надо протестить): Actions → "Release Desktop" → "Run workflow".
-
-Версия в имени `.exe` берётся из `src-tauri/tauri.conf.json` → `version`. Перед тегом обнови это поле, иначе несколько релизов будут собираться с одинаковым именем файла.
+Подробнее про auto-update — в [UPDATER.md](UPDATER.md).
 
 ### Локальная сборка
 
-**Требования:** Rust toolchain, `cargo install tauri-cli --version '^2'`, системные зависимости Tauri.
-
-**Запуск из исходников:**
+**Из исходников (dev-режим):**
 
 ```bash
 cd src-tauri
+cargo install tauri-cli --version '^2'   # один раз
 cargo tauri dev
 ```
 
-**Кросс-сборка под Windows из Linux** через `cargo-xwin` — детали в [TAURI_WINDOWS_BUILD_PLAN.md](TAURI_WINDOWS_BUILD_PLAN.md). Артефакт — NSIS-установщик.
+**Кросс-сборка под Windows из Linux/WSL** через [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin):
+
+```bash
+cd src-tauri
+cargo install cargo-xwin
+rustup target add x86_64-pc-windows-msvc
+CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
+  cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
+```
+
+Артефакт — NSIS-установщик в `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
 
 ### Конфигурация
 
 Build-time env: `APP_BASE_URL` (например `https://your-host.example.com/`). Бейкается в бинарь через `option_env!`. Дефолт — `http://localhost:8080/`. Никаких секретов в бинаре: ICE-конфиг и signaling клиент тянет из бэкенда после login.
 
-Hotkey в Tauri пока оконный, не глобальный системный.
-
 ## Структура
 
 ```
 backend/   Go HTTP-сервер: auth + статика + /ws (signaling) + pion SFU + pion TURN
-frontend/  React 18 + TypeScript + Vite. Билдится в web/.
-web/       build output из frontend/ (статика, отдаётся бэкендом)
+frontend/  React 18 + TypeScript + Vite. Билдится в frontend/dist/
 src-tauri/ desktop-обёртка на Tauri 2 (remote URL)
 deploy/    Caddyfile
-.github/   CI: build & push в ghcr.io, deploy по SSH
+.github/   CI: build & push в ghcr.io, deploy по SSH, release desktop
 ```
 
-Дальше: [DEPLOY.md](DEPLOY.md) — прод на VPS · [ROADMAP.md](ROADMAP.md) — что сделано и что дальше.
+Дальше: [DEPLOY.md](DEPLOY.md) — прод на VPS · [ROADMAP.md](ROADMAP.md) — что сделано и что дальше · [AGENTS.md](AGENTS.md) — правила для AI-агентов.
 
 ---
 
@@ -88,9 +111,9 @@ deploy/    Caddyfile
      └──────▶└──────────────────────────┘
 ```
 
-Один Go-бинарь делает всё: cookie-auth, отдача статики из `web/`, JSON-WS signaling, pion SFU (audio-only forwarding), pion TURN (HMAC short-term creds). Janus и coturn убраны.
+Один Go-бинарь делает всё: cookie-auth, отдача статики из `frontend/dist/`, JSON-WS signaling, pion SFU (audio-only forwarding), pion TURN (HMAC short-term creds).
 
-Свой speaking считается локально по RMS на `AnalyserNode`. Чужой speaking-индикатор не реализован (server-side VAD пока нет в pion SFU-обёртке).
+Свой speaking считается локально по RMS на `AnalyserNode`. Чужой speaking-индикатор не реализован.
 
 ### Аудиограф
 
