@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'src-tauri/**'
+  workflow_dispatch:
 
 concurrency:
   group: auto-tag-desktop
