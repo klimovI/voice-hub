@@ -20,11 +20,14 @@ import { AudioCard } from "./components/AudioCard";
 import { HotkeyCard } from "./components/HotkeyCard";
 import { ParticipantsCard } from "./components/ParticipantsCard";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { Footer } from "./components/Footer";
+import { useAppVersion } from "./hooks/useAppVersion";
 
 export function App() {
   const store = useStore();
   const audio = useAudioEngine();
   const sfu = useSFU();
+  const { bootVersion, update, reload, applyDesktopUpdate } = useAppVersion();
 
   // Track current mic graph for self-mute updates.
   const micGraphRef = useRef<MicGraph | null>(null);
@@ -513,7 +516,7 @@ export function App() {
   return (
     <main className="grid w-[min(1180px,100%)] gap-[22px] mx-auto px-5 pt-7 pb-15 max-[640px]:px-3 max-[640px]:pt-4 max-[640px]:pb-10">
       <TopBar />
-      <UpdateBanner />
+      <UpdateBanner update={update} reload={reload} applyDesktopUpdate={applyDesktopUpdate} />
       <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
         <div className="grid gap-[22px] content-start">
           <SessionCard
@@ -538,6 +541,7 @@ export function App() {
           <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
         </div>
       </div>
+      <Footer uiVersion={bootVersion} />
     </main>
   );
 }

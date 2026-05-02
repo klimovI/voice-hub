@@ -19,6 +19,7 @@ async function fetchVersion(): Promise<string | null> {
 }
 
 export function useAppVersion(): {
+  bootVersion: string | null;
   update: AppUpdate | null;
   reload: () => void;
   applyDesktopUpdate: () => void;
@@ -104,5 +105,5 @@ export function useAppVersion(): {
     });
   };
 
-  return { update, reload, applyDesktopUpdate };
+  return { bootVersion, update, reload, applyDesktopUpdate };
 }

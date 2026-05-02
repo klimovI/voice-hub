@@ -1,9 +1,14 @@
-import { useAppVersion } from "../hooks/useAppVersion";
+import type { AppUpdate } from "../hooks/useAppVersion";
 import { useStore } from "../store/useStore";
 import { REJOIN_ON_LOAD_KEY } from "../utils/rejoin";
 
-export function UpdateBanner() {
-  const { update, reload, applyDesktopUpdate } = useAppVersion();
+interface Props {
+  update: AppUpdate | null;
+  reload: () => void;
+  applyDesktopUpdate: () => void;
+}
+
+export function UpdateBanner({ update, reload, applyDesktopUpdate }: Props) {
   const joinState = useStore((s) => s.joinState);
 
   if (!update) return null;
