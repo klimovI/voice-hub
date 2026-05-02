@@ -16,6 +16,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
