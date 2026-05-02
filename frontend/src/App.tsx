@@ -27,7 +27,7 @@ export function App() {
   const store = useStore();
   const audio = useAudioEngine();
   const sfu = useSFU();
-  const { bootVersion, update, reload, applyDesktopUpdate } = useAppVersion();
+  const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
 
   // Track current mic graph for self-mute updates.
   const micGraphRef = useRef<MicGraph | null>(null);
@@ -519,7 +519,12 @@ export function App() {
   return (
     <main className="grid w-[min(1180px,100%)] gap-[22px] mx-auto px-5 pt-7 pb-15 max-[640px]:px-3 max-[640px]:pt-4 max-[640px]:pb-10">
       <TopBar />
-      <UpdateBanner update={update} reload={reload} applyDesktopUpdate={applyDesktopUpdate} />
+      <UpdateBanner
+        update={update}
+        reload={reload}
+        applyDesktopUpdate={applyDesktopUpdate}
+        desktopApplyState={desktopApplyState}
+      />
       <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
         <div className="grid gap-[22px] content-start">
           <SessionCard

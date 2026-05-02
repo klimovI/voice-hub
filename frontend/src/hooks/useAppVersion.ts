@@ -7,6 +7,17 @@ type FrontendUpdate = { kind: "frontend"; current: string; next: string };
 type DesktopUpdate = { kind: "desktop"; version: string };
 export type AppUpdate = FrontendUpdate | DesktopUpdate;
 
+export type DesktopUpdateProgress = {
+  downloaded: number;
+  total: number | null;
+};
+
+export type DesktopApplyState =
+  | { phase: "idle" }
+  | { phase: "downloading"; progress: DesktopUpdateProgress | null }
+  | { phase: "installing" }
+  | { phase: "error"; message: string };
+
 async function fetchVersion(): Promise<string | null> {
   try {
     const res = await fetch("/api/version", { cache: "no-store" });
@@ -23,10 +34,12 @@ export function useAppVersion(): {
   update: AppUpdate | null;
   reload: () => void;
   applyDesktopUpdate: () => void;
+  desktopApplyState: DesktopApplyState;
 } {
   const [bootVersion, setBootVersion] = useState<string | null>(null);
   const [frontendNext, setFrontendNext] = useState<string | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdate | null>(null);
+  const [desktopApplyState, setDesktopApplyState] = useState<DesktopApplyState>({ phase: "idle" });
 
   useEffect(() => {
     let cancelled = false;
@@ -71,19 +84,33 @@ export function useAppVersion(): {
 
   useEffect(() => {
     if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
     let cancelled = false;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen<{ version: string }>("update-available", (event) => {
-        setDesktopUpdate({ kind: "desktop", version: event.payload.version });
-      }).then((off) => {
-        if (cancelled) off();
-        else unlisten = off;
-      }),
-    );
+    void import("@tauri-apps/api/event").then(async ({ listen }) => {
+      const subs = await Promise.all([
+        listen<{ version: string }>("update-available", (event) => {
+          setDesktopUpdate({ kind: "desktop", version: event.payload.version });
+          setDesktopApplyState((prev) => (prev.phase === "error" ? prev : { phase: "idle" }));
+        }),
+        listen<{ downloaded: number; total: number | null }>("update-progress", (event) => {
+          setDesktopApplyState({
+            phase: "downloading",
+            progress: { downloaded: event.payload.downloaded, total: event.payload.total },
+          });
+        }),
+        listen<unknown>("update-installing", () => {
+          setDesktopApplyState({ phase: "installing" });
+        }),
+        listen<{ message: string }>("update-error", (event) => {
+          setDesktopApplyState({ phase: "error", message: event.payload.message });
+        }),
+      ]);
+      if (cancelled) subs.forEach((off) => off());
+      else unlisteners.push(...subs);
+    });
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisteners.forEach((off) => off());
     };
   }, []);
 
@@ -98,12 +125,14 @@ export function useAppVersion(): {
   };
 
   const applyDesktopUpdate = () => {
+    setDesktopApplyState({ phase: "downloading", progress: null });
     void import("@tauri-apps/api/core").then(({ invoke }) => {
-      void invoke("apply_update").catch(() => {
-        /* user can retry from tray */
+      void invoke("apply_update").catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err ?? "unknown error");
+        setDesktopApplyState({ phase: "error", message });
       });
     });
   };
 
-  return { bootVersion, update, reload, applyDesktopUpdate };
+  return { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState };
 }
