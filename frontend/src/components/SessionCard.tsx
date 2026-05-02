@@ -20,6 +20,7 @@ export function SessionCard({
   const joinState = useStore((s) => s.joinState);
   const selfMuted = useStore((s) => s.selfMuted);
   const deafened = useStore((s) => s.deafened);
+  const configReady = useStore((s) => s.configReady);
 
   const joining = joinState === "joining";
   const joined = joinState === "joined";
@@ -64,10 +65,10 @@ export function SessionCard({
           <button
             id="join-button"
             type="submit"
-            disabled={joining || joined}
+            disabled={joining || joined || !configReady}
             className="btn btn-primary"
           >
-            Join Room
+            {configReady ? "Join Room" : "Loading…"}
           </button>
           <button
             id="self-mute-button"

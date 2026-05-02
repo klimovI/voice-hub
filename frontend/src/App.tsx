@@ -60,6 +60,7 @@ export function App() {
       .then((cfg) => {
         // Store config for use at join time.
         configRef.current = cfg;
+        store.setConfigReady(true);
         store.setStatus("Ready");
         if (shouldRejoin) {
           const name = localStorage.getItem("voice-hub.display-name") ?? "";

@@ -31,6 +31,11 @@ export interface AppState {
   joinState: JoinState;
   setJoinState: (s: JoinState) => void;
 
+  // True once /api/config has resolved — gates Join so users can't click
+  // before iceServers are known.
+  configReady: boolean;
+  setConfigReady: (v: boolean) => void;
+
   // Self audio controls
   selfMuted: boolean;
   setSelfMuted: (v: boolean) => void;
@@ -77,6 +82,8 @@ export const useStore = create<AppState>((set, get) => ({
   // Join state
   joinState: "idle",
   setJoinState: (s) => set({ joinState: s }),
+  configReady: false,
+  setConfigReady: (v) => set({ configReady: v }),
 
   // Self audio controls
   selfMuted: false,
