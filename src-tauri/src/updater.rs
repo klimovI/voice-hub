@@ -58,12 +58,13 @@ pub async fn check_on_focus(app: AppHandle) {
 }
 
 async fn check(app: AppHandle, force: bool) {
+    let shared: SharedUpdater = match app.try_state::<SharedUpdater>() {
+        Some(s) => s.inner().clone(),
+        None => return,
+    };
+
     if !force {
-        let state = match app.try_state::<SharedUpdater>() {
-            Some(s) => s,
-            None => return,
-        };
-        if let Ok(s) = state.lock() {
+        if let Ok(s) = shared.lock() {
             if let Some(prev) = s.last_checked {
                 if prev.elapsed() < FOCUS_THROTTLE {
                     return;
@@ -72,14 +73,8 @@ async fn check(app: AppHandle, force: bool) {
         }
     }
 
-    {
-        let state = match app.try_state::<SharedUpdater>() {
-            Some(s) => s,
-            None => return,
-        };
-        if let Ok(mut s) = state.lock() {
-            s.last_checked = Some(Instant::now());
-        }
+    if let Ok(mut s) = shared.lock() {
+        s.last_checked = Some(Instant::now());
     }
 
     let updater = match app.updater() {
@@ -100,17 +95,15 @@ async fn check(app: AppHandle, force: bool) {
     };
 
     let version = update.version.clone();
-    if let Some(state) = app.try_state::<SharedUpdater>() {
-        if let Ok(mut s) = state.lock() {
-            let already_known = s
-                .pending
-                .as_ref()
-                .map(|u| u.version == version)
-                .unwrap_or(false);
-            s.pending = Some(update);
-            if already_known {
-                return;
-            }
+    if let Ok(mut s) = shared.lock() {
+        let already_known = s
+            .pending
+            .as_ref()
+            .map(|u| u.version == version)
+            .unwrap_or(false);
+        s.pending = Some(update);
+        if already_known {
+            return;
         }
     }
 
