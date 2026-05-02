@@ -25,17 +25,15 @@ Desktop-обёртка на Tauri 2 в `src-tauri/`. Грузит remote URL (`A
 
 ### Скачать готовый билд (Windows)
 
-Билды собираются GitHub Actions, публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest). Два варианта:
+Билды собираются GitHub Actions, публикуются в [Releases](https://github.com/klimovI/voice-hub/releases/latest):
 
-- **`voice-hub-desktop.exe`** — standalone, скачал и запустил, без установки. Требует Microsoft Edge WebView2 на машине (Windows 11 — есть всегда; Windows 10 — есть в подавляющем большинстве после 2023).
-- **`Voice Hub_<version>_x64-setup.exe`** — NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует.
+- **`Voice Hub_<version>_x64-setup.exe`** — NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует. Поддерживает auto-update через `tauri-plugin-updater` (детали в [UPDATER.md](UPDATER.md)).
 
 ### Релиз (как собрать новый билд)
 
-Workflow `.github/workflows/release-desktop.yml` запускается:
+Авто-релиз: push изменений в `src-tauri/**` в master → `auto-tag-desktop.yml` бампит patch версию → тег `v*` → `release-desktop.yml` собирает + подписывает + публикует. Изменения в `frontend/**` или `backend/**` шелл-релиз не требуют — фронт обновляется через backend deploy сам по себе.
 
-- **по тегу** — `git tag v0.1.1 && git push origin v0.1.1` создаёт Release с `.exe`
-- **вручную** — Actions → "Release Desktop" → "Run workflow" (без тега, для теста)
+Ручной запуск (если надо протестить): Actions → "Release Desktop" → "Run workflow".
 
 Версия в имени `.exe` берётся из `src-tauri/tauri.conf.json` → `version`. Перед тегом обнови это поле, иначе несколько релизов будут собираться с одинаковым именем файла.
 

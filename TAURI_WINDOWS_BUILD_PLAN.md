@@ -6,23 +6,22 @@
 
 Workflow: `.github/workflows/release-desktop.yml`. Runner — `windows-latest`, нативный MSVC, без xwin. Триггеры:
 
-- `push` тега `v*` → собирает и создаёт Release с `.exe`
+- `push` тега `v*` → собирает и создаёт Release с NSIS installer
 - `workflow_dispatch` → ручной запуск из UI с произвольным тегом (для теста)
+- авто-триггер через `auto-tag-desktop.yml` при push в `src-tauri/**` (см. [UPDATER.md](UPDATER.md))
 
 ### Релиз новой версии
 
-```bash
-# 1. Обновить версию
-$EDITOR src-tauri/tauri.conf.json   # version: "0.1.1"
-git commit -am "bump: 0.1.1"
-git push origin master
+Обычно делается автоматом: правишь `src-tauri/**` → push в master → bot бампит patch + создаёт тег. Вручную, если нужно major/minor:
 
-# 2. Создать тег и запушить
-git tag -a v0.1.1 -m "Release 0.1.1"
-git push origin v0.1.1
+```bash
+# bump версии в src-tauri/Cargo.toml + tauri.conf.json (синхронно)
+git commit -am "release(desktop): v0.2.0"
+git tag v0.2.0
+git push origin master --tags
 ```
 
-GH Actions подхватит push тега → ~5-10 мин → новый Release на https://github.com/klimovI/voice-hub/releases с двумя файлами: `voice-hub-desktop.exe` (standalone) и `Voice Hub_0.1.1_x64-setup.exe` (NSIS installer).
+GH Actions → ~5-10 мин → новый Release с `Voice Hub_<version>_x64-setup.exe` (NSIS) + `latest.json` для updater. Подписывается из `TAURI_SIGNING_PRIVATE_KEY` secret.
 
 ### Стоимость
 

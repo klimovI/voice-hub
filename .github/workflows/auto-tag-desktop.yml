@@ -1,0 +1,69 @@
+name: Auto-tag Desktop
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src-tauri/**'
+
+concurrency:
+  group: auto-tag-desktop
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          set -euo pipefail
+
+          OLD=$(jq -r '.version' src-tauri/tauri.conf.json)
+          IFS='.' read -r MAJ MIN PAT <<< "$OLD"
+          NEW="${MAJ}.${MIN}.$((PAT + 1))"
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW" >> "$GITHUB_OUTPUT"
+
+          jq --arg v "$NEW" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+
+          sed -i -E "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$NEW\"/}" src-tauri/Cargo.toml
+
+      - name: Verify tag does not exist
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "ERROR: tag $TAG already exists" >&2
+            exit 1
+          fi
+
+      - name: Commit, tag, push
+        env:
+          OLD: ${{ steps.bump.outputs.old }}
+          NEW: ${{ steps.bump.outputs.new }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore(desktop): bump $OLD → $NEW"
+          git tag "$TAG"
+          git push origin master
+          git push origin "$TAG"
+
+      - name: Trigger release-desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: gh workflow run release-desktop.yml -f tag="$TAG"
