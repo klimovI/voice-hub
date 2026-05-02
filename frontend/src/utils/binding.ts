@@ -6,16 +6,6 @@ export type InputBinding =
   | { kind: "mouse"; button: string };
 
 const STORAGE_KEY = "voice-hub.shortcut";
-const MODIFIER_CODES = new Set([
-  "ControlLeft",
-  "ControlRight",
-  "ShiftLeft",
-  "ShiftRight",
-  "AltLeft",
-  "AltRight",
-  "MetaLeft",
-  "MetaRight",
-]);
 
 export function defaultBinding(): InputBinding {
   const mac = /Mac|iPhone|iPad/i.test(navigator.platform);
@@ -51,55 +41,102 @@ export function saveBinding(binding: InputBinding | null): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(binding));
 }
 
-export function isModifierOnly(event: KeyboardEvent): boolean {
-  return MODIFIER_CODES.has(event.code);
-}
-
-export function bindingFromKeyboardEvent(event: KeyboardEvent): InputBinding | null {
-  const label = labelFromCode(event.code, event.key);
-  if (!label) return null;
-  const keys: string[] = [];
-  if (event.ctrlKey) keys.push("Ctrl");
-  if (event.shiftKey) keys.push("Shift");
-  if (event.altKey) keys.push("Alt");
-  if (event.metaKey) keys.push("Meta");
-  keys.push(label);
-  return { kind: "keyboard", keys };
-}
-
-export function matchesBinding(event: KeyboardEvent, binding: InputBinding): boolean {
-  if (binding.kind !== "keyboard") return false;
-  const want = new Set(binding.keys);
-  if (want.has("Ctrl") !== event.ctrlKey) return false;
-  if (want.has("Shift") !== event.shiftKey) return false;
-  if (want.has("Alt") !== event.altKey) return false;
-  if (want.has("Meta") !== event.metaKey) return false;
-  const label = labelFromCode(event.code, event.key);
-  if (!label) return false;
-  for (const k of binding.keys) {
-    if (k === "Ctrl" || k === "Shift" || k === "Alt" || k === "Meta") continue;
-    if (k !== label) return false;
+// Canonical label for a modifier code (left/right collapsed).
+export function modifierLabelFromCode(code: string): string | null {
+  switch (code) {
+    case "ControlLeft":
+    case "ControlRight":
+      return "Ctrl";
+    case "ShiftLeft":
+    case "ShiftRight":
+      return "Shift";
+    case "AltLeft":
+    case "AltRight":
+      return "Alt";
+    case "MetaLeft":
+    case "MetaRight":
+      return "Meta";
+    default:
+      return null;
   }
-  return true;
 }
 
-function labelFromCode(code: string, key: string): string | null {
+// Canonical label for any key code, including modifiers.
+// Returns null for keys we don't have a stable mapping for (e.g. media keys
+// without a corresponding rdev variant on the Rust side).
+export function labelFromCode(code: string): string | null {
+  const mod = modifierLabelFromCode(code);
+  if (mod) return mod;
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) {
+    const tail = code.slice(6);
+    switch (tail) {
+      case "Add":
+        return "Num+";
+      case "Subtract":
+        return "Num-";
+      case "Multiply":
+        return "Num*";
+      case "Divide":
+        return "Num/";
+      case "Enter":
+        return "NumEnter";
+      case "Decimal":
+        return "Num.";
+      default:
+        if (/^\d$/.test(tail)) return `Num${tail}`;
+        return null;
+    }
+  }
   switch (code) {
     case "Space":
     case "Tab":
-    case "CapsLock":
+    case "Enter":
+    case "Backspace":
+    case "Delete":
+    case "Escape":
     case "Insert":
     case "Home":
     case "End":
     case "PageUp":
     case "PageDown":
-    case "Pause":
-    case "ScrollLock":
+    case "CapsLock":
     case "NumLock":
+    case "ScrollLock":
+    case "Pause":
     case "PrintScreen":
       return code;
+    case "ArrowUp":
+      return "Up";
+    case "ArrowDown":
+      return "Down";
+    case "ArrowLeft":
+      return "Left";
+    case "ArrowRight":
+      return "Right";
+    case "Minus":
+      return "-";
+    case "Equal":
+      return "=";
+    case "BracketLeft":
+      return "[";
+    case "BracketRight":
+      return "]";
+    case "Backslash":
+      return "\\";
+    case "Semicolon":
+      return ";";
+    case "Quote":
+      return "'";
+    case "Comma":
+      return ",";
+    case "Period":
+      return ".";
+    case "Slash":
+      return "/";
+    case "Backquote":
+      return "`";
     case "F1":
     case "F2":
     case "F3":
@@ -114,7 +151,37 @@ function labelFromCode(code: string, key: string): string | null {
     case "F12":
       return code;
     default:
-      if (key && key.length === 1) return key.toUpperCase();
       return null;
   }
+}
+
+// Sort keys so modifiers come first in canonical Ctrl/Shift/Alt/Meta order,
+// then the non-modifier (capture order).
+export function canonicalizeKeys(keys: string[]): string[] {
+  const order = ["Ctrl", "Shift", "Alt", "Meta"];
+  const mods = order.filter((m) => keys.includes(m));
+  const rest = keys.filter((k) => !order.includes(k));
+  return [...mods, ...rest];
+}
+
+export function matchesBinding(event: KeyboardEvent, binding: InputBinding): boolean {
+  if (binding.kind !== "keyboard") return false;
+  const want = new Set(binding.keys);
+  if (want.has("Ctrl") !== event.ctrlKey) return false;
+  if (want.has("Shift") !== event.shiftKey) return false;
+  if (want.has("Alt") !== event.altKey) return false;
+  if (want.has("Meta") !== event.metaKey) return false;
+  const label = labelFromCode(event.code);
+  if (!label) return false;
+  const nonModifier = binding.keys.find(
+    (k) => k !== "Ctrl" && k !== "Shift" && k !== "Alt" && k !== "Meta",
+  );
+  if (nonModifier) {
+    // Trigger key must be the bound non-modifier — otherwise typing while
+    // holding the modifier set would fire on every keystroke.
+    return label === nonModifier;
+  }
+  // Modifier-only binding: fire when the trigger key itself is one of the
+  // bound modifiers (and the rest are already held, checked above).
+  return want.has(label);
 }

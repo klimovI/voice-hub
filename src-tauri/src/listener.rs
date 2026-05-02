@@ -57,13 +57,16 @@ fn handle_event(state: &mut ListenerState, app: &AppHandle, event: &Event) {
         EventType::KeyPress(k) => {
             let was_modifier = is_modifier(k);
             state.pressed.insert(*k);
-            match state.mode {
-                // Edge-trigger: fire only on press of the non-modifier key.
-                // Pressing a modifier while a non-modifier is already held must
-                // not retro-fire the binding.
-                Mode::Normal if !was_modifier => try_fire_keyboard(state, app),
-                Mode::Normal => {}
-                Mode::Capturing => try_capture_keyboard(state, app, *k),
+            // Keyboard capture happens in the webview (Tauri+rdev keyboard
+            // events are suppressed when the window is focused on Windows —
+            // tauri-apps/tauri#14770). The listener only handles fire-time
+            // matching for keyboard.
+            if state.mode == Mode::Normal {
+                let modifier_only = is_modifier_only_binding(state.current.as_ref());
+                let trigger = if modifier_only { was_modifier } else { !was_modifier };
+                if trigger {
+                    try_fire_keyboard(state, app);
+                }
             }
         }
         EventType::KeyRelease(k) => {
@@ -104,6 +107,19 @@ fn fire_toggle(state: &mut ListenerState, app: &AppHandle) {
     let _ = app.emit("toggle-mute", ());
 }
 
+fn is_modifier_only_binding(b: Option<&InputBinding>) -> bool {
+    match b {
+        Some(InputBinding::Keyboard { keys }) if !keys.is_empty() => {
+            keys.iter().all(|k| is_modifier_label(k))
+        }
+        _ => false,
+    }
+}
+
+fn is_modifier_label(label: &str) -> bool {
+    matches!(label, "Ctrl" | "Shift" | "Alt" | "Meta")
+}
+
 fn matches_keyboard(binding: &InputBinding, pressed: &HashSet<Key>) -> bool {
     let keys = match binding {
         InputBinding::Keyboard { keys } => keys,
@@ -129,7 +145,7 @@ fn matches_keyboard(binding: &InputBinding, pressed: &HashSet<Key>) -> bool {
     }
 
     for label in keys {
-        if matches!(label.as_str(), "Ctrl" | "Shift" | "Alt" | "Meta") {
+        if is_modifier_label(label) {
             continue;
         }
         let Some(target) = label_to_key(label) else {
@@ -149,36 +165,7 @@ fn matches_mouse(current: Option<&InputBinding>, btn: &Button) -> bool {
     button_label(btn).as_deref() == Some(button.as_str())
 }
 
-// ---- Capturing mode ----
-
-// Both keyboard and mouse commit immediately on first non-modifier press.
-// Modifier-only combos cannot be bound (avoids accidental fires).
-
-fn try_capture_keyboard(state: &mut ListenerState, app: &AppHandle, k: Key) {
-    if is_modifier(&k) {
-        return;
-    }
-    let Some(label) = key_label(&k) else {
-        return;
-    };
-
-    let mut keys: Vec<String> = Vec::new();
-    if has_ctrl(&state.pressed) {
-        keys.push("Ctrl".into());
-    }
-    if has_shift(&state.pressed) {
-        keys.push("Shift".into());
-    }
-    if has_alt(&state.pressed) {
-        keys.push("Alt".into());
-    }
-    if has_meta(&state.pressed) {
-        keys.push("Meta".into());
-    }
-    keys.push(label);
-
-    finalize_capture(state, app, InputBinding::Keyboard { keys });
-}
+// ---- Capturing mode (mouse only) ----
 
 fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
     let Some(label) = button_label(btn) else {
@@ -235,83 +222,15 @@ fn button_label(b: &Button) -> Option<String> {
         Button::Right => Some("Right".to_string()),
         Button::Middle => Some("Middle".to_string()),
         Button::Unknown(n) => Some(format!("Side{n}")),
-        _ => None, // Left intentionally excluded
+        _ => None, // Left intentionally excluded (would block normal clicks)
     }
 }
 
-// ---- Key label mapping (round-trip) ----
-
-fn key_label(k: &Key) -> Option<String> {
-    Some(
-        match k {
-            Key::KeyA => "A",
-            Key::KeyB => "B",
-            Key::KeyC => "C",
-            Key::KeyD => "D",
-            Key::KeyE => "E",
-            Key::KeyF => "F",
-            Key::KeyG => "G",
-            Key::KeyH => "H",
-            Key::KeyI => "I",
-            Key::KeyJ => "J",
-            Key::KeyK => "K",
-            Key::KeyL => "L",
-            Key::KeyM => "M",
-            Key::KeyN => "N",
-            Key::KeyO => "O",
-            Key::KeyP => "P",
-            Key::KeyQ => "Q",
-            Key::KeyR => "R",
-            Key::KeyS => "S",
-            Key::KeyT => "T",
-            Key::KeyU => "U",
-            Key::KeyV => "V",
-            Key::KeyW => "W",
-            Key::KeyX => "X",
-            Key::KeyY => "Y",
-            Key::KeyZ => "Z",
-            Key::Num0 => "0",
-            Key::Num1 => "1",
-            Key::Num2 => "2",
-            Key::Num3 => "3",
-            Key::Num4 => "4",
-            Key::Num5 => "5",
-            Key::Num6 => "6",
-            Key::Num7 => "7",
-            Key::Num8 => "8",
-            Key::Num9 => "9",
-            Key::F1 => "F1",
-            Key::F2 => "F2",
-            Key::F3 => "F3",
-            Key::F4 => "F4",
-            Key::F5 => "F5",
-            Key::F6 => "F6",
-            Key::F7 => "F7",
-            Key::F8 => "F8",
-            Key::F9 => "F9",
-            Key::F10 => "F10",
-            Key::F11 => "F11",
-            Key::F12 => "F12",
-            Key::Space => "Space",
-            Key::Tab => "Tab",
-            Key::CapsLock => "CapsLock",
-            Key::Insert => "Insert",
-            Key::Home => "Home",
-            Key::End => "End",
-            Key::PageUp => "PageUp",
-            Key::PageDown => "PageDown",
-            Key::Pause => "Pause",
-            Key::ScrollLock => "ScrollLock",
-            Key::NumLock => "NumLock",
-            Key::PrintScreen => "PrintScreen",
-            _ => return None,
-        }
-        .to_string(),
-    )
-}
+// ---- Key label mapping (round-trip with frontend labelFromCode) ----
 
 fn label_to_key(label: &str) -> Option<Key> {
     Some(match label {
+        // Letters
         "A" => Key::KeyA,
         "B" => Key::KeyB,
         "C" => Key::KeyC,
@@ -338,6 +257,7 @@ fn label_to_key(label: &str) -> Option<Key> {
         "X" => Key::KeyX,
         "Y" => Key::KeyY,
         "Z" => Key::KeyZ,
+        // Digits (top row)
         "0" => Key::Num0,
         "1" => Key::Num1,
         "2" => Key::Num2,
@@ -348,6 +268,7 @@ fn label_to_key(label: &str) -> Option<Key> {
         "7" => Key::Num7,
         "8" => Key::Num8,
         "9" => Key::Num9,
+        // Function row
         "F1" => Key::F1,
         "F2" => Key::F2,
         "F3" => Key::F3,
@@ -360,18 +281,57 @@ fn label_to_key(label: &str) -> Option<Key> {
         "F10" => Key::F10,
         "F11" => Key::F11,
         "F12" => Key::F12,
+        // Edit / nav
         "Space" => Key::Space,
         "Tab" => Key::Tab,
-        "CapsLock" => Key::CapsLock,
+        "Enter" => Key::Return,
+        "Backspace" => Key::Backspace,
+        "Delete" => Key::Delete,
+        "Escape" => Key::Escape,
         "Insert" => Key::Insert,
         "Home" => Key::Home,
         "End" => Key::End,
         "PageUp" => Key::PageUp,
         "PageDown" => Key::PageDown,
-        "Pause" => Key::Pause,
-        "ScrollLock" => Key::ScrollLock,
+        "Up" => Key::UpArrow,
+        "Down" => Key::DownArrow,
+        "Left" => Key::LeftArrow,
+        "Right" => Key::RightArrow,
+        // Locks / system
+        "CapsLock" => Key::CapsLock,
         "NumLock" => Key::NumLock,
+        "ScrollLock" => Key::ScrollLock,
+        "Pause" => Key::Pause,
         "PrintScreen" => Key::PrintScreen,
+        // Symbols
+        "-" => Key::Minus,
+        "=" => Key::Equal,
+        "[" => Key::LeftBracket,
+        "]" => Key::RightBracket,
+        "\\" => Key::BackSlash,
+        ";" => Key::SemiColon,
+        "'" => Key::Quote,
+        "," => Key::Comma,
+        "." => Key::Dot,
+        "/" => Key::Slash,
+        "`" => Key::BackQuote,
+        // Numpad
+        "Num0" => Key::Kp0,
+        "Num1" => Key::Kp1,
+        "Num2" => Key::Kp2,
+        "Num3" => Key::Kp3,
+        "Num4" => Key::Kp4,
+        "Num5" => Key::Kp5,
+        "Num6" => Key::Kp6,
+        "Num7" => Key::Kp7,
+        "Num8" => Key::Kp8,
+        "Num9" => Key::Kp9,
+        "Num+" => Key::KpPlus,
+        "Num-" => Key::KpMinus,
+        "Num*" => Key::KpMultiply,
+        "Num/" => Key::KpDivide,
+        "NumEnter" => Key::KpReturn,
+        "Num." => Key::KpDelete,
         _ => return None,
     })
 }
