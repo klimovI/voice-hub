@@ -1,35 +1,64 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store/useStore";
 import { labelFromCode } from "../utils/binding";
-import { isTauri } from "../utils/tauri";
 
 const COOLDOWN_MS = 250;
 
 // In-window keydown listener for the mute toggle.
-// Disabled in Tauri builds — the desktop shell uses an OS-level listener
-// (rdev) that fires regardless of focus. Both running together would
-// double-toggle when the window is focused.
+//
+// Runs in both web and Tauri. In Tauri the desktop shell also has an OS-level
+// listener (rdev), but on Windows rdev keyboard events are suppressed while
+// the Tauri window has focus (tauri-apps/tauri#14770) — so we run the webview
+// listener under focus and the rdev listener takes over on blur. To avoid
+// double-firing on macOS/Linux (where rdev keyboard events are not
+// suppressed in focus), the webview listener gates fires by `focused` and
+// the Rust side gates fires by `window_focused`.
 export function useGlobalShortcut(onTrigger: () => void): void {
   const shortcut = useStore((s) => s.shortcut);
   const capturingShortcut = useStore((s) => s.capturingShortcut);
   const joinState = useStore((s) => s.joinState);
+
+  // All runtime state is held in refs so the listener attaches exactly once
+  // per session. Re-attaching on every onTrigger identity change (which
+  // happens on any store update — App subscribes to the whole store) used to
+  // wipe the `pressed` set mid-sequence and break 3+ key combos.
+  const onTriggerRef = useRef(onTrigger);
+  const shortcutRef = useRef(shortcut);
+  const capturingRef = useRef(capturingShortcut);
+  const joinStateRef = useRef(joinState);
+  const pressedRef = useRef<Set<string>>(new Set());
   const lastFireRef = useRef(0);
+  const focusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
 
   useEffect(() => {
-    if (isTauri()) return;
-    if (!shortcut || shortcut.kind !== "keyboard") return;
-    const required = shortcut.keys;
-    const requiredNonMods = required.filter(
-      (k) => k !== "Ctrl" && k !== "Shift" && k !== "Alt" && k !== "Meta",
-    );
-    const pressed = new Set<string>();
+    onTriggerRef.current = onTrigger;
+  }, [onTrigger]);
+  useEffect(() => {
+    shortcutRef.current = shortcut;
+  }, [shortcut]);
+  useEffect(() => {
+    capturingRef.current = capturingShortcut;
+  }, [capturingShortcut]);
+  useEffect(() => {
+    joinStateRef.current = joinState;
+  }, [joinState]);
 
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
       const label = labelFromCode(event.code);
-      if (label) pressed.add(label);
-      if (capturingShortcut || joinState !== "joined") return;
+      if (label) pressedRef.current.add(label);
 
+      // Window/tab not focused — let the OS-level (rdev) listener handle it
+      // in the Tauri build. On web the tab can't deliver keydown when
+      // unfocused, so this is a no-op there.
+      if (!focusedRef.current) return;
+
+      const sc = shortcutRef.current;
+      if (!sc || sc.kind !== "keyboard") return;
+      if (capturingRef.current || joinStateRef.current !== "joined") return;
+
+      const required = sc.keys;
       if (required.includes("Ctrl") !== event.ctrlKey) return;
       if (required.includes("Shift") !== event.shiftKey) return;
       if (required.includes("Alt") !== event.altKey) return;
@@ -42,8 +71,9 @@ export function useGlobalShortcut(onTrigger: () => void): void {
       // All bound non-modifier keys must currently be held. KeyboardEvent
       // alone only tells us about the single key being pressed, so we keep a
       // pressed-set across keydown/keyup events.
-      for (const k of requiredNonMods) {
-        if (!pressed.has(k)) return;
+      for (const k of required) {
+        if (k === "Ctrl" || k === "Shift" || k === "Alt" || k === "Meta") continue;
+        if (!pressedRef.current.has(k)) return;
       }
 
       const now = performance.now();
@@ -51,25 +81,32 @@ export function useGlobalShortcut(onTrigger: () => void): void {
       lastFireRef.current = now;
 
       event.preventDefault();
-      onTrigger();
+      onTriggerRef.current();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
       const label = labelFromCode(event.code);
-      if (label) pressed.delete(label);
+      if (label) pressedRef.current.delete(label);
     };
 
     const onBlur = () => {
-      pressed.clear();
+      focusedRef.current = false;
+      pressedRef.current.clear();
+    };
+
+    const onFocus = () => {
+      focusedRef.current = true;
     };
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
     };
-  }, [shortcut, capturingShortcut, joinState, onTrigger]);
+  }, []);
 }

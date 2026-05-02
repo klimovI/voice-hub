@@ -146,16 +146,30 @@ export function App() {
     audio.applyAllRemoteGains();
   }, [store, audio, setSelfMuted]);
 
-  useGlobalShortcut(handleToggleSelfMute);
+  // Single dedup point for the mute toggle, shared between the in-window
+  // keyboard listener (useGlobalShortcut) and the Tauri OS-level event
+  // bridge below. Guards against a focus-race where both paths fire within
+  // the cooldown window — each path has its own short-circuit, but this is
+  // the authoritative gate.
+  const lastToggleAtRef = useRef(0);
+  const TOGGLE_COOLDOWN_MS = 200;
+  const triggerToggleSelfMute = useCallback(() => {
+    const now = performance.now();
+    if (now - lastToggleAtRef.current < TOGGLE_COOLDOWN_MS) return;
+    lastToggleAtRef.current = now;
+    handleToggleSelfMute();
+  }, [handleToggleSelfMute]);
+
+  useGlobalShortcut(triggerToggleSelfMute);
 
   // ---- Tauri global hotkey bridge ----
-  // OS-level listener (rdev) emits "toggle-mute" regardless of window focus.
-  // The handler is captured via ref so the Tauri listener registers exactly
-  // once across renders instead of churning on every store change.
-  const toggleHandlerRef = useRef(handleToggleSelfMute);
+  // OS-level listener (rdev) emits "toggle-mute" when the window is unfocused.
+  // (Under focus, the in-window listener owns the keyboard path.) Mouse
+  // events come through here regardless of focus.
+  const toggleHandlerRef = useRef(triggerToggleSelfMute);
   useEffect(() => {
-    toggleHandlerRef.current = handleToggleSelfMute;
-  }, [handleToggleSelfMute]);
+    toggleHandlerRef.current = triggerToggleSelfMute;
+  }, [triggerToggleSelfMute]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -487,12 +501,16 @@ export function App() {
     audio.updateSendGain();
     audio.applyAllRemoteGains();
 
+    if (store.engine !== "rnnoise") {
+      void handleEngineSelect("rnnoise");
+    }
+
     if (store.joinState === "joined") {
       store.setStatus("Audio tuning reset. Reconnect to apply mic path changes.", false, true);
     } else {
       store.setStatus("Audio tuning reset to defaults.");
     }
-  }, [store, audio]);
+  }, [store, audio, handleEngineSelect]);
 
   const handleStatusMessage = useCallback(
     (msg: string) => {

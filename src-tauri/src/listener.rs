@@ -20,6 +20,12 @@ pub struct ListenerState {
     pub mode: Mode,
     pub pressed: HashSet<Key>,
     pub last_fire: Option<Instant>,
+    // True while the Tauri main window is focused. The webview-level
+    // listener handles keyboard fires under focus (since rdev keyboard
+    // events are suppressed under focus on Windows — tauri#14770), so
+    // we skip keyboard fires here while focused to avoid double-toggle
+    // on macOS/Linux where rdev is not suppressed.
+    pub window_focused: bool,
 }
 
 impl ListenerState {
@@ -29,6 +35,7 @@ impl ListenerState {
             mode: Mode::Normal,
             pressed: HashSet::new(),
             last_fire: None,
+            window_focused: false,
         }
     }
 }
@@ -87,6 +94,11 @@ fn handle_event(state: &mut ListenerState, app: &AppHandle, event: &Event) {
 // ---- Normal mode ----
 
 fn try_fire_keyboard(state: &mut ListenerState, app: &AppHandle) {
+    // The webview-level listener owns keyboard fires while the window is
+    // focused — see ListenerState::window_focused.
+    if state.window_focused {
+        return;
+    }
     let Some(binding) = state.current.clone() else {
         return;
     };

@@ -68,6 +68,10 @@ function CardView({ api }: { api: HotkeyApi }) {
           className="input-field cursor-pointer"
         />
       </label>
+      <p className="text-[11px] text-muted leading-snug -mt-1">
+        Tip: bind a modifier (Ctrl / Shift / Alt) plus a key, or a side-mouse
+        button. Combos must be held — fast taps won&apos;t fire.
+      </p>
       <div className="flex flex-wrap gap-2.5">
         <button
           id="shortcut-reset"
@@ -240,7 +244,11 @@ function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
 // ---- Tauri (desktop) ----
 
 function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
-  const [binding, setBinding] = useState<InputBinding | null>(null);
+  // Single source of truth: zustand. The desktop binding lives in Rust
+  // (config file), but `useStore.shortcut` mirrors it so the in-window
+  // listener in useGlobalShortcut can read the actual desktop binding.
+  const binding = useStore((s) => s.shortcut);
+  const setShortcut = useStore((s) => s.setShortcut);
   const [capturing, setCapturing] = useState(false);
   const [liveKeys, setLiveKeys] = useState<string[]>([]);
   const capturingRef = useRef(false);
@@ -249,10 +257,10 @@ function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
     capturingRef.current = capturing;
   }, [capturing]);
 
-  // Initial load + listen for mouse capture events from rdev (keyboard
-  // capture is handled in the webview because rdev keyboard events are
-  // suppressed on Windows while the Tauri window has focus — see Tauri
-  // issue #14770).
+  // Initial load + listen for capture events from rdev. Rust currently emits
+  // `input-captured` for mouse only (keyboard capture happens in the webview
+  // via useKeyboardCapture and goes through `onCommit`), but we mirror any
+  // payload into the store to stay source-agnostic.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -265,14 +273,13 @@ function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
 
       try {
         const current = await invoke<InputBinding | null>("get_shortcut");
-        if (!cancelled) setBinding(current);
+        if (!cancelled) setShortcut(current);
       } catch (err) {
         console.error("get_shortcut failed", err);
       }
 
       const off = await listen<InputBinding>("input-captured", (event) => {
-        if (event.payload.kind !== "mouse") return;
-        setBinding(event.payload);
+        setShortcut(event.payload);
         setCapturing(false);
         onStatusMessage(`Hotkey: ${formatBinding(event.payload)}`);
       });
@@ -285,7 +292,7 @@ function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
       cancelled = true;
       unlisten?.();
     };
-  }, [onStatusMessage]);
+  }, [onStatusMessage, setShortcut]);
 
   const cancel = useCallback(async () => {
     if (!capturingRef.current) return;
@@ -316,14 +323,14 @@ function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
         const { invoke } = await import("@tauri-apps/api/core");
         await invoke("set_shortcut", { binding: b });
         await invoke("cancel_capture");
-        setBinding(b);
+        setShortcut(b);
         setCapturing(false);
         onStatusMessage(`Hotkey: ${formatBinding(b)}`);
       } catch (err) {
         console.error("set_shortcut failed", err);
       }
     },
-    [onStatusMessage],
+    [onStatusMessage, setShortcut],
   );
 
   useKeyboardCapture({ active: capturing, onCommit, onLiveChange: setLiveKeys });
@@ -332,24 +339,24 @@ function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("clear_shortcut");
-      setBinding(null);
+      setShortcut(null);
       onStatusMessage("Hotkey cleared");
     } catch (err) {
       console.error("clear_shortcut failed", err);
     }
-  }, [onStatusMessage]);
+  }, [onStatusMessage, setShortcut]);
 
   const reset = useCallback(async () => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const def = defaultBinding();
       await invoke("set_shortcut", { binding: def });
-      setBinding(def);
+      setShortcut(def);
       onStatusMessage(`Hotkey reset: ${formatBinding(def)}`);
     } catch (err) {
       console.error("set_shortcut failed", err);
     }
-  }, [onStatusMessage]);
+  }, [onStatusMessage, setShortcut]);
 
   return { binding, capturing, liveKeys, start, cancel, clear, reset };
 }

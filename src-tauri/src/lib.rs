@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
-use crate::listener::ListenerState;
+use crate::listener::{ListenerState, SharedState};
 
 pub struct QuitFlag(pub AtomicBool);
 
@@ -52,11 +52,23 @@ pub fn run() {
                 return;
             }
             match event {
-                WindowEvent::Focused(true) => {
-                    let app = window.app_handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        updater::check_on_focus(app).await;
-                    });
+                WindowEvent::Focused(focused) => {
+                    if let Some(state) = window.try_state::<SharedState>() {
+                        if let Ok(mut s) = state.lock() {
+                            s.window_focused = *focused;
+                            // Drop any keys we believe are held: Windows
+                            // suppresses rdev keyboard events under focus, so
+                            // a release that happened across a focus
+                            // transition can leave a stale key in `pressed`.
+                            s.pressed.clear();
+                        }
+                    }
+                    if *focused {
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            updater::check_on_focus(app).await;
+                        });
+                    }
                 }
                 WindowEvent::CloseRequested { api, .. } => {
                     let flag = window.state::<QuitFlag>();
