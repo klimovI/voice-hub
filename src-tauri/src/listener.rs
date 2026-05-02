@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::shortcut::{self, InputBinding};
 
-const COOLDOWN: Duration = Duration::from_millis(250);
+const COOLDOWN: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {

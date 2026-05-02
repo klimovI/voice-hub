@@ -202,7 +202,7 @@ function TauriHotkeyCard({ onStatusMessage }: Props) {
   const displayValue = capturing ? "Нажмите клавишу или кнопку мыши..." : formatBinding(binding);
 
   return (
-    <CardShell hint="Global toggle mute">
+    <CardShell hint="Global mute toggle">
       <label className="block text-[12px] font-medium text-muted">
         Click input, then press any key combo or mouse button
         <input
