@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
@@ -179,9 +180,35 @@ func NewRoom(cfg Config) (*Room, error) {
 	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
 		return nil, err
 	}
+
+	// Slim interceptor registry. Pion's default registry adds NACK,
+	// RTCPReports, Stats, and TWCC. We keep only RTCPReports.
+	//
+	// Skipped:
+	//   - Stats: getStats() is never called server-side; per-packet
+	//     bookkeeping is pure overhead (~1-2% CPU during sustained RTP).
+	//   - TWCC: bandwidth estimation for audio-only with fixed Opus
+	//     bitrate has no actionable use; the header extension and the
+	//     sender-side feedback generation are pure overhead.
+	//   - NACK: ConfigureNack only registers feedback on video codecs.
+	//     Default RegisterDefaultCodecs registers Opus with nil
+	//     RTCPFeedback, so the NACK interceptors never engage for audio
+	//     streams. Keeping them is dead weight; if Opus loss recovery
+	//     is ever wanted, register RTCPFeedback{Type:"nack"} for
+	//     RTPCodecTypeAudio and call ConfigureNack here.
+	//
+	// Kept:
+	//   - RTCPReports: SR/RR fired on a 1s timer, cheap; needed by
+	//     browser webrtc-internals and external monitoring tools.
+	ir := &interceptor.Registry{}
+	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
+		return nil, err
+	}
+
 	api := webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
 		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(ir),
 	)
 	return &Room{
 		peers:  make(map[string]*peer),
