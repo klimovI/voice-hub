@@ -571,71 +571,98 @@ func (r *Room) attemptSync() (retry bool) {
 	r.mu.Unlock()
 
 	for _, p := range peers {
-		if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
-			r.removePeer(p.id)
+		if r.syncOnePeer(p, tracks) {
 			return true
 		}
+	}
+	return false
+}
 
-		want := make(map[string]bool, len(tracks))
-		for ownerID, t := range tracks {
-			if ownerID == p.id {
-				continue
-			}
-			want[t.ID()] = true
+// syncBufs holds the per-iteration scratch maps used by syncOnePeer.
+// Pooled to avoid 2 map allocations per peer per attemptSync call,
+// which is the dominant alloc source during a join/leave storm.
+type syncBufs struct {
+	want map[string]bool
+	have map[string]bool
+}
+
+var syncBufsPool = sync.Pool{
+	New: func() any {
+		return &syncBufs{
+			want: make(map[string]bool, 16),
+			have: make(map[string]bool, 16),
 		}
+	},
+}
 
-		have := make(map[string]bool)
+func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
+	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		r.removePeer(p.id)
+		return true
+	}
 
-		for _, sender := range p.pc.GetSenders() {
-			t := sender.Track()
-			if t == nil {
-				continue
-			}
-			id := t.ID()
-			have[id] = true
-			if !want[id] {
-				if err := p.pc.RemoveTrack(sender); err != nil {
-					return true
-				}
-			}
+	bufs := syncBufsPool.Get().(*syncBufs)
+	defer syncBufsPool.Put(bufs)
+	want := bufs.want
+	have := bufs.have
+	clear(want)
+	clear(have)
+
+	for ownerID, t := range tracks {
+		if ownerID == p.id {
+			continue
 		}
+		want[t.ID()] = true
+	}
 
-		for _, recv := range p.pc.GetReceivers() {
-			t := recv.Track()
-			if t == nil {
-				continue
-			}
-			have[t.ID()] = true
+	for _, sender := range p.pc.GetSenders() {
+		t := sender.Track()
+		if t == nil {
+			continue
 		}
-
-		for ownerID, t := range tracks {
-			if ownerID == p.id {
-				continue
-			}
-			if have[t.ID()] {
-				continue
-			}
-			if _, err := p.pc.AddTrack(t); err != nil {
+		id := t.ID()
+		have[id] = true
+		if !want[id] {
+			if err := p.pc.RemoveTrack(sender); err != nil {
 				return true
 			}
 		}
+	}
 
-		offer, err := p.pc.CreateOffer(nil)
-		if err != nil {
-			return true
+	for _, recv := range p.pc.GetReceivers() {
+		t := recv.Track()
+		if t == nil {
+			continue
 		}
-		if err := p.pc.SetLocalDescription(offer); err != nil {
-			return true
+		have[t.ID()] = true
+	}
+
+	for ownerID, t := range tracks {
+		if ownerID == p.id {
+			continue
 		}
-		sd, err := json.Marshal(offer)
-		if err != nil {
-			return true
+		if have[t.ID()] {
+			continue
 		}
-		if err := p.write(protocol.Envelope{Event: "offer", Data: sd}); err != nil {
+		if _, err := p.pc.AddTrack(t); err != nil {
 			return true
 		}
 	}
 
+	offer, err := p.pc.CreateOffer(nil)
+	if err != nil {
+		return true
+	}
+	if err := p.pc.SetLocalDescription(offer); err != nil {
+		return true
+	}
+	sd, err := json.Marshal(offer)
+	if err != nil {
+		return true
+	}
+	if err := p.write(protocol.Envelope{Event: "offer", Data: sd}); err != nil {
+		return true
+	}
 	return false
 }
 
