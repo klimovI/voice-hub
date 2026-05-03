@@ -20,19 +20,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+
+	"voice-hub/backend/internal/sfu/protocol"
 )
-
-// Message is the JSON envelope on the signaling WebSocket.
-type Message struct {
-	Event string          `json:"event"`
-	Data  json.RawMessage `json:"data,omitempty"`
-}
-
-// PeerInfo is sent to clients in welcome/peer-joined/peer-info events.
-type PeerInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-}
 
 // Config holds room-level configuration.
 type Config struct {
@@ -58,7 +48,7 @@ type peer struct {
 	cancel  context.CancelFunc
 }
 
-func (p *peer) write(msg Message) error {
+func (p *peer) write(msg protocol.Envelope) error {
 	if p.ctx.Err() != nil {
 		return p.ctx.Err()
 	}
@@ -75,12 +65,12 @@ func (p *peer) write(msg Message) error {
 
 // Room holds the live state of all peers and forwarded tracks.
 type Room struct {
-	mu       sync.Mutex
-	peers    map[string]*peer
-	tracks   map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
-	cfg      Config
-	api      *webrtc.API
-	closed   atomic.Bool
+	mu     sync.Mutex
+	peers  map[string]*peer
+	tracks map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
+	cfg    Config
+	api    *webrtc.API
+	closed atomic.Bool
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -155,14 +145,12 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		log.Printf("sfu: ws read hello: %v", err)
 		return
 	}
-	var helloMsg Message
+	var helloMsg protocol.Envelope
 	if err := json.Unmarshal(raw, &helloMsg); err != nil || helloMsg.Event != "hello" {
 		log.Printf("sfu: expected hello, got %q", helloMsg.Event)
 		return
 	}
-	var hello struct {
-		DisplayName string `json:"displayName"`
-	}
+	var hello protocol.HelloPayload
 	_ = json.Unmarshal(helloMsg.Data, &hello)
 
 	p := &peer{
@@ -185,7 +173,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			return
 		}
-		_ = p.write(Message{Event: "candidate", Data: b})
+		_ = p.write(protocol.Envelope{Event: "candidate", Data: b})
 	})
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -235,7 +223,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			}
 			return
 		}
-		var msg Message
+		var msg protocol.Envelope
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			log.Printf("sfu: bad json from %s: %v", p.id, err)
 			continue
@@ -244,7 +232,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (r *Room) handleClientMessage(p *peer, msg Message) {
+func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 	switch msg.Event {
 	case "answer":
 		var sd webrtc.SessionDescription
@@ -263,9 +251,7 @@ func (r *Room) handleClientMessage(p *peer, msg Message) {
 			log.Printf("sfu: add candidate (%s): %v", p.id, err)
 		}
 	case "set-displayname":
-		var dn struct {
-			DisplayName string `json:"displayName"`
-		}
+		var dn protocol.SetDisplayNamePayload
 		if err := json.Unmarshal(msg.Data, &dn); err != nil {
 			return
 		}
@@ -275,22 +261,22 @@ func (r *Room) handleClientMessage(p *peer, msg Message) {
 
 // Peers returns a snapshot of the current peers for read-only consumers
 // (e.g. the lobby/preview HTTP endpoint).
-func (r *Room) Peers() []PeerInfo {
+func (r *Room) Peers() []protocol.PeerInfo {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]PeerInfo, 0, len(r.peers))
+	out := make([]protocol.PeerInfo, 0, len(r.peers))
 	for _, p := range r.peers {
-		out = append(out, PeerInfo{ID: p.id, DisplayName: p.displayName})
+		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName})
 	}
 	return out
 }
 
 func (r *Room) addPeer(p *peer) {
 	r.mu.Lock()
-	existing := make([]PeerInfo, 0, len(r.peers))
+	existing := make([]protocol.PeerInfo, 0, len(r.peers))
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
-		existing = append(existing, PeerInfo{ID: op.id, DisplayName: op.displayName})
+		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName})
 		others = append(others, op)
 	}
 	r.peers[p.id] = p
@@ -299,15 +285,12 @@ func (r *Room) addPeer(p *peer) {
 
 	log.Printf("sfu: peer joined id=%s name=%q peers=%d", p.id, p.displayName, count)
 
-	welcome, _ := json.Marshal(struct {
-		ID    string     `json:"id"`
-		Peers []PeerInfo `json:"peers"`
-	}{ID: p.id, Peers: existing})
-	_ = p.write(Message{Event: "welcome", Data: welcome})
+	welcome, _ := json.Marshal(protocol.WelcomePayload{ID: p.id, Peers: existing})
+	_ = p.write(protocol.Envelope{Event: "welcome", Data: welcome})
 
-	joined, _ := json.Marshal(PeerInfo{ID: p.id, DisplayName: p.displayName})
+	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName})
 	for _, op := range others {
-		_ = op.write(Message{Event: "peer-joined", Data: joined})
+		_ = op.write(protocol.Envelope{Event: "peer-joined", Data: joined})
 	}
 }
 
@@ -333,9 +316,9 @@ func (r *Room) removePeer(id string) {
 
 	log.Printf("sfu: peer left id=%s peers=%d", id, count)
 
-	left, _ := json.Marshal(PeerInfo{ID: id})
+	left, _ := json.Marshal(protocol.PeerInfo{ID: id})
 	for _, op := range others {
-		_ = op.write(Message{Event: "peer-left", Data: left})
+		_ = op.write(protocol.Envelope{Event: "peer-left", Data: left})
 	}
 
 	r.signalPeerConnections()
@@ -378,9 +361,9 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	r.mu.Unlock()
 
-	info, _ := json.Marshal(PeerInfo{ID: id, DisplayName: name})
+	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name})
 	for _, op := range others {
-		_ = op.write(Message{Event: "peer-info", Data: info})
+		_ = op.write(protocol.Envelope{Event: "peer-info", Data: info})
 	}
 }
 
@@ -484,7 +467,7 @@ func (r *Room) attemptSync() (retry bool) {
 		if err != nil {
 			return true
 		}
-		if err := p.write(Message{Event: "offer", Data: sd}); err != nil {
+		if err := p.write(protocol.Envelope{Event: "offer", Data: sd}); err != nil {
 			return true
 		}
 	}

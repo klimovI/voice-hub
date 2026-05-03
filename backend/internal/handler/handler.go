@@ -17,6 +17,7 @@ import (
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/middleware"
 	"voice-hub/backend/internal/sfu"
+	"voice-hub/backend/internal/sfu/protocol"
 	turnsrv "voice-hub/backend/internal/turn"
 )
 
@@ -55,7 +56,7 @@ type RotateResponse struct {
 
 // RoomPeersResponse is the JSON body for GET /api/room/peers.
 type RoomPeersResponse struct {
-	Peers []sfu.PeerInfo `json:"peers"`
+	Peers []protocol.PeerInfo `json:"peers"`
 }
 
 // FrontendVersion fingerprints the deployed frontend by hashing index.html.
