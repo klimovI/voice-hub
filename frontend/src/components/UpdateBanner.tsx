@@ -60,7 +60,7 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
       case "idle":
       default:
         message = `Доступна новая версия Voice Hub (${update.version})`;
-        actionLabel = "Перезапустить";
+        actionLabel = "Установить";
         break;
     }
   }
