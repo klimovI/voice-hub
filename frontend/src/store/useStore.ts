@@ -142,9 +142,8 @@ export const useStore = create<AppState>((set, get) => ({
       const merged: ParticipantUI = existing
         ? { ...existing, ...partial }
         : {
-            id: partial.id,
+            ...partial,
             display: partial.display ?? `user-${partial.id}`,
-            clientId: partial.clientId,
             isSelf: Boolean(partial.isSelf),
             selfMuted: partial.selfMuted ?? false,
             speaking: partial.speaking ?? false,
