@@ -77,7 +77,7 @@ export function SessionCard({
             id="self-mute-button"
             type="button"
             disabled={!joined}
-            aria-pressed={selfMuted ? "true" : "false"}
+            aria-pressed={selfMuted}
             aria-label={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
             title={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
             onClick={onToggleSelfMute}
@@ -89,7 +89,7 @@ export function SessionCard({
             id="deafen-button"
             type="button"
             disabled={!joined}
-            aria-pressed={deafened ? "true" : "false"}
+            aria-pressed={deafened}
             aria-label={deafened ? "Слушать всех" : "Заглушить всех"}
             title={deafened ? "Слушать всех" : "Заглушить всех"}
             onClick={onToggleDeafen}

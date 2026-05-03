@@ -1,6 +1,7 @@
 import { useStore } from "../store/useStore";
 import { savePeerVolume } from "../utils/storage";
 import type { ParticipantUI } from "../types";
+import { VolumeIcon, VolumeOffIcon } from "./icons";
 
 interface Props {
   participant: ParticipantUI;
@@ -104,9 +105,12 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
             <button
               type="button"
               onClick={handleToggleMute}
-              className={`btn btn-mini ${participant.localMuted ? "btn-toggle-on" : "btn-secondary"}`}
+              aria-pressed={participant.localMuted}
+              aria-label={participant.localMuted ? "Слушать" : "Заглушить"}
+              title={participant.localMuted ? "Слушать" : "Заглушить"}
+              className={`btn btn-mini justify-center p-0! w-9 h-9 rounded-full ${participant.localMuted ? "btn-toggle-on" : "btn-secondary"}`}
             >
-              {participant.localMuted ? "Слушать" : "Заглушить"}
+              {participant.localMuted ? <VolumeOffIcon /> : <VolumeIcon />}
             </button>
             <label className="grid gap-1 w-50 max-[640px]:w-full">
               <span className="whitespace-nowrap tabular-nums text-[11px] text-muted">
