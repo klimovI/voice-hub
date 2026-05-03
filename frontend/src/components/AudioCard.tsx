@@ -109,7 +109,13 @@ export function AudioCard({
             id="mic-device"
             value={micDeviceId ?? ""}
             onChange={(e) => onMicDeviceSelect(e.target.value || null)}
-            className="w-full px-3 py-2 text-[13px] bg-bg-input border border-line rounded-[10px] text-text focus:outline-none focus:border-accent"
+            style={{
+              backgroundImage:
+                "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%239aa8a2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>\")",
+              backgroundRepeat: "no-repeat",
+              backgroundPosition: "right 14px center",
+            }}
+            className="appearance-none w-full pl-3 pr-10 py-2 text-[13px] bg-bg-input border border-line rounded-[10px] text-text cursor-pointer hover:border-muted-2 focus:outline-none focus:border-accent transition-colors duration-100"
           >
             <option value="">Системный по умолчанию</option>
             {micDevices.map((d, i) => (
