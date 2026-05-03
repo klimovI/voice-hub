@@ -161,6 +161,12 @@ type Room struct {
 	// pending at a time; further exhaustions while pending are no-ops
 	// (the in-flight retry already covers the latest state).
 	resyncPending atomic.Bool
+
+	// attemptSyncCount counts attemptSync invocations across the room's
+	// lifetime. Used by load tests to verify the deferred retry loop
+	// continues firing under sustained pathology rather than stopping
+	// after one window. No production observer.
+	attemptSyncCount atomic.Int64
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -568,26 +574,57 @@ func (r *Room) unpublishTrack(ownerID string) {
 // signalPeerConnections renegotiates each peer so it has senders for all
 // current room tracks (minus its own). Optimistic retry pattern from sfu-ws.
 func (r *Room) signalPeerConnections() {
-	const maxAttempts = 25
-	for range maxAttempts {
-		if !r.attemptSync() {
-			return
-		}
+	if r.runSyncAttempts() {
+		return
 	}
 	if !r.resyncPending.CompareAndSwap(false, true) {
 		return
 	}
-	go func() {
-		defer r.resyncPending.Store(false)
+	go r.deferredResyncLoop()
+}
+
+// runSyncAttempts runs up to maxAttempts inline passes of attemptSync.
+// Returns true if any pass settled cleanly (no retry needed). Returns
+// false only when all attempts exhausted with attemptSync still wanting
+// to retry.
+func (r *Room) runSyncAttempts() bool {
+	const maxAttempts = 25
+	for range maxAttempts {
+		if !r.attemptSync() {
+			return true
+		}
+	}
+	return false
+}
+
+// deferredResyncLoop is the body of the single in-flight retry
+// goroutine. It keeps issuing maxAttempts passes every 3s until one
+// settles or the room closes. Single-flight is enforced by
+// r.resyncPending; this goroutine clears the flag only on exit so any
+// concurrent exhaustion correctly folds into the in-flight retry rather
+// than spawning a duplicate.
+//
+// Earlier we recursed into signalPeerConnections() from this goroutine,
+// which silently stopped scheduling further retries: the recursive call
+// hit CompareAndSwap(false, true) while the outer goroutine still held
+// the flag, so it returned without queuing another pass, then the outer
+// defer cleared the flag — and nothing else was scheduled. A peer stuck
+// for longer than one 3s window would leave the room un-resynced.
+func (r *Room) deferredResyncLoop() {
+	defer r.resyncPending.Store(false)
+	for {
 		time.Sleep(3 * time.Second)
 		if r.closed.Load() {
 			return
 		}
-		r.signalPeerConnections()
-	}()
+		if r.runSyncAttempts() {
+			return
+		}
+	}
 }
 
 func (r *Room) attemptSync() (retry bool) {
+	r.attemptSyncCount.Add(1)
 	r.mu.Lock()
 	peers := make([]*peer, 0, len(r.peers))
 	for _, p := range r.peers {

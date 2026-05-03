@@ -486,7 +486,7 @@ func TestLoadRetryStorm(t *testing.T) {
 	}
 	const n = 8
 
-	_, _, url := newLoadServer(t)
+	room, _, url := newLoadServer(t)
 
 	startGo := runtime.NumGoroutine()
 
@@ -513,21 +513,36 @@ func TestLoadRetryStorm(t *testing.T) {
 		}(ws)
 		conns[i] = ws
 	}
-	time.Sleep(500 * time.Millisecond)
+	// Let the initial join-storm cascade burn through its inline retries.
+	// 1.5s is well past one inline-retry burst (which is bounded by
+	// maxAttempts × per-attempt cost) but before the first 3s deferred
+	// window fires. After this sleep, attemptSyncCount delta isolates
+	// the deferred retry loop from the join-storm noise.
+	time.Sleep(1500 * time.Millisecond)
 	afterHello := runtime.NumGoroutine()
+	baselineAttempts := room.attemptSyncCount.Load()
 
-	// Retry path is already active from the join storm because zombies
-	// never send "answer" — each peer's pc stays in have-local-offer and
-	// attemptSync keeps failing. With the dedup fix, only one retry
-	// goroutine is in flight at a time across the wait window below.
-	time.Sleep(500 * time.Millisecond)
+	// Retry path stays active because zombies never send "answer" —
+	// each peer's pc stays in have-local-offer and attemptSync keeps
+	// returning true. With the deferredResyncLoop fix, the single
+	// in-flight retry goroutine keeps issuing maxAttempts passes every
+	// 3s. Over the 7s wait below we expect at least 2 windows to fire.
 
-	// Wait through several retry windows (3s each).
 	time.Sleep(7 * time.Second)
 	afterRetries := runtime.NumGoroutine()
+	deferredAttempts := room.attemptSyncCount.Load() - baselineAttempts
 
-	t.Logf("retry-storm n=%d: goroutines start=%d afterHello=%d afterRetries(+7s)=%d",
-		n, startGo, afterHello, afterRetries)
+	// With the fix: 7s covers ~2 retry windows × maxAttempts(25) = 50.
+	// Without the fix: the loop bails after one deferred pass and we'd
+	// see at most ~25 extra attempts (and likely fewer).
+	const minExpectedAttempts = 40
+	if deferredAttempts < minExpectedAttempts {
+		t.Errorf("retry-storm: deferred attemptSync fired only %d times in 7s (want >= %d) — retry loop appears stuck",
+			deferredAttempts, minExpectedAttempts)
+	}
+
+	t.Logf("retry-storm n=%d: goroutines start=%d afterHello=%d afterRetries(+7s)=%d deferredAttempts=%d",
+		n, startGo, afterHello, afterRetries, deferredAttempts)
 
 	for _, w := range conns {
 		_ = w.Close(websocket.StatusNormalClosure, "bye")
