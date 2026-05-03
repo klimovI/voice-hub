@@ -347,3 +347,38 @@ fn label_to_key(label: &str) -> Option<Key> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(serde::Deserialize)]
+    struct KeymapEntry {
+        label: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Keymap {
+        labels: Vec<KeymapEntry>,
+    }
+
+    const MODIFIERS: &[&str] = &["Ctrl", "Shift", "Alt", "Meta"];
+
+    #[test]
+    fn keymap_json_coverage() {
+        let keymap: Keymap =
+            serde_json::from_str(include_str!("../keymap.json")).expect("keymap.json is valid JSON");
+
+        for entry in &keymap.labels {
+            let label = &entry.label;
+            if MODIFIERS.contains(&label.as_str()) {
+                continue;
+            }
+            assert!(
+                label_to_key(label).is_some(),
+                "label_to_key returned None for label {:?} — keymap.json and Rust are out of sync",
+                label
+            );
+        }
+    }
+}
