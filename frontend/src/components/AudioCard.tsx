@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
 import { clampPercentage } from "../utils/storage";
-import { formatRnnoiseMix, formatEngine } from "../utils/clamp";
+import { formatRnnoiseMix } from "../utils/clamp";
 import type { EngineKind } from "../types";
-
-// Currently only off + RNNoise. New engines slot in by adding to this list
-// (and to EngineKind, preloadEngine, and the engine branch in buildMicGraph).
-const ENGINES: EngineKind[] = ["off", "rnnoise"];
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -126,36 +122,26 @@ export function AudioCard({
         </div>
       )}
 
-      <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-3">
         <span className="text-[13px] text-muted">Шумоподавление</span>
-        <div
-          id="denoiser-engine"
-          role="radiogroup"
+        <button
+          type="button"
+          role="switch"
+          aria-checked={engine !== "off" ? "true" : "false"}
           aria-label="Шумоподавление"
-          className="grid gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
-          style={{ gridTemplateColumns: `repeat(${ENGINES.length}, minmax(0, 1fr))` }}
+          onClick={() => onEngineSelect(engine === "off" ? "rnnoise" : "off")}
+          className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border cursor-pointer transition-colors duration-150 focus:outline-none focus-visible:shadow-[0_0_0_3px_rgba(34,197,94,0.16)] ${
+            engine !== "off"
+              ? "bg-accent border-accent hover:bg-accent-hover hover:border-accent-hover"
+              : "bg-bg-input border-line hover:border-muted-2"
+          }`}
         >
-          {ENGINES.map((eng) => {
-            const active = engine === eng;
-            return (
-              <button
-                key={eng}
-                type="button"
-                data-engine={eng}
-                role="radio"
-                aria-checked={active ? "true" : "false"}
-                onClick={() => onEngineSelect(eng)}
-                className={`flex justify-center items-center w-full px-2.5 py-2 text-[12px] font-semibold rounded-[10px] cursor-pointer border transition-[background,color,border-color] duration-100 ${
-                  active
-                    ? "bg-accent text-accent-ink border-accent"
-                    : "bg-transparent border-transparent text-muted hover:bg-bg-3 hover:text-text"
-                }`}
-              >
-                {formatEngine(eng)}
-              </button>
-            );
-          })}
-        </div>
+          <span
+            className={`inline-block h-[16px] w-[16px] rounded-full bg-white shadow transition-transform duration-150 ${
+              engine !== "off" ? "translate-x-[20px]" : "translate-x-[2px]"
+            }`}
+          />
+        </button>
       </div>
 
       {engine === "rnnoise" && (
