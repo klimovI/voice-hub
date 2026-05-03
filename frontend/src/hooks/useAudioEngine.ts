@@ -14,10 +14,10 @@ import {
   type MicGraph,
 } from "../audio/mic-graph";
 import {
+  createRemoteAudioContext,
   setupParticipantAudio,
   teardownParticipantAudio,
   applyParticipantGain,
-  closeRemoteAudioContext,
   startRemoteSpeakingLoop,
   stopRemoteSpeakingLoop,
   type RemoteParticipantAudio,
@@ -44,6 +44,8 @@ export interface AudioEngineRef {
   micGraph: MicGraph | null;
   // per-participant audio nodes keyed by participant id
   remoteAudio: Map<string, RemoteParticipantAudio>;
+  // one AudioContext shared across all remote participants; created lazily
+  remoteAudioCtx: AudioContext | null;
   // stable send-volume ref for the ScriptProcessor callback
   sendVolume: number;
   rnnoiseMix: number;
@@ -55,6 +57,7 @@ export function useAudioEngine() {
     rawLocalStream: null,
     micGraph: null,
     remoteAudio: new Map(),
+    remoteAudioCtx: null,
     sendVolume: store.sendVolume,
     rnnoiseMix: store.rnnoiseMix,
   });
@@ -176,9 +179,16 @@ export function useAudioEngine() {
       if (existing) {
         teardownParticipantAudio(existing);
       }
-      const audio = setupParticipantAudio(stream);
+      // Create the shared remote AudioContext lazily on first attach.
+      if (!r.remoteAudioCtx) {
+        r.remoteAudioCtx = createRemoteAudioContext();
+      }
+      const audio = setupParticipantAudio(r.remoteAudioCtx, stream);
       r.remoteAudio.set(participantId, audio);
       applyAllRemoteGains();
+      // useStore.getState() inside the RAF callback is intentional: this is a
+      // periodic snapshot read, not a reactive subscription. Audio modules
+      // must not re-render on store changes.
       startRemoteSpeakingLoop(
         () => refs.current.remoteAudio,
         (id, speaking) => {
@@ -224,7 +234,8 @@ export function useAudioEngine() {
       teardownParticipantAudio(audio);
     }
     r.remoteAudio.clear();
-    closeRemoteAudioContext();
+    void r.remoteAudioCtx?.close().catch(() => undefined);
+    r.remoteAudioCtx = null;
   }, []);
 
   const fullCleanup = useCallback(() => {

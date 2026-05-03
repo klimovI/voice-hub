@@ -2,18 +2,29 @@
 // Mute (going off):  880 → 440 Hz descending.
 // Unmute (going on): 440 → 880 Hz ascending.
 
-import { ensureRemoteAudioContext } from "./remote";
-
 const PEAK = 0.15;
 const DURATION = 0.09;
 
-function playGlide(from: number, to: number): void {
-  let ctx: AudioContext;
+// Dedicated lightweight context for UI feedback tones. Not tied to any stream;
+// holds no external resources, so a module-level singleton is appropriate here.
+let uiAudioCtx: AudioContext | null = null;
+
+function getUiAudioContext(): AudioContext | null {
+  if (uiAudioCtx) return uiAudioCtx;
   try {
-    ctx = ensureRemoteAudioContext();
+    const Ctor =
+      (window as Window & typeof globalThis).AudioContext ??
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    uiAudioCtx = new Ctor({ sampleRate: 48000 });
+    return uiAudioCtx;
   } catch {
-    return;
+    return null;
   }
+}
+
+function playGlide(from: number, to: number): void {
+  const ctx = getUiAudioContext();
+  if (!ctx) return;
   const t0 = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();

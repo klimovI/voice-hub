@@ -17,26 +17,19 @@ export interface RemoteParticipantAudio {
 
 const SPEAKING_HOLD_MS = 250;
 
-let remoteAudioContext: AudioContext | null = null;
-
-export function ensureRemoteAudioContext(): AudioContext {
-  if (remoteAudioContext) return remoteAudioContext;
+export function createRemoteAudioContext(): AudioContext {
   const Ctor =
     (window as Window & typeof globalThis).AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  remoteAudioContext = new Ctor({ sampleRate: 48000 });
-  void remoteAudioContext.resume().catch(() => undefined);
-  return remoteAudioContext;
+  const ctx = new Ctor({ sampleRate: 48000 });
+  void ctx.resume().catch(() => undefined);
+  return ctx;
 }
 
-export function closeRemoteAudioContext(): void {
-  void remoteAudioContext?.close().catch(() => undefined);
-  remoteAudioContext = null;
-}
-
-export function setupParticipantAudio(stream: MediaStream): RemoteParticipantAudio {
-  const ctx = ensureRemoteAudioContext();
-
+export function setupParticipantAudio(
+  ctx: AudioContext,
+  stream: MediaStream,
+): RemoteParticipantAudio {
   const audioEl = document.createElement("audio");
   audioEl.autoplay = true;
   (audioEl as HTMLAudioElement & { playsInline: boolean }).playsInline = true;

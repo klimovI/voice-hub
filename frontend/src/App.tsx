@@ -27,98 +27,80 @@ export function App() {
   // Display name local state (synced to localStorage).
   const [displayName, setDisplayName] = useState<string>(() => loadDisplayName());
 
-  // ---- Self-mute helpers ----
-
-  const applySelfMutedToStream = useCallback(
-    (muted: boolean) => {
-      const graph = session.micGraphRef.current;
-      if (!graph) return;
-      for (const track of graph.processedLocalStream.getAudioTracks()) {
-        track.enabled = !muted;
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  const setSelfMuted = useCallback(
-    (muted: boolean) => {
-      store.setSelfMuted(muted);
-      applySelfMutedToStream(muted);
-      const peerId = session.peerIdRef.current;
-      if (peerId) {
-        store.updateParticipant(peerId, {
-          selfMuted: muted,
-          speaking: muted ? false : undefined,
-        });
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, applySelfMutedToStream],
-  );
-
   // ---- Toggle handlers ----
-
-  const handleToggleSelfMute = useCallback(() => {
-    if (!session.micGraphRef.current) return;
-    if (store.deafened) {
-      store.setDeafened(false);
-      store.setOutputMuted(store.preDeafenOutputMuted);
-      audio.applyAllRemoteGains();
-    }
-    const nextMuted = !store.selfMuted;
-    setSelfMuted(nextMuted);
-    if (nextMuted) playMuteSound();
-    else playUnmuteSound();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, audio, setSelfMuted]);
-
-  const handleToggleOutputMute = useCallback(() => {
-    const { deafened, preDeafenSelfMuted } = store;
-    if (deafened) {
-      store.setDeafened(false);
-      setSelfMuted(preDeafenSelfMuted);
-    }
-    store.setOutputMuted(!store.outputMuted);
-    audio.applyAllRemoteGains();
-  }, [store, audio, setSelfMuted]);
-
-  const handleToggleDeafen = useCallback(() => {
-    if (store.deafened) {
-      store.setDeafened(false);
-      setSelfMuted(store.preDeafenSelfMuted);
-      store.setOutputMuted(store.preDeafenOutputMuted);
-    } else {
-      store.saveDeafenSnapshot();
-      store.setDeafened(true);
-      setSelfMuted(true);
-      store.setOutputMuted(true);
-    }
-    audio.applyAllRemoteGains();
-  }, [store, audio, setSelfMuted]);
 
   // Single dedup gate shared between in-window keyboard listener and the Tauri
   // OS-level event bridge. Each path has its own short-circuit; this is the
   // authoritative gate against a focus-race where both paths fire together.
   const lastToggleAtRef = useRef(0);
   const TOGGLE_COOLDOWN_MS = 60;
+
+  // triggerToggleSelfMute needs session, but session is defined below.
+  // We break the cycle with a stable ref, same pattern as the hook itself.
+  const handleToggleSelfMuteRef = useRef<() => void>(() => undefined);
+
   const triggerToggleSelfMute = useCallback(() => {
     const now = performance.now();
     if (now - lastToggleAtRef.current < TOGGLE_COOLDOWN_MS) return;
     lastToggleAtRef.current = now;
-    handleToggleSelfMute();
-  }, [handleToggleSelfMute]);
+    handleToggleSelfMuteRef.current();
+  }, []);
 
   useGlobalShortcut(triggerToggleSelfMute);
 
   // ---- Session manager ----
-  // Owns join/leave/reconnect/config/Tauri event subscription.
+  // Owns join/leave/reconnect/config/Tauri event subscription/mic actions.
 
   const session = useSessionManager({
     audio,
     sfu,
     onTauriToggleMute: triggerToggleSelfMute,
   });
+
+  const handleToggleSelfMute = useCallback(() => {
+    if (!session.getPeerId()) return;
+    if (store.deafened) {
+      store.setDeafened(false);
+      store.setOutputMuted(store.preDeafenOutputMuted);
+      audio.applyAllRemoteGains();
+    }
+    const nextMuted = !store.selfMuted;
+    store.setSelfMuted(nextMuted);
+    session.setMicEnabled(!nextMuted);
+    if (nextMuted) playMuteSound();
+    else playUnmuteSound();
+  }, [store, audio, session]);
+
+  // Keep the ref in sync so triggerToggleSelfMute (defined before session) can
+  // call the latest version without capturing session in its own dep array.
+  handleToggleSelfMuteRef.current = handleToggleSelfMute;
+
+  const handleToggleOutputMute = useCallback(() => {
+    const { deafened, preDeafenSelfMuted } = store;
+    if (deafened) {
+      store.setDeafened(false);
+      store.setSelfMuted(preDeafenSelfMuted);
+      session.setMicEnabled(!preDeafenSelfMuted);
+    }
+    store.setOutputMuted(!store.outputMuted);
+    audio.applyAllRemoteGains();
+  }, [store, audio, session]);
+
+  const handleToggleDeafen = useCallback(() => {
+    if (store.deafened) {
+      store.setDeafened(false);
+      store.setSelfMuted(store.preDeafenSelfMuted);
+      session.setMicEnabled(!store.preDeafenSelfMuted);
+      store.setOutputMuted(store.preDeafenOutputMuted);
+    } else {
+      store.saveDeafenSnapshot();
+      store.setDeafened(true);
+      store.setSelfMuted(true);
+      session.setMicEnabled(false);
+      store.setOutputMuted(true);
+    }
+    audio.applyAllRemoteGains();
+  }, [store, audio, session]);
 
   // ---- Engine switch ----
 
@@ -133,26 +115,7 @@ export function App() {
       }
       store.setStatus(`Switching to ${engine}...`);
       try {
-        const graph = await audio.rebuildLocalAudio(
-          engine,
-          store.selfMuted,
-          session.peerIdRef.current,
-          () => sfu.getPeerConnection(),
-        );
-        session.micGraphRef.current = graph;
-        audio.startSpeaking(
-          graph,
-          () => store.selfMuted,
-          () => session.peerIdRef.current,
-          (speaking) => {
-            const pid = session.peerIdRef.current;
-            if (!pid) return;
-            const current = useStore.getState().participants.get(pid);
-            if (current && current.speaking !== speaking) {
-              store.updateParticipant(pid, { speaking });
-            }
-          },
-        );
+        await session.switchEngine(engine);
         store.setStatus(`Denoiser: ${engine}`, false, true);
       } catch (err) {
         store.setStatus(
@@ -162,8 +125,7 @@ export function App() {
         );
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, audio, sfu],
+    [store, session],
   );
 
   // ---- Audio controls ----
@@ -223,15 +185,10 @@ export function App() {
     (value: string) => {
       setDisplayName(value);
       if (store.joinState === "joined" && value.trim()) {
-        sfu.getClient()?.setDisplayName(value.trim());
-        const peerId = session.peerIdRef.current;
-        if (peerId) {
-          store.updateParticipant(peerId, { display: value.trim() });
-        }
+        session.setRemoteDisplayName(value.trim());
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, sfu],
+    [store, session],
   );
 
   return (

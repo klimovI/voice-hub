@@ -85,7 +85,7 @@ export function loadEngine(): EngineKind {
   return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
 }
 
-export function saveEngine(e: string): void {
+export function saveEngine(e: EngineKind): void {
   localStorage.setItem(KEYS.engine, e);
 }
 

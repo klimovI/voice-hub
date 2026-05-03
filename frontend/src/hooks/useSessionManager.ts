@@ -2,9 +2,11 @@
 //
 // Owns: join, leave, reconnect state machine (scheduleReconnect +
 // RECONNECT_DELAYS_MS), Tauri "toggle-mute" event bridge, config loading,
-// auto-rejoin-on-reload.
+// auto-rejoin-on-reload, mic track enable/disable, engine switch,
+// display-name sync to SFU.
 //
-// Does NOT own: mute/deafen toggle logic (App), engine switch (App), sliders.
+// Does NOT own: mute/deafen boolean state (App), output mute/deafen UX (App),
+// status messages for engine switch (App wraps switchEngine in try/catch).
 
 import { useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store/useStore";
@@ -36,12 +38,26 @@ export type UseSessionManagerDeps = {
 };
 
 export type UseSessionManagerReturn = {
-  /** Shared with App for mute/deafen stream-track toggling. */
-  micGraphRef: React.MutableRefObject<MicGraph | null>;
-  /** Shared with App for speaking-loop callbacks and participant updates. */
-  peerIdRef: React.MutableRefObject<string | null>;
   join: (name: string) => Promise<void>;
   leave: () => void;
+  /** Read the peer id on demand. Returns null when not joined. No ref escape. */
+  getPeerId: () => string | null;
+  /**
+   * Apply enabled/disabled to the mic track and update the self-participant in
+   * the store. No-op when there is no active graph.
+   * Does NOT write store.selfMuted — App owns that boolean.
+   */
+  setMicEnabled: (enabled: boolean) => void;
+  /**
+   * Rebuild the audio graph with the given engine and replace the SFU sender
+   * track. Throws on failure; caller wraps in try/catch and sets status.
+   */
+  switchEngine: (engine: EngineKind) => Promise<void>;
+  /**
+   * Sync the display name to the SFU and update the self-participant in the
+   * store. No-op when not joined.
+   */
+  setRemoteDisplayName: (name: string) => void;
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
@@ -53,7 +69,7 @@ export function useSessionManager({
 }: UseSessionManagerDeps): UseSessionManagerReturn {
   const store = useStore();
 
-  // Imperative refs shared with App's mute/deafen handlers.
+  // Imperative refs — internal only, not exposed to callers.
   const micGraphRef = useRef<MicGraph | null>(null);
   const peerIdRef = useRef<string | null>(null);
 
@@ -80,6 +96,65 @@ export function useSessionManager({
   const connectSfuRef = useRef<(graph: MicGraph, display: string) => Promise<void>>(async () => {
     throw new Error("connectSfu not yet initialised");
   });
+
+  // ---- Action surface helpers (stable, ref-based) ----
+
+  const getPeerId = useCallback((): string | null => peerIdRef.current, []);
+
+  const setMicEnabled = useCallback(
+    (enabled: boolean): void => {
+      const graph = micGraphRef.current;
+      if (!graph) return;
+      for (const track of graph.processedLocalStream.getAudioTracks()) {
+        track.enabled = enabled;
+      }
+      const pid = peerIdRef.current;
+      if (pid) {
+        store.updateParticipant(pid, {
+          selfMuted: !enabled,
+          speaking: !enabled ? false : undefined,
+        });
+      }
+    },
+    [store],
+  );
+
+  const switchEngine = useCallback(
+    async (engine: EngineKind): Promise<void> => {
+      const graph = await audio.rebuildLocalAudio(
+        engine,
+        useStore.getState().selfMuted,
+        peerIdRef.current,
+        () => sfu.getPeerConnection(),
+      );
+      micGraphRef.current = graph;
+      audio.startSpeaking(
+        graph,
+        () => useStore.getState().selfMuted,
+        () => peerIdRef.current,
+        (speaking) => {
+          const pid = peerIdRef.current;
+          if (!pid) return;
+          const current = useStore.getState().participants.get(pid);
+          if (current && current.speaking !== speaking) {
+            store.updateParticipant(pid, { speaking });
+          }
+        },
+      );
+    },
+    [audio, sfu, store],
+  );
+
+  const setRemoteDisplayName = useCallback(
+    (name: string): void => {
+      sfu.getClient()?.setDisplayName(name);
+      const pid = peerIdRef.current;
+      if (pid) {
+        store.updateParticipant(pid, { display: name });
+      }
+    },
+    [sfu, store],
+  );
 
   // ---- Reconnect scheduler ----
   // Created once; options that need freshness use refs (isLeaving, onAttempt).
@@ -257,26 +332,7 @@ export function useSessionManager({
             if (s.joinState !== "joined") return;
             if (s.engine !== targetEngine) return;
             try {
-              const upgraded = await audio.rebuildLocalAudio(
-                targetEngine,
-                s.selfMuted,
-                peerIdRef.current,
-                () => sfu.getPeerConnection(),
-              );
-              micGraphRef.current = upgraded;
-              audio.startSpeaking(
-                upgraded,
-                () => useStore.getState().selfMuted,
-                () => peerIdRef.current,
-                (speaking) => {
-                  const pid = peerIdRef.current;
-                  if (!pid) return;
-                  const current = useStore.getState().participants.get(pid);
-                  if (current && current.speaking !== speaking) {
-                    store.updateParticipant(pid, { speaking });
-                  }
-                },
-              );
+              await switchEngine(targetEngine);
               store.setStatus(`Шумоподавитель: ${targetEngine}`, false, true);
             } catch (err) {
               store.setStatus(
@@ -308,7 +364,7 @@ export function useSessionManager({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, audio, connectSfu, handleLeave],
+    [store, audio, connectSfu, handleLeave, switchEngine],
   );
 
   useEffect(() => {
@@ -361,5 +417,12 @@ export function useSessionManager({
     };
   }, []);
 
-  return { micGraphRef, peerIdRef, join: handleJoin, leave: handleLeave };
+  return {
+    join: handleJoin,
+    leave: handleLeave,
+    getPeerId,
+    setMicEnabled,
+    switchEngine,
+    setRemoteDisplayName,
+  };
 }
