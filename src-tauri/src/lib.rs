@@ -2,6 +2,7 @@ mod commands;
 mod connection;
 mod listener;
 mod shortcut;
+mod tray;
 mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +26,11 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Warn)
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();

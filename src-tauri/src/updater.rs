@@ -1,26 +1,19 @@
-use std::sync::atomic::Ordering;
+// Updater state machine.
+//
+// Owns: UpdaterState, check cadence, download/install flow.
+// Does NOT own: tray construction — that lives in tray.rs.
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-use crate::connection;
-use crate::QuitFlag;
+use crate::tray;
 
 const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_EMIT_THROTTLE: Duration = Duration::from_millis(100);
-
-const TRAY_ID: &str = "main";
-const ITEM_UPDATE: &str = "update_apply";
-const ITEM_CHECK: &str = "update_check";
-const ITEM_SHOW: &str = "show_window";
-const ITEM_CHANGE_SERVER: &str = "change_server";
-const ITEM_DISCONNECT: &str = "disconnect";
-const ITEM_QUIT: &str = "quit";
 
 pub struct UpdaterState {
     last_checked: Option<Instant>,
@@ -44,7 +37,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let state: SharedUpdater = Arc::new(Mutex::new(UpdaterState::new()));
     app.manage(state.clone());
 
-    build_tray(app)?;
+    tray::init(app)?;
 
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -64,6 +57,12 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 
 pub async fn check_on_focus(app: AppHandle) {
     check(app, /* force */ false).await;
+}
+
+/// Force an immediate update check. Called from the tray "Check for updates"
+/// item so it must be `pub`.
+pub async fn check_forced(app: AppHandle) {
+    check(app, /* force */ true).await;
 }
 
 async fn check(app: AppHandle, force: bool) {
@@ -89,7 +88,7 @@ async fn check(app: AppHandle, force: bool) {
     let updater = match app.updater() {
         Ok(u) => u,
         Err(err) => {
-            eprintln!("updater: build failed: {err}");
+            log::error!("updater: build failed: {err}");
             return;
         }
     };
@@ -98,7 +97,7 @@ async fn check(app: AppHandle, force: bool) {
         Ok(Some(u)) => u,
         Ok(None) => return,
         Err(err) => {
-            eprintln!("updater: check failed: {err}");
+            log::error!("updater: check failed: {err}");
             return;
         }
     };
@@ -117,8 +116,8 @@ async fn check(app: AppHandle, force: bool) {
     }
 
     let _ = app.emit("update-available", serde_json::json!({ "version": version }));
-    if let Err(err) = update_tray_for_available(&app, &version) {
-        eprintln!("updater: tray rebuild failed: {err}");
+    if let Err(err) = tray::set_update_available(&app, &version) {
+        log::error!("updater: tray rebuild failed: {err}");
     }
 }
 
@@ -146,7 +145,7 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
     let result = run_install(app.clone()).await;
 
     if let Err(ref err) = result {
-        eprintln!("updater: install failed: {err}");
+        log::error!("updater: install failed: {err}");
         if let Some(state) = app.try_state::<SharedUpdater>() {
             if let Ok(mut s) = state.lock() {
                 s.installing = false;
@@ -217,126 +216,4 @@ async fn run_install(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("install: {e}"))?;
 
     app.restart();
-}
-
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let menu = base_menu(app)?;
-    TrayIconBuilder::with_id(TRAY_ID)
-        .icon(app.default_window_icon().cloned().expect("default icon"))
-        .tooltip("Voice Hub")
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(handle_menu_event)
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_main(tray.app_handle());
-            }
-        })
-        .build(app)?;
-    Ok(())
-}
-
-fn show_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
-fn base_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    let connected = connection::load_host().is_some();
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
-    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
-    let disconnect =
-        MenuItem::with_id(app, ITEM_DISCONNECT, "Disconnect", connected, None::<&str>)?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
-    MenuBuilder::new(app)
-        .item(&show)
-        .item(&check)
-        .item(&sep1)
-        .item(&change)
-        .item(&disconnect)
-        .item(&sep2)
-        .item(&quit)
-        .build()
-}
-
-fn update_tray_for_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
-    let connected = connection::load_host().is_some();
-    let label = format!("Install v{version}");
-    let apply = MenuItem::with_id(app, ITEM_UPDATE, &label, true, None::<&str>)?;
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
-    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
-    let disconnect =
-        MenuItem::with_id(app, ITEM_DISCONNECT, "Disconnect", connected, None::<&str>)?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
-    let menu = MenuBuilder::new(app)
-        .item(&apply)
-        .item(&sep1)
-        .item(&show)
-        .item(&check)
-        .item(&sep2)
-        .item(&change)
-        .item(&disconnect)
-        .item(&sep3)
-        .item(&quit)
-        .build()?;
-
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_menu(Some(menu))?;
-        tray.set_tooltip(Some(format!("Voice Hub — v{version} available")))?;
-    }
-    Ok(())
-}
-
-fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
-    match event.id.as_ref() {
-        ITEM_SHOW => show_main(app),
-        ITEM_CHECK => {
-            let h = app.clone();
-            tauri::async_runtime::spawn(async move {
-                check(h, true).await;
-            });
-        }
-        ITEM_UPDATE => {
-            let h = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(err) = apply_update(h).await {
-                    eprintln!("updater: apply failed: {err}");
-                }
-            });
-        }
-        ITEM_CHANGE_SERVER => {
-            show_main(app);
-            if let Err(err) = connection::change_server(app.clone()) {
-                eprintln!("change_server: {err}");
-            }
-        }
-        ITEM_DISCONNECT => {
-            show_main(app);
-            if let Err(err) = connection::disconnect(app.clone()) {
-                eprintln!("disconnect: {err}");
-            }
-        }
-        ITEM_QUIT => {
-            if let Some(flag) = app.try_state::<QuitFlag>() {
-                flag.0.store(true, Ordering::SeqCst);
-            }
-            app.exit(0);
-        }
-        _ => {}
-    }
 }

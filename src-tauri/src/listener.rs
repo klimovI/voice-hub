@@ -54,7 +54,7 @@ pub fn start(app: AppHandle, state: SharedState) {
             handle_event(&mut s, &cb_app, &event);
         });
         if let Err(err) = result {
-            eprintln!("rdev listen failed: {err:?}");
+            log::error!("rdev listen failed: {err:?}");
         }
     });
 }
@@ -189,7 +189,7 @@ fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
 
 pub fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
     if let Err(err) = shortcut::save(app, Some(&binding)) {
-        eprintln!("save shortcut: {err}");
+        log::error!("save shortcut: {err}");
     }
     state.current = Some(binding.clone());
     state.pressed.clear();
