@@ -30,8 +30,8 @@ func Load() Config {
 		TurnRealm:     env("TURN_REALM", hostname),
 		AdminPassword: os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:  envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:    uint16(envInt("UDP_PORT_MIN", 10000)),
-		UDPPortMax:    uint16(envInt("UDP_PORT_MAX", 10100)),
+		UDPPortMin:    uint16(envInt("UDP_PORT_MIN", 10101)),
+		UDPPortMax:    uint16(envInt("UDP_PORT_MAX", 10200)),
 	}
 }
 

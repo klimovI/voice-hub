@@ -13,9 +13,12 @@ services:
       APP_ADMIN_PASSWORD: "dev"
       APP_COOKIE_SECURE: "false"
     volumes:
-      - ./data:/app/data
+      - app_data:/app/data
     ports:
       - "8080:8080"
       - "3478:3478/udp"
-      - "10000-10100:10000-10100/udp"
+      - "10101-10200:10101-10200/udp"
       - "49160-49200:49160-49200/udp"
+
+volumes:
+  app_data:
