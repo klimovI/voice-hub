@@ -1,0 +1,5 @@
+voice-hub bundles third-party components under frontend/public/vendor/.
+Each retains its own license:
+
+- frontend/public/vendor/rnnoise/  RNNoise WASM, Apache License 2.0
+- frontend/public/vendor/dtln/     @sapphi-red/dtln-web (MIT), fft.js (MIT)
