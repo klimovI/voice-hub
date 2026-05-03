@@ -392,6 +392,9 @@ func (r *Room) signalPeerConnections() {
 	}
 	go func() {
 		time.Sleep(3 * time.Second)
+		if r.closed.Load() {
+			return
+		}
 		r.signalPeerConnections()
 	}()
 }
