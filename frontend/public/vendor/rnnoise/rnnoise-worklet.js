@@ -3,6 +3,8 @@
 // GC/jank can no longer cause underruns and crackling. Frame math ported
 // verbatim from frontend/src/audio/rnnoise.ts.
 
+console.log("[rnnoise-worklet] module evaluating");
+
 const RING_CAPACITY = 4096;
 const GATE_OPEN_VAD = 0.4;
 const GATE_ATTACK_MS = 5;
@@ -17,6 +19,7 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
+    console.log("[rnnoise-worklet] constructor");
     this.ready = false;
     this.primed = false;
     this.frameSize = 0;
@@ -50,6 +53,7 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
   }
 
   async _init() {
+    console.log("[rnnoise-worklet] _init start");
     try {
       // Shiguredo rnnoise.js (emscripten output) gates init on
       // `typeof window === "object" || typeof WorkerGlobalScope !== "undefined"`.
@@ -61,15 +65,20 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       if (typeof globalThis.WorkerGlobalScope === "undefined") {
         globalThis.WorkerGlobalScope = function () {};
       }
+      console.log("[rnnoise-worklet] importing vendor module");
       const mod = await import("/vendor/rnnoise/rnnoise.js");
+      console.log("[rnnoise-worklet] vendor imported, calling Rnnoise.load");
       const Rn = await mod.Rnnoise.load();
+      console.log("[rnnoise-worklet] Rnnoise loaded, frameSize=", Rn.frameSize);
       this.state = Rn.createDenoiseState();
       this.frameSize = Rn.frameSize;
       this.frame = new Float32Array(this.frameSize);
       this.original = new Float32Array(this.frameSize);
       this.ready = true;
+      console.log("[rnnoise-worklet] ready");
       this.port.postMessage({ type: "ready", frameSize: this.frameSize });
     } catch (err) {
+      console.error("[rnnoise-worklet] _init failed:", err);
       this.port.postMessage({ type: "error", message: String(err?.message ?? err) });
     }
   }

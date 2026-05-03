@@ -42,10 +42,17 @@ const workletRegistry = new WeakMap<AudioContext, Promise<void>>();
 export function ensureRnnoiseWorkletRegistered(ctx: AudioContext): Promise<void> {
   let p = workletRegistry.get(ctx);
   if (p) return p;
-  p = ctx.audioWorklet.addModule("/vendor/rnnoise/rnnoise-worklet.js").catch((err: unknown) => {
-    workletRegistry.delete(ctx);
-    throw err;
-  });
+  console.log("[rnnoise] addModule start");
+  p = ctx.audioWorklet
+    .addModule("/vendor/rnnoise/rnnoise-worklet.js")
+    .then(() => {
+      console.log("[rnnoise] addModule resolved");
+    })
+    .catch((err: unknown) => {
+      console.error("[rnnoise] addModule failed:", err);
+      workletRegistry.delete(ctx);
+      throw err;
+    });
   workletRegistry.set(ctx, p);
   return p;
 }
@@ -54,12 +61,17 @@ export async function createRnnoiseProcessor(
   ctx: AudioContext,
   mix0to100: number,
 ): Promise<AudioWorkletNode | null> {
+  console.log("[rnnoise] createRnnoiseProcessor sr=", ctx.sampleRate, "mix=", mix0to100);
   // RNNoise frame contract is 48 kHz.
-  if (ctx.sampleRate !== 48000) return null;
+  if (ctx.sampleRate !== 48000) {
+    console.warn("[rnnoise] context sample rate != 48000, refusing");
+    return null;
+  }
 
   try {
     await ensureRnnoiseWorkletRegistered(ctx);
-  } catch {
+  } catch (err) {
+    console.error("[rnnoise] register failed:", err);
     return null;
   }
 
@@ -71,7 +83,9 @@ export async function createRnnoiseProcessor(
       channelCount: 1,
       parameterData: { mix: mix0to100 / 100 },
     });
-  } catch {
+    console.log("[rnnoise] AudioWorkletNode constructed");
+  } catch (err) {
+    console.error("[rnnoise] AudioWorkletNode construction failed:", err);
     return null;
   }
 
@@ -120,7 +134,8 @@ export async function createRnnoiseProcessor(
   try {
     await Promise.race([ready, timeout]);
     return node;
-  } catch {
+  } catch (err) {
+    console.error("[rnnoise] ready/timeout race rejected:", err);
     try {
       node.disconnect();
     } catch {
