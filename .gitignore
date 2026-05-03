@@ -4,6 +4,8 @@
 bin/
 tmp/
 *.log
+*.test
+*.prof
 .env
 .env.local
 backend/.env
