@@ -9,19 +9,16 @@ import (
 	"time"
 
 	"voice-hub/backend/internal/auth"
-	"voice-hub/backend/internal/config"
+	"voice-hub/backend/internal/handler"
+	"voice-hub/backend/internal/middleware"
 )
 
 // Tests in this file enforce the privilege boundary:
 // a guest (user-role session) MUST NOT reach admin endpoints, and admin
 // endpoints MUST NOT be reachable without a valid admin cookie.
 
-func newTestConfig() config.Config {
-	return config.Config{
-		AdminPassword: "correct-admin-pass",
-		SessionSecret: []byte("0123456789abcdef0123456789abcdef"),
-		CookieSecure:  false,
-	}
+func newTestSecret() []byte {
+	return []byte("0123456789abcdef0123456789abcdef")
 }
 
 func adminHandler() http.Handler {
@@ -39,8 +36,8 @@ func cookieFor(secret []byte, role auth.Role, gen uint64) *http.Cookie {
 }
 
 func TestRequireAdmin_RejectsAnonymous(t *testing.T) {
-	cfg := newTestConfig()
-	srv := httptest.NewServer(requireAdmin(cfg, adminHandler()))
+	secret := newTestSecret()
+	srv := httptest.NewServer(middleware.RequireAdmin(secret, adminHandler()))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL)
@@ -54,12 +51,12 @@ func TestRequireAdmin_RejectsAnonymous(t *testing.T) {
 }
 
 func TestRequireAdmin_RejectsUserRole(t *testing.T) {
-	cfg := newTestConfig()
-	srv := httptest.NewServer(requireAdmin(cfg, adminHandler()))
+	secret := newTestSecret()
+	srv := httptest.NewServer(middleware.RequireAdmin(secret, adminHandler()))
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
-	req.AddCookie(cookieFor(cfg.SessionSecret, auth.RoleUser, 0))
+	req.AddCookie(cookieFor(secret, auth.RoleUser, 0))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -71,12 +68,12 @@ func TestRequireAdmin_RejectsUserRole(t *testing.T) {
 }
 
 func TestRequireAdmin_AcceptsAdminRole(t *testing.T) {
-	cfg := newTestConfig()
-	srv := httptest.NewServer(requireAdmin(cfg, adminHandler()))
+	secret := newTestSecret()
+	srv := httptest.NewServer(middleware.RequireAdmin(secret, adminHandler()))
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
-	req.AddCookie(cookieFor(cfg.SessionSecret, auth.RoleAdmin, 0))
+	req.AddCookie(cookieFor(secret, auth.RoleAdmin, 0))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +85,8 @@ func TestRequireAdmin_AcceptsAdminRole(t *testing.T) {
 }
 
 func TestRequireAdmin_RejectsForgedCookie(t *testing.T) {
-	cfg := newTestConfig()
-	srv := httptest.NewServer(requireAdmin(cfg, adminHandler()))
+	secret := newTestSecret()
+	srv := httptest.NewServer(middleware.RequireAdmin(secret, adminHandler()))
 	defer srv.Close()
 
 	// Cookie minted with the wrong secret — simulates an attacker without server access.
@@ -109,11 +106,11 @@ func TestRequireAdmin_RejectsForgedCookie(t *testing.T) {
 }
 
 func TestLogin_AdminPasswordYieldsAdminRole(t *testing.T) {
-	cfg := newTestConfig()
+	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
-	limiter := newAuthLimiter(100, time.Minute)
+	limiter := auth.NewAuthLimiter(100, time.Minute)
 
-	srv := httptest.NewServer(loginHandler(cfg, connPass, limiter))
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
 	defer srv.Close()
 
 	resp := postLogin(t, srv.URL, "correct-admin-pass")
@@ -122,22 +119,22 @@ func TestLogin_AdminPasswordYieldsAdminRole(t *testing.T) {
 		t.Fatalf("admin login: got %d, want 204", resp.StatusCode)
 	}
 
-	role := roleFromCookie(t, cfg.SessionSecret, resp)
+	role := roleFromCookie(t, secret, resp)
 	if role != auth.RoleAdmin {
 		t.Fatalf("admin login: cookie role=%q, want admin", role)
 	}
 }
 
 func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
-	cfg := newTestConfig()
+	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
 	plain, err := connPass.Rotate()
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 
-	limiter := newAuthLimiter(100, time.Minute)
-	srv := httptest.NewServer(loginHandler(cfg, connPass, limiter))
+	limiter := auth.NewAuthLimiter(100, time.Minute)
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
 	defer srv.Close()
 
 	resp := postLogin(t, srv.URL, plain)
@@ -145,21 +142,21 @@ func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("user login: got %d, want 204", resp.StatusCode)
 	}
-	role := roleFromCookie(t, cfg.SessionSecret, resp)
+	role := roleFromCookie(t, secret, resp)
 	if role != auth.RoleUser {
 		t.Fatalf("user login: cookie role=%q, want user", role)
 	}
 }
 
 func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
-	cfg := newTestConfig()
+	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
 	if _, err := connPass.Rotate(); err != nil {
 		t.Fatal(err)
 	}
 
-	limiter := newAuthLimiter(100, time.Minute)
-	srv := httptest.NewServer(loginHandler(cfg, connPass, limiter))
+	limiter := auth.NewAuthLimiter(100, time.Minute)
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
 	defer srv.Close()
 
 	// Wrong password — neither admin nor SP — must not yield any session.
@@ -176,7 +173,7 @@ func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
 }
 
 func TestAuthenticated_StaleUserGenerationRejected(t *testing.T) {
-	cfg := newTestConfig()
+	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
 	if _, err := connPass.Rotate(); err != nil {
 		t.Fatal(err)
@@ -184,29 +181,29 @@ func TestAuthenticated_StaleUserGenerationRejected(t *testing.T) {
 	gen := connPass.Generation()
 
 	// Issue a user session at the current generation, then rotate.
-	cookie := cookieFor(cfg.SessionSecret, auth.RoleUser, gen)
+	cookie := cookieFor(secret, auth.RoleUser, gen)
 	if _, err := connPass.Rotate(); err != nil {
 		t.Fatal(err)
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
-	if authenticated(cfg, connPass, req) {
+	if auth.Authenticated(secret, connPass, req) {
 		t.Fatal("user session with stale generation accepted after rotate")
 	}
 }
 
 func TestAuthenticated_AdminUnaffectedByRotate(t *testing.T) {
-	cfg := newTestConfig()
+	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
-	cookie := cookieFor(cfg.SessionSecret, auth.RoleAdmin, 0)
+	cookie := cookieFor(secret, auth.RoleAdmin, 0)
 	if _, err := connPass.Rotate(); err != nil {
 		t.Fatal(err)
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
-	if !authenticated(cfg, connPass, req) {
+	if !auth.Authenticated(secret, connPass, req) {
 		t.Fatal("admin session rejected after connpass rotate")
 	}
 }
