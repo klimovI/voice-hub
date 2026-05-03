@@ -1,10 +1,19 @@
 import { useState, useRef } from "react";
+import { isTauri } from "./utils/tauri";
 import "./styles/main.css";
 
 export function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Desktop only: an unauthenticated user with a wrong/expired password can't
+  // reach the in-app TopBar button, so expose a way out from the login screen.
+  // Same Tauri command as the TopBar / tray entry.
+  async function handleChangeServer() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("change_server");
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -80,6 +89,17 @@ export function Login() {
           </div>
         )}
       </form>
+      {isTauri() && (
+        <div className="mt-5 pt-4 border-t border-line text-center">
+          <button
+            type="button"
+            onClick={handleChangeServer}
+            className="text-[12px] text-muted hover:text-text underline-offset-2 hover:underline transition-colors"
+          >
+            Сменить сервер
+          </button>
+        </div>
+      )}
     </main>
   );
 }
