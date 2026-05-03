@@ -73,10 +73,22 @@ type peer struct {
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
 
-	writeMu sync.Mutex
-	ctx     context.Context
-	cancel  context.CancelFunc
+	// out is the per-peer outbound queue, drained by writeLoop. Broadcast
+	// loops enqueue here non-blocking and never wait on a slow socket; if
+	// the queue is full, the peer is treated as dead and its context is
+	// cancelled so it can be torn down without holding up other peers.
+	out chan []byte
+	ctx    context.Context
+	cancel context.CancelFunc
 }
+
+// peerOutBufLen bounds per-peer outbound queue depth. Sized for worst-case
+// state-change bursts: a synchronized fan-out from N peers in the same
+// tick can push up to ~N messages onto each recipient's queue before its
+// writeLoop drains any. 512 covers rooms up to a few hundred peers
+// without false drops; a peer that exceeds it is genuinely stuck and is
+// dropped instead of blocking room-wide broadcasts.
+const peerOutBufLen = 512
 
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
@@ -86,18 +98,49 @@ func (p *peer) write(msg protocol.Envelope) error {
 	return p.writeRaw(raw)
 }
 
-// writeRaw sends a pre-marshaled envelope. Used by broadcast loops to
-// marshal the JSON once and fan it out to N peers, instead of marshaling
-// once per recipient inside the writeMu critical section.
+// writeRaw enqueues a pre-marshaled envelope onto the peer's outbound
+// queue. Non-blocking: if the queue is full the peer is cancelled and an
+// error is returned so the broadcast loop can move on. Caller must not
+// rely on synchronous delivery — successful return means "queued", not
+// "sent".
 func (p *peer) writeRaw(raw []byte) error {
-	if p.ctx.Err() != nil {
+	select {
+	case <-p.ctx.Done():
 		return p.ctx.Err()
+	default:
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	wctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
-	defer cancel()
-	return p.ws.Write(wctx, websocket.MessageText, raw)
+	select {
+	case p.out <- raw:
+		return nil
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	default:
+		log.Printf("sfu: peer %s outq full (cap=%d), dropping", p.id, peerOutBufLen)
+		p.cancel()
+		return errPeerOutqFull
+	}
+}
+
+var errPeerOutqFull = errors.New("peer outq full")
+
+// writeLoop drains p.out and serializes WS writes for this peer. Started
+// once per peer in ServeWS before addPeer so the welcome message has a
+// reader. Returns on ctx cancellation or write failure.
+func (p *peer) writeLoop() {
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case raw := <-p.out:
+			wctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+			err := p.ws.Write(wctx, websocket.MessageText, raw)
+			cancel()
+			if err != nil {
+				p.cancel()
+				return
+			}
+		}
+	}
 }
 
 // Room holds the live state of all peers and forwarded tracks.
@@ -203,9 +246,11 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		clientID:    hello.ClientID,
 		pc:          pc,
 		ws:          ws,
+		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+	go p.writeLoop()
 
 	r.addPeer(p)
 	defer r.removePeer(p.id)
