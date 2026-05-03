@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../store/useStore";
 import { labelFromCode } from "../utils/binding";
 
-const COOLDOWN_MS = 250;
+const COOLDOWN_MS = 50;
 
 // In-window keydown listener for the mute toggle.
 //

@@ -101,7 +101,7 @@ export function App() {
   // OS-level event bridge. Each path has its own short-circuit; this is the
   // authoritative gate against a focus-race where both paths fire together.
   const lastToggleAtRef = useRef(0);
-  const TOGGLE_COOLDOWN_MS = 200;
+  const TOGGLE_COOLDOWN_MS = 60;
   const triggerToggleSelfMute = useCallback(() => {
     const now = performance.now();
     if (now - lastToggleAtRef.current < TOGGLE_COOLDOWN_MS) return;

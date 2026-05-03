@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::shortcut::{self, InputBinding};
 
-const COOLDOWN: Duration = Duration::from_millis(250);
+const COOLDOWN: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -63,7 +63,15 @@ fn handle_event(state: &mut ListenerState, app: &AppHandle, event: &Event) {
     match &event.event_type {
         EventType::KeyPress(k) => {
             let was_modifier = is_modifier(k);
-            state.pressed.insert(*k);
+            // Skip OS auto-repeat: if the key is already in `pressed`, this is
+            // a repeat event from holding the key, not a new press edge. On
+            // platforms that send synthetic KeyRelease between repeats (X11),
+            // the cooldown below catches the residual; press-edge handles
+            // Wayland/Windows/macOS where no synthetic release is delivered.
+            let newly_pressed = state.pressed.insert(*k);
+            if !newly_pressed {
+                return;
+            }
             // Keyboard capture happens in the webview (Tauri+rdev keyboard
             // events are suppressed when the window is focused on Windows —
             // tauri-apps/tauri#14770). The listener only handles fire-time
