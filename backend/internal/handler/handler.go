@@ -77,7 +77,6 @@ func FrontendVersion(webDir string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// Health handles GET /healthz.
 func Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -89,7 +88,6 @@ func Health() http.HandlerFunc {
 	}
 }
 
-// Version handles GET /api/version.
 func Version(version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -149,7 +147,6 @@ func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPa
 	}
 }
 
-// Logout handles POST /api/logout by expiring the session cookie.
 func Logout(cookieSecure bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -169,7 +166,6 @@ func Logout(cookieSecure bool) http.HandlerFunc {
 	}
 }
 
-// RoomPeersOf handles GET /api/room/peers.
 func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -208,7 +204,6 @@ func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) htt
 	}
 }
 
-// ConnPassStatus handles GET /api/admin/connection-password.
 func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -220,7 +215,6 @@ func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 	}
 }
 
-// ConnPassRotate handles POST /api/admin/connection-password/rotate.
 func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -246,7 +240,6 @@ func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.Handl
 	}
 }
 
-// ConnPassRevoke handles POST /api/admin/connection-password/revoke.
 func ConnPassRevoke(connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

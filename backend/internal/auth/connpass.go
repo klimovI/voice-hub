@@ -138,7 +138,6 @@ func (s *ConnPassStore) Revoke() error {
 	return s.persist(snapshot)
 }
 
-// persist writes state atomically: temp file + rename.
 func (s *ConnPassStore) persist(state connPassFileFormat) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {

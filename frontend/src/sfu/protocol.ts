@@ -9,9 +9,7 @@
 //   candidate     → RTCIceCandidateInit         (W3C spec)
 // No custom mirrors needed for those.
 
-// ---------------------------------------------------------------------------
 // Shared
-// ---------------------------------------------------------------------------
 
 export type Envelope = {
   event: string;
@@ -24,9 +22,7 @@ export type PeerInfo = {
   displayName?: string;
 };
 
-// ---------------------------------------------------------------------------
 // Server → Client payloads
-// ---------------------------------------------------------------------------
 
 /** Data field of the "welcome" message. Sent once, on connect. */
 export type WelcomePayload = {
@@ -41,9 +37,7 @@ export type PeerLeftPayload = {
 
 // peer-joined and peer-info reuse PeerInfo directly (no wrapper).
 
-// ---------------------------------------------------------------------------
 // Client → Server payloads
-// ---------------------------------------------------------------------------
 
 /** Data field of "hello" — first message after WS open. */
 export type HelloPayload = {
@@ -55,9 +49,7 @@ export type SetDisplayNamePayload = {
   displayName: string;
 };
 
-// ---------------------------------------------------------------------------
 // Discriminated union — all server→client variants
-// ---------------------------------------------------------------------------
 
 export type ServerMessage =
   | { event: "welcome"; data: WelcomePayload }
@@ -67,9 +59,7 @@ export type ServerMessage =
   | { event: "offer"; data: RTCSessionDescriptionInit }
   | { event: "candidate"; data: RTCIceCandidateInit };
 
-// ---------------------------------------------------------------------------
 // ClientMessage union (used in send helpers)
-// ---------------------------------------------------------------------------
 
 export type ClientMessage =
   | { event: "hello"; data: HelloPayload }
@@ -77,9 +67,7 @@ export type ClientMessage =
   | { event: "candidate"; data: RTCIceCandidateInit }
   | { event: "set-displayname"; data: SetDisplayNamePayload };
 
-// ---------------------------------------------------------------------------
 // Runtime guard — parses raw WS text into a typed ServerMessage
-// ---------------------------------------------------------------------------
 
 /**
  * Parses a raw WebSocket message string into a typed ServerMessage.

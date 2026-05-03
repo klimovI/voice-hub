@@ -93,11 +93,8 @@ export function App() {
       session.setMicEnabled(!store.preDeafenSelfMuted);
       store.setOutputMuted(store.preDeafenOutputMuted);
     } else {
-      store.saveDeafenSnapshot();
-      store.setDeafened(true);
-      store.setSelfMuted(true);
+      store.enterDeafen();
       session.setMicEnabled(false);
-      store.setOutputMuted(true);
     }
     audio.applyAllRemoteGains();
   }, [store, audio, session]);

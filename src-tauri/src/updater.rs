@@ -1,6 +1,5 @@
 // Updater state machine.
 //
-// Owns: UpdaterState, check cadence, download/install flow.
 // Does NOT own: tray construction — that lives in tray.rs.
 
 use std::sync::{Arc, Mutex};
@@ -258,7 +257,6 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
         if let Some(state) = app.try_state::<SharedUpdater>() {
             if let Ok(mut s) = state.lock() {
                 s.installing = false;
-                s.pending = None;
             }
         }
         let _ = app.emit(

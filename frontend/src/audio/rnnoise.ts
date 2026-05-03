@@ -134,16 +134,13 @@ function onRnnoiseProcess(event: AudioProcessingEvent, gs: RnnoiseGraphState): v
   const frame = gs.scratchFrame;
   const originalFrame = gs.scratchOriginal;
 
-  // Append new input samples to inputRing (drop overflow defensively).
   const inputCapacityLeft = inputRing.length - gs.inputRingLen;
   const inputAppend = Math.min(input.length, inputCapacityLeft);
   inputRing.set(input.subarray(0, inputAppend), gs.inputRingLen);
   gs.inputRingLen += inputAppend;
 
-  // Drain whole frames into outputRing.
   let consumed = 0;
   while (gs.inputRingLen - consumed >= frameSize) {
-    // Copy frame from ring into scratch, scale to int16 range, save dry copy.
     for (let i = 0; i < frameSize; i += 1) {
       const v = inputRing[consumed + i];
       originalFrame[i] = v;
@@ -177,7 +174,6 @@ function onRnnoiseProcess(event: AudioProcessingEvent, gs: RnnoiseGraphState): v
     consumed += frameSize;
   }
 
-  // Shift unconsumed input down to the start of the ring.
   if (consumed > 0) {
     const remaining = gs.inputRingLen - consumed;
     if (remaining > 0) {
@@ -186,7 +182,6 @@ function onRnnoiseProcess(event: AudioProcessingEvent, gs: RnnoiseGraphState): v
     gs.inputRingLen = remaining;
   }
 
-  // Drain output ring into the SP output block.
   const take = Math.min(output.length, gs.outputRingLen);
   output.fill(0);
   if (take > 0) {

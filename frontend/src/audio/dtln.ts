@@ -1,5 +1,4 @@
 // DTLN denoiser head.
-// Matches app.js prepareDtlnHead() exactly.
 // DTLN runs in its own AudioContext at Dtln.sampleRate, feeds a
 // MediaStreamDestination, which is then re-sourced into the main 48 kHz ctx.
 //

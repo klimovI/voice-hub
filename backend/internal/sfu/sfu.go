@@ -348,7 +348,7 @@ func (r *Room) removePeer(id string) {
 }
 
 // Close stops accepting new peers and tears down all active sessions.
-// Safe to call multiple times. Used during graceful shutdown.
+// Safe to call multiple times.
 func (r *Room) Close() {
 	if !r.closed.CompareAndSwap(false, true) {
 		return

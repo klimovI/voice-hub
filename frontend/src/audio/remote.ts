@@ -101,37 +101,44 @@ export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
   audio.audioEl.srcObject = null;
 }
 
-let remoteSpeakingFrameId: number | null = null;
-
-export function startRemoteSpeakingLoop(
-  getMap: () => Map<string, RemoteParticipantAudio>,
-  onChange: (participantId: string, speaking: boolean) => void,
-): void {
-  if (remoteSpeakingFrameId !== null) return;
-  const tick = () => {
-    const now = performance.now();
-    const map = getMap();
-    for (const [id, audio] of map) {
-      const level = detectLevel(audio.analyser, audio.monitorData);
-      if (level > SPEAKING_THRESHOLD) {
-        audio.speakingHoldUntil = now + SPEAKING_HOLD_MS;
-      }
-      const speakingNow = audio.speakingHoldUntil > now;
-      if (speakingNow !== audio.speaking) {
-        audio.speaking = speakingNow;
-        onChange(id, speakingNow);
-      }
-    }
-    remoteSpeakingFrameId = requestAnimationFrame(tick);
-  };
-  remoteSpeakingFrameId = requestAnimationFrame(tick);
+export interface RemoteSpeakingLoop {
+  start(
+    getMap: () => Map<string, RemoteParticipantAudio>,
+    onChange: (participantId: string, speaking: boolean) => void,
+  ): void;
+  stop(): void;
 }
 
-export function stopRemoteSpeakingLoop(): void {
-  if (remoteSpeakingFrameId !== null) {
-    cancelAnimationFrame(remoteSpeakingFrameId);
-    remoteSpeakingFrameId = null;
-  }
+export function createRemoteSpeakingLoop(): RemoteSpeakingLoop {
+  let frameId: number | null = null;
+  return {
+    start(getMap, onChange) {
+      if (frameId !== null) return;
+      const tick = () => {
+        const now = performance.now();
+        const map = getMap();
+        for (const [id, audio] of map) {
+          const level = detectLevel(audio.analyser, audio.monitorData);
+          if (level > SPEAKING_THRESHOLD) {
+            audio.speakingHoldUntil = now + SPEAKING_HOLD_MS;
+          }
+          const speakingNow = audio.speakingHoldUntil > now;
+          if (speakingNow !== audio.speaking) {
+            audio.speaking = speakingNow;
+            onChange(id, speakingNow);
+          }
+        }
+        frameId = requestAnimationFrame(tick);
+      };
+      frameId = requestAnimationFrame(tick);
+    },
+    stop() {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+    },
+  };
 }
 
 export function applyParticipantGain(

@@ -22,7 +22,6 @@ export type JoinState = "idle" | "joining" | "joined";
 export type StatusState = "idle" | "ok" | "err";
 
 export interface AppState {
-  // Join state
   joinState: JoinState;
   setJoinState: (s: JoinState) => void;
 
@@ -31,7 +30,6 @@ export interface AppState {
   configReady: boolean;
   setConfigReady: (v: boolean) => void;
 
-  // Self audio controls
   selfMuted: boolean;
   setSelfMuted: (v: boolean) => void;
   outputMuted: boolean;
@@ -40,9 +38,10 @@ export interface AppState {
   setDeafened: (v: boolean) => void;
   preDeafenSelfMuted: boolean;
   preDeafenOutputMuted: boolean;
-  saveDeafenSnapshot: () => void;
+  // Atomic enter: snapshot current self/output mute state and force all three
+  // muted flags on in a single set() so subscribers never see partial state.
+  enterDeafen: () => void;
 
-  // Slider values (persisted)
   sendVolume: number;
   setSendVolume: (v: number) => void;
   rnnoiseMix: number;
@@ -50,22 +49,18 @@ export interface AppState {
   outputVolume: number;
   setOutputVolume: (v: number) => void;
 
-  // Engine
   engine: EngineKind;
   setEngine: (e: EngineKind) => void;
 
-  // Shortcut
   shortcut: InputBinding | null;
   setShortcut: (s: InputBinding | null) => void;
   capturingShortcut: boolean;
   setCapturingShortcut: (v: boolean) => void;
 
-  // Status pill
   statusText: string;
   statusState: StatusState;
   setStatus: (text: string, isError?: boolean, joined?: boolean) => void;
 
-  // Participants
   participants: Map<string, ParticipantUI>;
   upsertParticipant: (p: Partial<ParticipantUI> & { id: string }) => ParticipantUI;
   removeParticipant: (id: string) => void;
@@ -74,13 +69,11 @@ export interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
-  // Join state
   joinState: "idle",
   setJoinState: (s) => set({ joinState: s }),
   configReady: false,
   setConfigReady: (v) => set({ configReady: v }),
 
-  // Self audio controls
   selfMuted: false,
   setSelfMuted: (v) => set({ selfMuted: v }),
   outputMuted: loadBoolean(KEYS.outputMuted, false),
@@ -92,13 +85,18 @@ export const useStore = create<AppState>((set, get) => ({
   setDeafened: (v) => set({ deafened: v }),
   preDeafenSelfMuted: false,
   preDeafenOutputMuted: false,
-  saveDeafenSnapshot: () =>
-    set((s) => ({
-      preDeafenSelfMuted: s.selfMuted,
-      preDeafenOutputMuted: s.outputMuted,
-    })),
+  enterDeafen: () =>
+    set((s) => {
+      saveOutputMuted(true);
+      return {
+        preDeafenSelfMuted: s.selfMuted,
+        preDeafenOutputMuted: s.outputMuted,
+        deafened: true,
+        selfMuted: true,
+        outputMuted: true,
+      };
+    }),
 
-  // Sliders
   sendVolume: loadNumber(KEYS.sendVolume, 100),
   setSendVolume: (v) => {
     saveSendVolume(v);
@@ -115,20 +113,17 @@ export const useStore = create<AppState>((set, get) => ({
     set({ outputVolume: v });
   },
 
-  // Engine
   engine: loadEngine(),
   setEngine: (e) => {
     saveEngine(e);
     set({ engine: e });
   },
 
-  // Shortcut
   shortcut: loadBinding(),
   setShortcut: (s) => set({ shortcut: s }),
   capturingShortcut: false,
   setCapturingShortcut: (v) => set({ capturingShortcut: v }),
 
-  // Status
   statusText: "Ready",
   statusState: "idle",
   setStatus: (text, isError = false, joined) => {
@@ -139,7 +134,6 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  // Participants
   participants: new Map(),
   upsertParticipant: (partial) => {
     const existing = get().participants.get(partial.id);

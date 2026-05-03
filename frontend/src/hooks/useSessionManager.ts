@@ -327,7 +327,11 @@ export function useSessionManager({
         }
 
         if (!denoiserReady) {
+          // Capture the graph identity so leave-during-load (or leave+rejoin
+          // before WASM resolves) cannot rebuild on a torn-down / replaced graph.
+          const pendingGraph = graph;
           void preloadEngine(targetEngine).then(async () => {
+            if (micGraphRef.current !== pendingGraph) return;
             const s = useStore.getState();
             if (s.joinState !== "joined") return;
             if (s.engine !== targetEngine) return;

@@ -1,5 +1,4 @@
 // RMS speaking-level detector using AnalyserNode time-domain data.
-// Threshold 0.02 as in the original.
 
 export const SPEAKING_THRESHOLD = 0.02;
 

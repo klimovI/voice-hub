@@ -18,9 +18,9 @@ import {
   setupParticipantAudio,
   teardownParticipantAudio,
   applyParticipantGain,
-  startRemoteSpeakingLoop,
-  stopRemoteSpeakingLoop,
+  createRemoteSpeakingLoop,
   type RemoteParticipantAudio,
+  type RemoteSpeakingLoop,
 } from "../audio/remote";
 import { preloadRnnoise, isRnnoiseReady } from "../audio/rnnoise";
 import { preloadDtln, isDtlnReady } from "../audio/dtln";
@@ -46,6 +46,8 @@ export interface AudioEngineRef {
   remoteAudio: Map<string, RemoteParticipantAudio>;
   // one AudioContext shared across all remote participants; created lazily
   remoteAudioCtx: AudioContext | null;
+  // hook-owned RAF loop driving remote speaking detection
+  remoteSpeakingLoop: RemoteSpeakingLoop;
   // stable send-volume ref for the ScriptProcessor callback
   sendVolume: number;
   rnnoiseMix: number;
@@ -53,11 +55,13 @@ export interface AudioEngineRef {
 
 export function useAudioEngine() {
   const store = useStore();
+  const setStatus = store.setStatus;
   const refs = useRef<AudioEngineRef>({
     rawLocalStream: null,
     micGraph: null,
     remoteAudio: new Map(),
     remoteAudioCtx: null,
+    remoteSpeakingLoop: createRemoteSpeakingLoop(),
     sendVolume: store.sendVolume,
     rnnoiseMix: store.rnnoiseMix,
   });
@@ -93,14 +97,13 @@ export function useAudioEngine() {
         r.rawLocalStream,
         engine,
         () => refs.current.rnnoiseMix,
-        (msg, isError) => store.setStatus(msg, isError),
+        (msg, isError) => setStatus(msg, isError),
         prebuiltContext,
       );
       r.micGraph = graph;
       return graph;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [setStatus],
   );
 
   const teardownGraph = useCallback(() => {
@@ -189,7 +192,7 @@ export function useAudioEngine() {
       // useStore.getState() inside the RAF callback is intentional: this is a
       // periodic snapshot read, not a reactive subscription. Audio modules
       // must not re-render on store changes.
-      startRemoteSpeakingLoop(
+      r.remoteSpeakingLoop.start(
         () => refs.current.remoteAudio,
         (id, speaking) => {
           const current = useStore.getState().participants.get(id);
@@ -229,7 +232,7 @@ export function useAudioEngine() {
 
   const cleanupAllRemote = useCallback(() => {
     const r = refs.current;
-    stopRemoteSpeakingLoop();
+    r.remoteSpeakingLoop.stop();
     for (const audio of r.remoteAudio.values()) {
       teardownParticipantAudio(audio);
     }

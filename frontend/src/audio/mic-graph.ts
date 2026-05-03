@@ -1,6 +1,5 @@
 // Local mic AudioContext graph: mic → [denoiser head] → HPF(110Hz) → LPF(7200Hz)
 // → DynamicsCompressor → [RNNoise tail] → GainNode → MediaStreamDestination.
-// Matches app.js prepareLocalAudioGraph() / teardownLocalAudioGraph() exactly.
 
 import type { EngineKind } from "../types";
 import { DTLN_ASSET_BASE } from "../config";
@@ -167,7 +166,6 @@ export function teardownMicGraph(graph: MicGraph): void {
     graph.speakingFrameId = null;
   }
 
-  // RNNoise
   try {
     graph.rnnoiseProcessorNode?.disconnect();
   } catch {
@@ -176,7 +174,6 @@ export function teardownMicGraph(graph: MicGraph): void {
   resetRnnoiseGraphState(graph.rnnoiseGraphState);
   graph.rnnoiseProcessorNode = null;
 
-  // DTLN
   try {
     graph.dtln?.dtlnInputSource.disconnect();
   } catch {
@@ -195,7 +192,6 @@ export function teardownMicGraph(graph: MicGraph): void {
   void graph.dtln?.dtlnContext.close().catch(() => undefined);
   graph.dtln = null;
 
-  // Main chain
   try {
     graph.localSourceNode.disconnect();
   } catch {
