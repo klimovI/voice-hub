@@ -101,12 +101,13 @@ pub fn run() {
             // First run (no config file) → seed default and persist.
             // Existing file (even with `null`) → respect user's choice.
             let initial = match shortcut::load(&handle) {
-                Some(opt) => opt,
-                None => {
+                shortcut::LoadResult::Missing => {
                     let default = shortcut::InputBinding::default_combo();
                     let _ = shortcut::save(&handle, Some(&default));
                     Some(default)
                 }
+                shortcut::LoadResult::Cleared => None,
+                shortcut::LoadResult::Bound(b) => Some(b),
             };
             let state = Arc::new(Mutex::new(ListenerState::new(initial)));
             app.manage(state.clone());
