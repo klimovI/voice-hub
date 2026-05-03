@@ -7,12 +7,10 @@ import type { InputBinding } from "../utils/binding";
 import { loadBinding } from "../utils/binding";
 import {
   KEYS,
-  loadBoolean,
   loadEngine,
   loadMicDeviceId,
   loadNumber,
   loadPercentage,
-  saveOutputMuted,
   saveSendVolume,
   saveRnnoiseMix,
   saveOutputVolume,
@@ -82,26 +80,20 @@ export const useStore = create<AppState>((set, get) => ({
 
   selfMuted: false,
   setSelfMuted: (v) => set({ selfMuted: v }),
-  outputMuted: loadBoolean(KEYS.outputMuted, false),
-  setOutputMuted: (v) => {
-    saveOutputMuted(v);
-    set({ outputMuted: v });
-  },
+  outputMuted: false,
+  setOutputMuted: (v) => set({ outputMuted: v }),
   deafened: false,
   setDeafened: (v) => set({ deafened: v }),
   preDeafenSelfMuted: false,
   preDeafenOutputMuted: false,
   enterDeafen: () =>
-    set((s) => {
-      saveOutputMuted(true);
-      return {
-        preDeafenSelfMuted: s.selfMuted,
-        preDeafenOutputMuted: s.outputMuted,
-        deafened: true,
-        selfMuted: true,
-        outputMuted: true,
-      };
-    }),
+    set((s) => ({
+      preDeafenSelfMuted: s.selfMuted,
+      preDeafenOutputMuted: s.outputMuted,
+      deafened: true,
+      selfMuted: true,
+      outputMuted: true,
+    })),
 
   sendVolume: loadNumber(KEYS.sendVolume, 100),
   setSendVolume: (v) => {

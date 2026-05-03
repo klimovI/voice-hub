@@ -4,10 +4,23 @@
 
 import type { EngineKind } from "../types";
 
+// Legacy key, no longer written. We migrate it away on startup so users who
+// reloaded while deafened don't get stuck with output muted forever (the
+// dedicated mute button was removed in 143d849; only deafen toggles it now,
+// so persisting it independently created an orphan-state trap).
+const LEGACY_OUTPUT_MUTED_KEY = "voice-hub.output-muted";
+
+export function migrateLegacyKeys(): void {
+  try {
+    localStorage.removeItem(LEGACY_OUTPUT_MUTED_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const KEYS = {
   // Audio / engine
   outputVolume: "voice-hub.output-volume",
-  outputMuted: "voice-hub.output-muted",
   sendVolume: "voice-hub.send-volume",
   rnnoiseMix: "voice-hub.rnnoise-mix",
   engine: "voice-hub.engine",
@@ -110,10 +123,6 @@ export function loadPeerVolume(clientId: string): number | null {
 export function savePeerVolume(clientId: string, volume: number): void {
   if (!clientId) return;
   localStorage.setItem(PEER_VOLUME_PREFIX + clientId, String(volume));
-}
-
-export function saveOutputMuted(v: boolean): void {
-  localStorage.setItem(KEYS.outputMuted, String(v));
 }
 
 export function saveSendVolume(v: number): void {
