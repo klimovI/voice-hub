@@ -55,14 +55,14 @@ export function SessionCard({
             className="input-field"
           />
         </label>
-        <div className="flex flex-wrap gap-2.5">
+        <div className="grid grid-cols-4 gap-2.5">
           <button
             id="join-button"
             type="submit"
             disabled={joining || joined || !configReady}
-            className="btn btn-primary"
+            className="btn btn-primary justify-center"
           >
-            {configReady ? "Войти в комнату" : "Загрузка…"}
+            {configReady ? "Войти" : "Загрузка…"}
           </button>
           <button
             id="self-mute-button"
@@ -70,9 +70,9 @@ export function SessionCard({
             disabled={!joined}
             aria-pressed={selfMuted ? "true" : "false"}
             onClick={onToggleSelfMute}
-            className={`btn ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {selfMuted ? "Включить микрофон" : "Выключить микрофон"}
+            {selfMuted ? "Включить" : "Выключить"}
           </button>
           <button
             id="deafen-button"
@@ -80,16 +80,16 @@ export function SessionCard({
             disabled={!joined}
             aria-pressed={deafened ? "true" : "false"}
             onClick={onToggleDeafen}
-            className={`btn ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {deafened ? "Слушать всех" : "Заглушить всех"}
+            {deafened ? "Слушать" : "Заглушить"}
           </button>
           <button
             id="leave-button"
             type="button"
             disabled={!joined}
             onClick={onLeave}
-            className="btn btn-danger"
+            className="btn btn-danger justify-center"
           >
             Выйти
           </button>
