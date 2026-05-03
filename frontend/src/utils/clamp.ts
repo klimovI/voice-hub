@@ -9,9 +9,7 @@ export function formatRnnoiseMix(value: number): string {
 
 export function formatEngine(engine: string): string {
   if (engine === "off") return "Выкл.";
-  if (engine === "rnnoise") return "RNNoise";
-  if (engine === "dtln") return "DTLN";
-  if (engine === "dfn3") return "DeepFilter";
+  if (engine === "rnnoise") return "Вкл.";
   return engine;
 }
 

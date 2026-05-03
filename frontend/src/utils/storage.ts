@@ -3,7 +3,6 @@
 // localStorage calls in components, hooks, or the store.
 
 import type { EngineKind } from "../types";
-import { isTauri } from "./tauri";
 
 // Legacy key, no longer written. We migrate it away on startup so users who
 // reloaded while deafened don't get stuck with output muted forever (the
@@ -147,16 +146,11 @@ export function saveOutputVolume(v: number): void {
   localStorage.setItem(KEYS.outputVolume, String(v));
 }
 
-const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
-// dtln/dfn3 only function inside Tauri (CSP + vendor deploy gaps on web).
-// If the persisted engine is one of those but we're running on the web, fall
-// back to rnnoise so the user doesn't land on a non-functional engine.
-const WEB_ENGINE_VALUES: EngineKind[] = ["off", "rnnoise"];
+const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise"];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);
-  const allowed = isTauri() ? ENGINE_VALUES : WEB_ENGINE_VALUES;
-  return allowed.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
+  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
 }
 
 export function saveEngine(e: EngineKind): void {

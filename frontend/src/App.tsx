@@ -7,7 +7,7 @@ import { useSFU } from "./hooks/useSFU";
 import { useSessionManager } from "./hooks/useSessionManager";
 import { useGlobalShortcut } from "./hooks/useShortcut";
 import { loadOrCreateDisplayName } from "./utils/storage";
-import { makeGuestName } from "./utils/clamp";
+import { makeGuestName, formatEngine } from "./utils/clamp";
 import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
 
@@ -114,13 +114,13 @@ export function App() {
       s.setEngine(engine);
       preloadEngine(engine);
       if (s.joinState !== "joined") {
-        s.setStatus(`Шумоподавление: ${engine}`);
+        s.setStatus(`Шумоподавление: ${formatEngine(engine)}`);
         return;
       }
-      s.setStatus(`Переключаюсь на ${engine}…`);
+      s.setStatus(`Переключаюсь на ${formatEngine(engine)}…`);
       try {
         await session.switchEngine(engine);
-        useStore.getState().setStatus(`Шумоподавление: ${engine}`, false, true);
+        useStore.getState().setStatus(`Шумоподавление: ${formatEngine(engine)}`, false, true);
       } catch (err) {
         useStore
           .getState()

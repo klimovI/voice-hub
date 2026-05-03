@@ -21,7 +21,7 @@ import {
   loadOrCreateClientId,
   loadPeerVolume,
 } from "../utils/storage";
-import { makeGuestName } from "../utils/clamp";
+import { makeGuestName, formatEngine } from "../utils/clamp";
 import { loadAppConfig, buildWsUrl } from "../config";
 import { isTauri } from "../utils/tauri";
 import { createReconnectScheduler } from "../utils/reconnect";
@@ -419,10 +419,10 @@ export function useSessionManager({
             if (s.engine !== targetEngine) return;
             try {
               await switchEngine(targetEngine);
-              store.setStatus(`Шумоподавление: ${targetEngine}`, false, true);
+              store.setStatus(`Шумоподавление: ${formatEngine(targetEngine)}`, false, true);
             } catch (err) {
               store.setStatus(
-                `Не удалось включить ${targetEngine}: ${err instanceof Error ? err.message : String(err)}`,
+                `Не удалось включить ${formatEngine(targetEngine)}: ${err instanceof Error ? err.message : String(err)}`,
                 true,
                 true,
               );

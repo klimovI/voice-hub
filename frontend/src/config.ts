@@ -24,9 +24,3 @@ export function buildWsUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}/ws`;
 }
-
-// DTLN vendor assets live at this base URL.
-export const DTLN_ASSET_BASE = new URL("./vendor/dtln/", window.location.href).href;
-
-// DeepFilterNet3 vendor assets live at this base URL.
-export const DFN3_ASSET_BASE = new URL("./vendor/dfn3/", window.location.href).href;

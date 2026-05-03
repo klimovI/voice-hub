@@ -1,10 +1,16 @@
 // Local mic AudioContext graph: mic → [denoiser head] → HPF(110Hz) → LPF(7200Hz)
-// → DynamicsCompressor → [RNNoise tail] → GainNode → MediaStreamDestination.
+// → DynamicsCompressor → [denoiser tail] → GainNode → MediaStreamDestination.
+//
+// Denoiser engines plug in at one of two positions:
+// - Head: before the EQ/compressor — for engines that need their own ctx
+//   (e.g. a model running at a non-48 kHz sample rate).
+// - Tail: after the compressor — current pattern for RNNoise (48 kHz native,
+//   AudioWorkletNode in the main ctx).
+// The chainHead/chainTail variables keep this shape explicit so a future
+// engine can slot in by adding a branch on `engine` plus a field on MicGraph
+// for its handle.
 
 import type { EngineKind } from "../types";
-import { DTLN_ASSET_BASE, DFN3_ASSET_BASE } from "../config";
-import { prepareDtlnHead, type DtlnHandle } from "./dtln";
-import { prepareDfn3Head, type Dfn3Handle } from "./dfn3";
 import { createRnnoiseProcessor } from "./rnnoise";
 import { detectLevel, SPEAKING_THRESHOLD } from "./level-detect";
 
@@ -21,9 +27,7 @@ export interface MicGraph {
   localMonitorAnalyser: AnalyserNode;
   localMonitorData: Uint8Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
-  // Optional denoiser handles:
-  dtln: DtlnHandle | null;
-  dfn3: Dfn3Handle | null;
+  // Optional denoiser handles. Add a field per future engine.
   rnnoiseProcessorNode: AudioWorkletNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
@@ -81,30 +85,10 @@ export async function buildMicGraph(
   localCompressorNode.attack.value = 0.005;
   localCompressorNode.release.value = 0.1;
 
-  // Build chain head (possibly DTLN or DFN3 denoiser).
-  let chainHead: AudioNode = localSourceNode;
-  let dtlnHandle: DtlnHandle | null = null;
-  let dfn3Handle: Dfn3Handle | null = null;
-
-  if (engine === "dtln") {
-    try {
-      dtlnHandle = await prepareDtlnHead(DTLN_ASSET_BASE, rawLocalStream, localAudioContext);
-      chainHead = dtlnHandle.denoisedSourceNode;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      onStatusMessage(`DTLN failed: ${msg}. Using raw mic.`, true);
-      chainHead = localSourceNode;
-    }
-  } else if (engine === "dfn3") {
-    try {
-      dfn3Handle = await prepareDfn3Head(DFN3_ASSET_BASE, localSourceNode, localAudioContext);
-      chainHead = dfn3Handle.processorNode;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      onStatusMessage(`DFN3 failed: ${msg}. Using raw mic.`, true);
-      chainHead = localSourceNode;
-    }
-  }
+  // Build chain head — reserved for future engines that need to run at the
+  // mic source (e.g. a non-48 kHz model with its own ctx). No engine uses
+  // this position right now.
+  const chainHead: AudioNode = localSourceNode;
 
   chainHead.connect(localHighPassNode);
   localHighPassNode.connect(localLowPassNode);
@@ -138,8 +122,6 @@ export async function buildMicGraph(
     localMonitorAnalyser,
     localMonitorData,
     processedLocalStream: localDestinationNode.stream,
-    dtln: dtlnHandle,
-    dfn3: dfn3Handle,
     rnnoiseProcessorNode,
     speakingFrameId: null,
   };
@@ -182,15 +164,6 @@ export function teardownMicGraph(graph: MicGraph): void {
   }
   safeDisconnect(graph.rnnoiseProcessorNode);
   graph.rnnoiseProcessorNode = null;
-
-  safeDisconnect(graph.dtln?.dtlnInputSource);
-  safeDisconnect(graph.dtln?.dtlnProcessorNode);
-  safeDisconnect(graph.dtln?.denoisedSourceNode);
-  void graph.dtln?.dtlnContext.close().catch(() => undefined);
-  graph.dtln = null;
-
-  safeDisconnect(graph.dfn3?.processorNode);
-  graph.dfn3 = null;
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);

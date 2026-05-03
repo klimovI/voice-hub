@@ -1,6 +1,6 @@
 // Core domain types for Voice Hub.
 
-export type EngineKind = "off" | "rnnoise" | "dtln" | "dfn3";
+export type EngineKind = "off" | "rnnoise";
 
 export type Role = "admin" | "user";
 

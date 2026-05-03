@@ -2,20 +2,11 @@ import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
 import { clampPercentage } from "../utils/storage";
 import { formatRnnoiseMix, formatEngine } from "../utils/clamp";
-import { isTauri } from "../utils/tauri";
 import type { EngineKind } from "../types";
 
-// DTLN and DFN3 are unavailable on the web build:
-// - DTLN: vendor calls `new Function(...)` (tflite embind), blocked by the
-//   site CSP `script-src 'self' 'wasm-unsafe-eval'`. Vendor also fetches
-//   `tflite_web_api_cc_simd.js` with a relative path that resolves to the
-//   page origin (404). Both are baked into the third-party bundle.
-// - DFN3: vendor `dfn3.mjs` is not deployed to the web origin.
-// Tauri runs locally without that CSP and ships the vendor files, so both
-// work there. Hide them from the web UI to prevent dead clicks.
-const ENGINES: EngineKind[] = isTauri()
-  ? ["off", "rnnoise", "dtln", "dfn3"]
-  : ["off", "rnnoise"];
+// Currently only off + RNNoise. New engines slot in by adding to this list
+// (and to EngineKind, preloadEngine, and the engine branch in buildMicGraph).
+const ENGINES: EngineKind[] = ["off", "rnnoise"];
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -132,8 +123,9 @@ export function AudioCard({
         <div
           id="denoiser-engine"
           role="radiogroup"
-          aria-label="Движок шумоподавления"
-          className="grid grid-cols-4 gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
+          aria-label="Шумоподавление"
+          className="grid gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
+          style={{ gridTemplateColumns: `repeat(${ENGINES.length}, minmax(0, 1fr))` }}
         >
           {ENGINES.map((eng) => {
             const active = engine === eng;
@@ -158,20 +150,21 @@ export function AudioCard({
         </div>
       </div>
 
-      <div className="grid gap-2">
-        <SliderHead label="Сила подавления" value={formatRnnoiseMix(rnnoiseMix)} />
-        <input
-          id="rnnoise-mix"
-          type="range"
-          min="0"
-          max="100"
-          step="5"
-          value={rnnoiseMix}
-          disabled={engine !== "rnnoise"}
-          onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
-          className="vh-range"
-        />
-      </div>
+      {engine === "rnnoise" && (
+        <div className="grid gap-2">
+          <SliderHead label="Сила подавления" value={formatRnnoiseMix(rnnoiseMix)} />
+          <input
+            id="rnnoise-mix"
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={rnnoiseMix}
+            onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
+            className="vh-range"
+          />
+        </div>
+      )}
 
       <div className="grid gap-2">
         <SliderHead label="Громкость микрофона" value={`${sendVolume}%`} />
