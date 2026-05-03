@@ -49,57 +49,81 @@ export function Login() {
   }
 
   return (
-    <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,24px)]">
-      <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
-        <img
-          src="/favicon.svg"
-          alt=""
-          className="w-7 h-7 rounded-[8px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
-        />
-        Voice Hub
-      </div>
-      <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
-      <div className="text-muted text-[13px] mb-5">Введите пароль доступа.</div>
-      <form id="login-form" ref={formRef} method="post" action="/api/login" onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="password" className="block text-[12px] font-medium text-muted mb-1.5">
-            Пароль
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            autoFocus
-            className="input-field !mt-0"
-          />
-        </div>
-        <button
-          type="submit"
-          id="submit"
-          disabled={submitting}
-          className="btn btn-primary w-full justify-center mt-5 disabled:cursor-progress disabled:opacity-60"
-        >
-          Войти
-        </button>
-        {error && (
-          <div className="mt-3.5 px-3 py-2.5 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
-            {error}
-          </div>
-        )}
-      </form>
+    <>
       {isTauri() && (
-        <div className="mt-5 pt-4 border-t border-line text-center">
-          <button
-            type="button"
-            onClick={handleChangeServer}
-            className="text-[12px] text-muted hover:text-text underline-offset-2 hover:underline transition-colors"
+        <button
+          type="button"
+          onClick={handleChangeServer}
+          title="Сменить сервер"
+          aria-label="Сменить сервер"
+          className="fixed top-4 right-4 z-10 inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-3 border border-line-strong text-muted hover:text-text hover:border-line transition-colors"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            Сменить сервер
-          </button>
-        </div>
+            <path d="m16 3 4 4-4 4" />
+            <path d="M20 7H4" />
+            <path d="m8 21-4-4 4-4" />
+            <path d="M4 17h16" />
+          </svg>
+        </button>
       )}
-    </main>
+      <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,60px)]">
+        <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
+          <img
+            src="/favicon.svg"
+            alt=""
+            className="w-7 h-7 rounded-[8px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
+          />
+          Voice Hub
+        </div>
+        <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
+        <div className="text-muted text-[13px] mb-5">Введите пароль доступа.</div>
+        <form
+          id="login-form"
+          ref={formRef}
+          method="post"
+          action="/api/login"
+          onSubmit={handleSubmit}
+        >
+          <div>
+            <label htmlFor="password" className="block text-[12px] font-medium text-muted mb-1.5">
+              Пароль
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              autoFocus
+              className="input-field !mt-0"
+            />
+          </div>
+          <button
+            type="submit"
+            id="submit"
+            disabled={submitting}
+            className="btn btn-primary w-full justify-center mt-5 disabled:cursor-progress disabled:opacity-60"
+          >
+            Войти
+          </button>
+          {error && (
+            <div className="mt-3.5 px-3 py-2.5 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
+              {error}
+            </div>
+          )}
+        </form>
+      </main>
+    </>
   );
 }
