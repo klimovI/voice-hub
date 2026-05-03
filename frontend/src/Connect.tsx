@@ -1,11 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { ConnectionState } from "./ipc";
 import "./styles/main.css";
-
-interface ConnectionState {
-  has_host: boolean;
-  host: string | null;
-}
 
 export function Connect() {
   const [submitting, setSubmitting] = useState(false);

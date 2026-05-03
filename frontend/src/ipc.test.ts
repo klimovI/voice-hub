@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ConnectionState,
   UpdateAvailablePayload,
   UpdateErrorPayload,
   UpdateInstallingPayload,
@@ -32,5 +33,12 @@ describe("ipc payloads", () => {
   it("UpdateErrorPayload carries a message string", () => {
     const p: UpdateErrorPayload = { message: "install failed" };
     expect(p.message).toBe("install failed");
+  });
+
+  it("ConnectionState mirrors get_state with nullable host", () => {
+    const fresh: ConnectionState = { has_host: false, host: null };
+    const set: ConnectionState = { has_host: true, host: "https://example.com" };
+    expect(fresh.host).toBeNull();
+    expect(set.has_host).toBe(true);
   });
 });

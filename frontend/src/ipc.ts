@@ -17,3 +17,10 @@ export type UpdateInstallingPayload = Record<string, never>;
 export type UpdateErrorPayload = {
   message: string;
 };
+
+// Return value of the `get_state` Tauri command. Mirrored on the Rust side
+// in src-tauri/src/connection.rs (ConnectionState).
+export type ConnectionState = {
+  has_host: boolean;
+  host: string | null;
+};
