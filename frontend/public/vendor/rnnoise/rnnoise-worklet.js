@@ -30,6 +30,11 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
     this.gateEnv = 1;
     this.gateHold = 0;
     this.gateOpen = true;
+    // Diagnostics:
+    this.framesProcessed = 0;
+    this.vadSum = 0;
+    this.vadMax = 0;
+    this.lastReportFrame = 0;
     this.port.onmessage = (e) => {
       if (e.data?.type === "destroy") {
         try {
@@ -63,7 +68,7 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       this.frame = new Float32Array(this.frameSize);
       this.original = new Float32Array(this.frameSize);
       this.ready = true;
-      this.port.postMessage({ type: "ready" });
+      this.port.postMessage({ type: "ready", frameSize: this.frameSize });
     } catch (err) {
       this.port.postMessage({ type: "error", message: String(err?.message ?? err) });
     }
@@ -110,6 +115,25 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
         frame[i] = v * 32768;
       }
       const vadProb = this.state.processFrame(frame);
+
+      this.framesProcessed += 1;
+      this.vadSum += vadProb;
+      if (vadProb > this.vadMax) this.vadMax = vadProb;
+      // Report every 100 frames (~1 s).
+      if (this.framesProcessed - this.lastReportFrame >= 100) {
+        this.port.postMessage({
+          type: "stats",
+          frames: this.framesProcessed,
+          vadAvg: this.vadSum / (this.framesProcessed - this.lastReportFrame),
+          vadMax: this.vadMax,
+          gateOpen: this.gateOpen,
+          gateEnv: this.gateEnv,
+          mix: strength,
+        });
+        this.vadSum = 0;
+        this.vadMax = 0;
+        this.lastReportFrame = this.framesProcessed;
+      }
 
       if (vadProb >= GATE_OPEN_VAD) {
         this.gateOpen = true;
