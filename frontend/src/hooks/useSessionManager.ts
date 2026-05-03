@@ -166,6 +166,10 @@ export function useSessionManager({
 
   const setRemoteDisplayName = useCallback(
     (name: string): void => {
+      // Track latest name so reconnect scheduler uses the up-to-date value,
+      // not whatever was passed to the original join.
+      lastDisplayNameRef.current = name;
+      if (name.trim()) saveDisplayName(name.trim());
       sfu.getClient()?.setDisplayName(name);
       const pid = peerIdRef.current;
       if (pid) {
