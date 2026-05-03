@@ -63,6 +63,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let pc: RTCPeerConnection | null = null;
   let myId: string | null = null;
   let stopped = false;
+  let statsTimer: ReturnType<typeof setInterval> | null = null;
 
   function send(event: string, data: unknown): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -78,6 +79,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     pc.ontrack = (event) => {
       const stream = event.streams?.[0] ?? null;
       const peerId = stream ? stream.id : null;
+      console.log(
+        `[sfu] ontrack kind=${event.track.kind} id=${event.track.id} muted=${event.track.muted} streamId=${stream?.id ?? "null"}`,
+      );
       if (stream) {
         on.onTrack({ track: event.track, stream, peerId });
       }
@@ -90,8 +94,18 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     pc.onconnectionstatechange = () => {
       if (!pc) return;
+      console.log(
+        `[sfu] connectionState=${pc.connectionState} iceConnectionState=${pc.iceConnectionState} iceGatheringState=${pc.iceGatheringState}`,
+      );
       on.onState(pc.connectionState);
     };
+
+    pc.oniceconnectionstatechange = () => {
+      if (!pc) return;
+      console.log(`[sfu] iceConnectionState=${pc.iceConnectionState}`);
+    };
+
+    statsTimer = setInterval(() => void logStats(), 3000);
 
     for (const track of opts.localStream.getTracks()) {
       pc.addTrack(track, opts.localStream);
@@ -202,8 +216,67 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     return myId;
   }
 
+  async function logStats(): Promise<void> {
+    if (!pc) return;
+    try {
+      const stats = await pc.getStats();
+      const inbound: string[] = [];
+      const outbound: string[] = [];
+      type CandPair = {
+        type: "candidate-pair";
+        nominated?: boolean;
+        state?: string;
+        localCandidateId: string;
+        remoteCandidateId: string;
+      };
+      type Cand = { id: string; candidateType?: string; protocol?: string };
+      let pair: CandPair | null = null;
+      const candById = new Map<string, Cand>();
+      stats.forEach((r) => {
+        const s = r as Record<string, unknown> & { type: string; id: string; kind?: string };
+        if (s.type === "inbound-rtp" && s.kind === "audio") {
+          inbound.push(
+            `ssrc=${s.ssrc as number} bytes=${s.bytesReceived as number} pkts=${s.packetsReceived as number} lost=${s.packetsLost as number} jitter=${(s.jitter as number)?.toFixed(3)} audioLevel=${(s.audioLevel as number)?.toFixed(3)}`,
+          );
+        }
+        if (s.type === "outbound-rtp" && s.kind === "audio") {
+          outbound.push(
+            `ssrc=${s.ssrc as number} bytes=${s.bytesSent as number} pkts=${s.packetsSent as number}`,
+          );
+        }
+        if (
+          s.type === "candidate-pair" &&
+          (s as unknown as CandPair).nominated &&
+          s.state === "succeeded"
+        ) {
+          pair = s as unknown as CandPair;
+        }
+        if (s.type === "local-candidate" || s.type === "remote-candidate") {
+          candById.set(s.id, s as unknown as Cand);
+        }
+      });
+      const candStr = pair
+        ? (() => {
+            const p = pair as CandPair;
+            const lc = candById.get(p.localCandidateId);
+            const rc = candById.get(p.remoteCandidateId);
+            return `local=${lc?.candidateType}/${lc?.protocol} remote=${rc?.candidateType}/${rc?.protocol}`;
+          })()
+        : "no nominated pair";
+      console.log(
+        `[sfu] stats inbound=[${inbound.join(" | ")}] outbound=[${outbound.join(" | ")}] pair=${candStr}`,
+      );
+    } catch (err) {
+      console.warn("[sfu] getStats failed:", err);
+    }
+  }
+
   function disconnect(): void {
     stopped = true;
+    if (statsTimer !== null) {
+      clearInterval(statsTimer);
+      statsTimer = null;
+    }
     if (ws) {
       try {
         ws.close();
