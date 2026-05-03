@@ -10,7 +10,6 @@ interface Props {
   onSendVolumeChange: (v: number) => void;
   onRnnoiseMixChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
-  onOutputMuteToggle: () => void;
   onReset: () => void;
 }
 
@@ -30,14 +29,12 @@ export function AudioCard({
   onSendVolumeChange,
   onRnnoiseMixChange,
   onOutputVolumeChange,
-  onOutputMuteToggle,
   onReset,
 }: Props) {
   const engine = useStore((s) => s.engine);
   const sendVolume = useStore((s) => s.sendVolume);
   const rnnoiseMix = useStore((s) => s.rnnoiseMix);
   const outputVolume = useStore((s) => s.outputVolume);
-  const outputMuted = useStore((s) => s.outputMuted);
 
   return (
     <section className="card grid gap-[14px]">
@@ -125,17 +122,6 @@ export function AudioCard({
           onChange={(e) => onOutputVolumeChange(Number(e.target.value))}
           className="vh-range"
         />
-        <div className="flex flex-wrap gap-2.5 mt-1.5">
-          <button
-            id="output-mute-button"
-            type="button"
-            aria-pressed={outputMuted ? "true" : "false"}
-            onClick={onOutputMuteToggle}
-            className={`btn btn-mini ${outputMuted ? "btn-toggle-on" : "btn-secondary"}`}
-          >
-            {outputMuted ? "Включить звук" : "Выключить звук"}
-          </button>
-        </div>
       </div>
     </section>
   );

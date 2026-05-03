@@ -83,17 +83,6 @@ export function App() {
   // call the latest version without capturing session in its own dep array.
   handleToggleSelfMuteRef.current = handleToggleSelfMute;
 
-  const handleToggleOutputMute = useCallback(() => {
-    const s = useStore.getState();
-    if (s.deafened) {
-      s.setDeafened(false);
-      s.setSelfMuted(s.preDeafenSelfMuted);
-      session.setMicEnabled(!s.preDeafenSelfMuted);
-    }
-    s.setOutputMuted(!s.outputMuted);
-    audio.applyAllRemoteGains();
-  }, [audio, session]);
-
   const handleToggleDeafen = useCallback(() => {
     const s = useStore.getState();
     if (s.deafened) {
@@ -218,7 +207,6 @@ export function App() {
             onSendVolumeChange={handleSendVolumeChange}
             onRnnoiseMixChange={handleRnnoiseMixChange}
             onOutputVolumeChange={handleOutputVolumeChange}
-            onOutputMuteToggle={handleToggleOutputMute}
             onReset={handleAudioReset}
           />
           <HotkeyCard onStatusMessage={handleStatusMessage} />
