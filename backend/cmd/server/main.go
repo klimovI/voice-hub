@@ -27,6 +27,9 @@ func main() {
 	if cfg.AdminPassword == "" {
 		log.Fatal("APP_ADMIN_PASSWORD must be set")
 	}
+	if cfg.PublicIP == "" {
+		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
+	}
 
 	const dataDir = "/app/data"
 
@@ -53,23 +56,17 @@ func main() {
 	stunURL := "stun:" + cfg.AppHostname + ":3478"
 	turnURL := "turn:" + cfg.AppHostname + ":3478?transport=udp"
 
-	var natIPs []string
-	if cfg.PublicIP != "" {
-		natIPs = []string{cfg.PublicIP}
-	}
 	room, err := sfu.NewRoom(sfu.Config{
-		ICEServers: []webrtc.ICEServer{{URLs: []string{stunURL}}},
-		NAT1To1IPs: natIPs,
-		UDPPortMin: 10000,
-		UDPPortMax: 10100,
+		ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},
+		NAT1To1IPs:  []string{cfg.PublicIP},
+		UDPPortMin:  cfg.UDPPortMin,
+		UDPPortMax:  cfg.UDPPortMax,
+		AppHostname: cfg.AppHostname,
 	})
 	if err != nil {
 		log.Fatalf("sfu init: %v", err)
 	}
 
-	if cfg.PublicIP == "" {
-		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
-	}
 	turnServer, err := turnsrv.Start(turnsrv.Config{
 		Realm:        cfg.TurnRealm,
 		SharedSecret: cfg.TurnSharedSecret,

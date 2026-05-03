@@ -34,6 +34,29 @@ type Config struct {
 	// container's exposed UDP ports match.
 	UDPPortMin uint16
 	UDPPortMax uint16
+	// AppHostname is used to derive the allowed WebSocket Origin patterns.
+	// When "localhost", dev wildcard patterns are added so local frontends on
+	// any port are accepted. For any other value, only that exact host is
+	// allowed (scheme-independent, since coder/websocket matches host:port).
+	AppHostname string
+}
+
+// originPatterns returns the OriginPatterns value for websocket.AcceptOptions
+// derived from cfg.AppHostname.
+//
+// coder/websocket already accepts requests whose Origin host equals r.Host, so
+// these patterns only need to cover cross-port/cross-host dev scenarios.
+//
+//   - "localhost" → also allow "localhost:*" and "127.0.0.1:*" (Vite, Tauri
+//     webview, or any local dev frontend may run on a different port).
+//   - any other hostname → allow only that exact host with no port wildcard,
+//     which covers the production case where the browser sends the canonical
+//     origin (no port, or the standard port stripped by the browser).
+func (cfg Config) originPatterns() []string {
+	if cfg.AppHostname == "" || cfg.AppHostname == "localhost" {
+		return []string{"localhost:*", "127.0.0.1:*"}
+	}
+	return []string{cfg.AppHostname}
 }
 
 type peer struct {
@@ -109,7 +132,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	ws, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: r.cfg.originPatterns(),
 	})
 	if err != nil {
 		log.Printf("sfu: ws accept: %v", err)
@@ -316,7 +339,7 @@ func (r *Room) removePeer(id string) {
 
 	log.Printf("sfu: peer left id=%s peers=%d", id, count)
 
-	left, _ := json.Marshal(protocol.PeerInfo{ID: id})
+	left, _ := json.Marshal(protocol.PeerLeftPayload{ID: id})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-left", Data: left})
 	}

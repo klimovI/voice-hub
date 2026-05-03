@@ -6,13 +6,15 @@ import (
 )
 
 type Config struct {
-	Addr             string
-	WebDir           string
-	AppHostname      string
-	PublicIP         string
-	TurnRealm        string
-	AdminPassword    string
-	CookieSecure     bool
+	Addr          string
+	WebDir        string
+	AppHostname   string
+	PublicIP      string
+	TurnRealm     string
+	AdminPassword string
+	CookieSecure  bool
+	UDPPortMin    uint16
+	UDPPortMax    uint16
 	// Populated by main from disk after Load(); not env-backed.
 	SessionSecret    []byte
 	TurnSharedSecret string
@@ -28,6 +30,8 @@ func Load() Config {
 		TurnRealm:     env("TURN_REALM", hostname),
 		AdminPassword: os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:  envBool("APP_COOKIE_SECURE", true),
+		UDPPortMin:    uint16(envInt("UDP_PORT_MIN", 10000)),
+		UDPPortMax:    uint16(envInt("UDP_PORT_MAX", 10100)),
 	}
 }
 
