@@ -37,9 +37,6 @@ export default defineConfig({
         login: resolve(__dirname, "login.html"),
         connect: resolve(__dirname, "connect.html"),
       },
-      // Vendor modules are served as static assets at runtime — not bundled.
-      // TypeScript paths map these to .d.ts stubs for type-checking only.
-      external: ["/vendor/rnnoise/rnnoise.js"],
     },
   },
 });

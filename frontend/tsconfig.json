@@ -14,12 +14,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "paths": {
-      "/vendor/rnnoise/rnnoise.js": ["./src/vendor-types/rnnoise.d.ts"],
-      "/vendor/dtln/dtln.mjs": ["./src/vendor-types/dtln.d.ts"],
-      "/vendor/dfn3/dfn3.mjs": ["./src/vendor-types/dfn3.d.ts"]
-    }
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
