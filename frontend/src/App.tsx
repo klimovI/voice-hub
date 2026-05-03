@@ -64,17 +64,19 @@ export function App() {
   });
 
   const handleToggleSelfMute = useCallback(() => {
-    if (!session.getPeerId()) return;
     const s = useStore.getState();
+    const joined = session.getPeerId() !== null;
     if (s.deafened) {
+      // Exit deafen as a side effect of unmuting (matches Discord).
       s.setDeafened(false);
-      s.setOutputMuted(s.preDeafenOutputMuted);
       audio.applyAllRemoteGains();
     }
     const nextMuted = !s.selfMuted;
     s.setSelfMuted(nextMuted);
-    session.setMicEnabled(!nextMuted);
-    session.sendSetState(nextMuted, false);
+    if (joined) {
+      session.setMicEnabled(!nextMuted);
+      session.sendSetState(nextMuted, false);
+    }
     if (nextMuted) playMuteSound();
     else playUnmuteSound();
   }, [audio, session]);
@@ -85,16 +87,20 @@ export function App() {
 
   const handleToggleDeafen = useCallback(() => {
     const s = useStore.getState();
+    const joined = session.getPeerId() !== null;
     if (s.deafened) {
       s.setDeafened(false);
       s.setSelfMuted(s.preDeafenSelfMuted);
-      session.setMicEnabled(!s.preDeafenSelfMuted);
-      s.setOutputMuted(s.preDeafenOutputMuted);
-      session.sendSetState(s.preDeafenSelfMuted, false);
+      if (joined) {
+        session.setMicEnabled(!s.preDeafenSelfMuted);
+        session.sendSetState(s.preDeafenSelfMuted, false);
+      }
     } else {
       s.enterDeafen();
-      session.setMicEnabled(false);
-      session.sendSetState(true, true);
+      if (joined) {
+        session.setMicEnabled(false);
+        session.sendSetState(true, true);
+      }
     }
     audio.applyAllRemoteGains();
   }, [audio, session]);

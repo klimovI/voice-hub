@@ -2,9 +2,20 @@ import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
 import { clampPercentage } from "../utils/storage";
 import { formatRnnoiseMix, formatEngine } from "../utils/clamp";
+import { isTauri } from "../utils/tauri";
 import type { EngineKind } from "../types";
 
-const ENGINES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
+// DTLN and DFN3 are unavailable on the web build:
+// - DTLN: vendor calls `new Function(...)` (tflite embind), blocked by the
+//   site CSP `script-src 'self' 'wasm-unsafe-eval'`. Vendor also fetches
+//   `tflite_web_api_cc_simd.js` with a relative path that resolves to the
+//   page origin (404). Both are baked into the third-party bundle.
+// - DFN3: vendor `dfn3.mjs` is not deployed to the web origin.
+// Tauri runs locally without that CSP and ships the vendor files, so both
+// work there. Hide them from the web UI to prevent dead clicks.
+const ENGINES: EngineKind[] = isTauri()
+  ? ["off", "rnnoise", "dtln", "dfn3"]
+  : ["off", "rnnoise"];
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;

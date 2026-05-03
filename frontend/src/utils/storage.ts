@@ -3,6 +3,7 @@
 // localStorage calls in components, hooks, or the store.
 
 import type { EngineKind } from "../types";
+import { isTauri } from "./tauri";
 
 // Legacy key, no longer written. We migrate it away on startup so users who
 // reloaded while deafened don't get stuck with output muted forever (the
@@ -26,6 +27,11 @@ export const KEYS = {
   engine: "voice-hub.engine",
   // Selected microphone deviceId, or empty string for system default.
   micDeviceId: "voice-hub.mic-device-id",
+  // Persistent mute/deafen state — Discord-style, survives reloads.
+  // outputMuted is derived from deafened (no separate key).
+  selfMuted: "voice-hub.self-muted",
+  deafened: "voice-hub.deafened",
+  preDeafenSelfMuted: "voice-hub.pre-deafen-self-muted",
   // Identity
   displayName: "voice-hub.display-name",
   // Stable per-install identifier (UUID) generated once on first launch.
@@ -129,6 +135,10 @@ export function saveSendVolume(v: number): void {
   localStorage.setItem(KEYS.sendVolume, String(v));
 }
 
+export function saveBoolean(key: string, v: boolean): void {
+  localStorage.setItem(key, String(v));
+}
+
 export function saveRnnoiseMix(v: number): void {
   localStorage.setItem(KEYS.rnnoiseMix, String(v));
 }
@@ -138,10 +148,15 @@ export function saveOutputVolume(v: number): void {
 }
 
 const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
+// dtln/dfn3 only function inside Tauri (CSP + vendor deploy gaps on web).
+// If the persisted engine is one of those but we're running on the web, fall
+// back to rnnoise so the user doesn't land on a non-functional engine.
+const WEB_ENGINE_VALUES: EngineKind[] = ["off", "rnnoise"];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);
-  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
+  const allowed = isTauri() ? ENGINE_VALUES : WEB_ENGINE_VALUES;
+  return allowed.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
 }
 
 export function saveEngine(e: EngineKind): void {

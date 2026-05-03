@@ -42,17 +42,11 @@ const workletRegistry = new WeakMap<AudioContext, Promise<void>>();
 export function ensureRnnoiseWorkletRegistered(ctx: AudioContext): Promise<void> {
   let p = workletRegistry.get(ctx);
   if (p) return p;
-  console.log("[rnnoise] addModule start");
-  p = ctx.audioWorklet
-    .addModule("/vendor/rnnoise/rnnoise-worklet.js")
-    .then(() => {
-      console.log("[rnnoise] addModule resolved");
-    })
-    .catch((err: unknown) => {
-      console.error("[rnnoise] addModule failed:", err);
-      workletRegistry.delete(ctx);
-      throw err;
-    });
+  p = ctx.audioWorklet.addModule("/vendor/rnnoise/rnnoise-worklet.js").catch((err: unknown) => {
+    console.error("[rnnoise] addModule failed:", err);
+    workletRegistry.delete(ctx);
+    throw err;
+  });
   workletRegistry.set(ctx, p);
   return p;
 }
@@ -61,17 +55,12 @@ export async function createRnnoiseProcessor(
   ctx: AudioContext,
   mix0to100: number,
 ): Promise<AudioWorkletNode | null> {
-  console.log("[rnnoise] createRnnoiseProcessor sr=", ctx.sampleRate, "mix=", mix0to100);
   // RNNoise frame contract is 48 kHz.
-  if (ctx.sampleRate !== 48000) {
-    console.warn("[rnnoise] context sample rate != 48000, refusing");
-    return null;
-  }
+  if (ctx.sampleRate !== 48000) return null;
 
   try {
     await ensureRnnoiseWorkletRegistered(ctx);
-  } catch (err) {
-    console.error("[rnnoise] register failed:", err);
+  } catch {
     return null;
   }
 
@@ -83,7 +72,6 @@ export async function createRnnoiseProcessor(
       channelCount: 1,
       parameterData: { mix: mix0to100 / 100 },
     });
-    console.log("[rnnoise] AudioWorkletNode constructed");
   } catch (err) {
     console.error("[rnnoise] AudioWorkletNode construction failed:", err);
     return null;
@@ -91,32 +79,9 @@ export async function createRnnoiseProcessor(
 
   const ready = new Promise<void>((resolve, reject) => {
     const onMessage = (e: MessageEvent) => {
-      const data = e.data as
-        | { type?: string; message?: string; frameSize?: number }
-        | null;
+      const data = e.data as { type?: string; message?: string } | null;
       if (data?.type === "ready") {
         node.port.removeEventListener("message", onMessage);
-        // eslint-disable-next-line no-console
-        console.log("[rnnoise] worklet ready, frameSize=", data.frameSize);
-        node.port.addEventListener("message", (ev: MessageEvent) => {
-          const d = ev.data as
-            | {
-                type?: string;
-                frames?: number;
-                vadAvg?: number;
-                vadMax?: number;
-                gateOpen?: boolean;
-                gateEnv?: number;
-                mix?: number;
-              }
-            | null;
-          if (d?.type === "stats") {
-            // eslint-disable-next-line no-console
-            console.log(
-              `[rnnoise] frames=${d.frames} vadAvg=${d.vadAvg?.toFixed(3)} vadMax=${d.vadMax?.toFixed(3)} gateOpen=${d.gateOpen} gateEnv=${d.gateEnv?.toFixed(3)} mix=${d.mix?.toFixed(2)}`,
-            );
-          }
-        });
         resolve();
       } else if (data?.type === "error") {
         node.port.removeEventListener("message", onMessage);
@@ -135,7 +100,7 @@ export async function createRnnoiseProcessor(
     await Promise.race([ready, timeout]);
     return node;
   } catch (err) {
-    console.error("[rnnoise] ready/timeout race rejected:", err);
+    console.warn("[rnnoise] worklet init timed out or rejected:", err);
     try {
       node.disconnect();
     } catch {

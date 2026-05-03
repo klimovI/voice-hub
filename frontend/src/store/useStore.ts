@@ -7,10 +7,12 @@ import type { InputBinding } from "../utils/binding";
 import { loadBinding } from "../utils/binding";
 import {
   KEYS,
+  loadBoolean,
   loadEngine,
   loadMicDeviceId,
   loadNumber,
   loadPercentage,
+  saveBoolean,
   saveSendVolume,
   saveRnnoiseMix,
   saveOutputVolume,
@@ -30,16 +32,18 @@ export interface AppState {
   configReady: boolean;
   setConfigReady: (v: boolean) => void;
 
+  // Mute/deafen are persistent (Discord-style — survive reload).
+  // There is no separate outputMuted field on purpose: the previous
+  // independently-persisted boolean caused an orphan-state trap (commit
+  // 9a7c196). Audio code that needs to know whether the local listener is
+  // muted reads `deafened` directly.
   selfMuted: boolean;
   setSelfMuted: (v: boolean) => void;
-  outputMuted: boolean;
-  setOutputMuted: (v: boolean) => void;
   deafened: boolean;
   setDeafened: (v: boolean) => void;
   preDeafenSelfMuted: boolean;
-  preDeafenOutputMuted: boolean;
-  // Atomic enter: snapshot current self/output mute state and force all three
-  // muted flags on in a single set() so subscribers never see partial state.
+  // Atomic enter: snapshot current selfMuted, force selfMuted+deafened on
+  // in a single set() so subscribers never see partial state.
   enterDeafen: () => void;
 
   sendVolume: number;
@@ -78,22 +82,28 @@ export const useStore = create<AppState>((set, get) => ({
   configReady: false,
   setConfigReady: (v) => set({ configReady: v }),
 
-  selfMuted: false,
-  setSelfMuted: (v) => set({ selfMuted: v }),
-  outputMuted: false,
-  setOutputMuted: (v) => set({ outputMuted: v }),
-  deafened: false,
-  setDeafened: (v) => set({ deafened: v }),
-  preDeafenSelfMuted: false,
-  preDeafenOutputMuted: false,
+  selfMuted: loadBoolean(KEYS.selfMuted, false),
+  setSelfMuted: (v) => {
+    saveBoolean(KEYS.selfMuted, v);
+    set({ selfMuted: v });
+  },
+  deafened: loadBoolean(KEYS.deafened, false),
+  setDeafened: (v) => {
+    saveBoolean(KEYS.deafened, v);
+    set({ deafened: v });
+  },
+  preDeafenSelfMuted: loadBoolean(KEYS.preDeafenSelfMuted, false),
   enterDeafen: () =>
-    set((s) => ({
-      preDeafenSelfMuted: s.selfMuted,
-      preDeafenOutputMuted: s.outputMuted,
-      deafened: true,
-      selfMuted: true,
-      outputMuted: true,
-    })),
+    set((s) => {
+      saveBoolean(KEYS.selfMuted, true);
+      saveBoolean(KEYS.deafened, true);
+      saveBoolean(KEYS.preDeafenSelfMuted, s.selfMuted);
+      return {
+        preDeafenSelfMuted: s.selfMuted,
+        deafened: true,
+        selfMuted: true,
+      };
+    }),
 
   sendVolume: loadNumber(KEYS.sendVolume, 100),
   setSendVolume: (v) => {

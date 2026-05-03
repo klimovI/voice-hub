@@ -115,14 +115,11 @@ export async function buildMicGraph(
   let rnnoiseProcessorNode: AudioWorkletNode | null = null;
 
   if (engine === "rnnoise") {
-    console.log("[rnnoise] mic-graph entering rnnoise branch");
     rnnoiseProcessorNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
     if (rnnoiseProcessorNode) {
       localCompressorNode.connect(rnnoiseProcessorNode);
       chainTail = rnnoiseProcessorNode;
-      console.log("[rnnoise] processor wired into mic graph");
     } else {
-      console.warn("[rnnoise] processor creation returned null — falling back to raw");
       onStatusMessage("RNNoise unavailable, sending without denoiser.", true);
     }
   }

@@ -214,13 +214,13 @@ export function useAudioEngine() {
 
   const applyAllRemoteGains = useCallback(() => {
     const r = refs.current;
-    const { outputVolume, outputMuted, participants } = useStore.getState();
+    const { outputVolume, deafened, participants } = useStore.getState();
     for (const [id, audio] of r.remoteAudio.entries()) {
       const p = participants.get(id);
       applyParticipantGain(
         audio,
         outputVolume,
-        outputMuted,
+        deafened,
         p?.localMuted ?? false,
         p?.localVolume ?? 100,
       );

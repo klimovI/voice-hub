@@ -9,8 +9,6 @@
 // factory, which only runs when Rnnoise.load() is called below.
 import { Rnnoise } from "/vendor/rnnoise/rnnoise.js";
 
-console.log("[rnnoise-worklet] module evaluating");
-
 const RING_CAPACITY = 4096;
 const GATE_OPEN_VAD = 0.4;
 const GATE_ATTACK_MS = 5;
@@ -25,7 +23,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
-    console.log("[rnnoise-worklet] constructor");
     this.ready = false;
     this.primed = false;
     this.frameSize = 0;
@@ -39,11 +36,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
     this.gateEnv = 1;
     this.gateHold = 0;
     this.gateOpen = true;
-    // Diagnostics:
-    this.framesProcessed = 0;
-    this.vadSum = 0;
-    this.vadMax = 0;
-    this.lastReportFrame = 0;
     this.port.onmessage = (e) => {
       if (e.data?.type === "destroy") {
         try {
@@ -59,7 +51,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
   }
 
   async _init() {
-    console.log("[rnnoise-worklet] _init start");
     try {
       // Shiguredo rnnoise.js (emscripten output) gates init on
       // `typeof window === "object" || typeof WorkerGlobalScope !== "undefined"`.
@@ -71,16 +62,13 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       if (typeof globalThis.WorkerGlobalScope === "undefined") {
         globalThis.WorkerGlobalScope = function () {};
       }
-      console.log("[rnnoise-worklet] calling Rnnoise.load");
       const Rn = await Rnnoise.load();
-      console.log("[rnnoise-worklet] Rnnoise loaded, frameSize=", Rn.frameSize);
       this.state = Rn.createDenoiseState();
       this.frameSize = Rn.frameSize;
       this.frame = new Float32Array(this.frameSize);
       this.original = new Float32Array(this.frameSize);
       this.ready = true;
-      console.log("[rnnoise-worklet] ready");
-      this.port.postMessage({ type: "ready", frameSize: this.frameSize });
+      this.port.postMessage({ type: "ready" });
     } catch (err) {
       console.error("[rnnoise-worklet] _init failed:", err);
       this.port.postMessage({ type: "error", message: String(err?.message ?? err) });
@@ -128,25 +116,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
         frame[i] = v * 32768;
       }
       const vadProb = this.state.processFrame(frame);
-
-      this.framesProcessed += 1;
-      this.vadSum += vadProb;
-      if (vadProb > this.vadMax) this.vadMax = vadProb;
-      // Report every 100 frames (~1 s).
-      if (this.framesProcessed - this.lastReportFrame >= 100) {
-        this.port.postMessage({
-          type: "stats",
-          frames: this.framesProcessed,
-          vadAvg: this.vadSum / (this.framesProcessed - this.lastReportFrame),
-          vadMax: this.vadMax,
-          gateOpen: this.gateOpen,
-          gateEnv: this.gateEnv,
-          mix: strength,
-        });
-        this.vadSum = 0;
-        this.vadMax = 0;
-        this.lastReportFrame = this.framesProcessed;
-      }
 
       if (vadProb >= GATE_OPEN_VAD) {
         this.gateOpen = true;

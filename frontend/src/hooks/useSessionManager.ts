@@ -69,7 +69,6 @@ export type UseSessionManagerReturn = {
   setRemoteDisplayName: (name: string) => void;
   /**
    * Broadcast local mic/deafen state to all peers. No-op when not joined.
-   * outputMuted-only changes are NOT broadcast — that is a local listener mute.
    */
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
 };
@@ -325,8 +324,14 @@ export function useSessionManager({
         clientId: clientIdRef.current,
       });
 
+      const s = useStore.getState();
       const track = graph.processedLocalStream.getAudioTracks()[0];
-      if (track) track.enabled = !useStore.getState().selfMuted;
+      if (track) track.enabled = !s.selfMuted;
+      // Broadcast persisted mute/deafen state — peers must see the user's
+      // saved Discord-style state from the moment they appear.
+      if (s.selfMuted || s.deafened) {
+        client.sendSetState(s.selfMuted, s.deafened);
+      }
     },
     [store, audio, sfu],
   );

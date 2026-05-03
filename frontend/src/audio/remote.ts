@@ -22,11 +22,7 @@ export function createRemoteAudioContext(): AudioContext {
     (window as Window & typeof globalThis).AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new Ctor({ sampleRate: 48000 });
-  console.log(`[remote-audio] ctx created state=${ctx.state} sr=${ctx.sampleRate}`);
-  ctx
-    .resume()
-    .then(() => console.log(`[remote-audio] ctx resumed state=${ctx.state}`))
-    .catch((err: unknown) => console.warn("[remote-audio] ctx resume failed:", err));
+  ctx.resume().catch((err: unknown) => console.warn("[remote-audio] ctx resume failed:", err));
   return ctx;
 }
 
@@ -34,9 +30,6 @@ export function setupParticipantAudio(
   ctx: AudioContext,
   stream: MediaStream,
 ): RemoteParticipantAudio {
-  console.log(
-    `[remote-audio] attach stream=${stream.id} tracks=${stream.getAudioTracks().length} ctxState=${ctx.state}`,
-  );
   const audioEl = document.createElement("audio");
   audioEl.autoplay = true;
   (audioEl as HTMLAudioElement & { playsInline: boolean }).playsInline = true;
@@ -44,7 +37,6 @@ export function setupParticipantAudio(
   audioEl.srcObject = stream;
   audioEl
     .play()
-    .then(() => console.log(`[remote-audio] play() ok stream=${stream.id}`))
     .catch((err: unknown) =>
       console.warn(`[remote-audio] play() failed stream=${stream.id}:`, err),
     );
@@ -156,15 +148,12 @@ export function createRemoteSpeakingLoop(): RemoteSpeakingLoop {
 export function applyParticipantGain(
   audio: RemoteParticipantAudio,
   outputVolume: number,
-  outputMuted: boolean,
+  deafened: boolean,
   localMuted: boolean,
   localVolume: number,
 ): void {
-  const muted = outputMuted || localMuted;
+  const muted = deafened || localMuted;
   const gain = muted ? 0 : (outputVolume / 100) * (localVolume / 100);
   const ctx = audio.gainNode.context;
-  console.log(
-    `[remote-audio] applyGain ctxState=${ctx.state} gain=${gain.toFixed(2)} outVol=${outputVolume} outMuted=${outputMuted} localMuted=${localMuted} localVol=${localVolume}`,
-  );
   audio.gainNode.gain.setTargetAtTime(gain, ctx.currentTime, 0.01);
 }
