@@ -27,10 +27,14 @@ type Envelope struct {
 // PeerInfo is the canonical peer descriptor used in welcome, peer-joined,
 // and peer-info messages. DisplayName is omitted from JSON when empty so
 // that peer-left (which intentionally carries no display name) does not
-// emit a spurious empty string.
+// emit a spurious empty string. ClientID is the stable per-install
+// identifier reported by the client in HelloPayload; it is echoed in
+// every peer descriptor so other clients can key per-peer UI prefs
+// (e.g. volume sliders) by something that survives reconnects.
 type PeerInfo struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName,omitempty"`
+	ClientID    string `json:"clientId,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -62,8 +66,16 @@ type PeerLeftPayload struct {
 // HelloPayload is the data field of the "hello" message. It must be the
 // first message sent by the client after the WebSocket handshake.
 // A 10-second server timeout applies.
+//
+// ClientID is a stable opaque identifier the client generates once on first
+// launch and persists locally (e.g. localStorage). It survives reconnects
+// and is echoed back to all peers in PeerInfo so they can key per-peer UI
+// state (volume, mute, etc.) by it instead of the ephemeral per-connection
+// peer ID. May be empty for older clients; consumers must treat absence as
+// "no stable identity available".
 type HelloPayload struct {
 	DisplayName string `json:"displayName"`
+	ClientID    string `json:"clientId,omitempty"`
 }
 
 // SetDisplayNamePayload is the data field of the "set-displayname" message,

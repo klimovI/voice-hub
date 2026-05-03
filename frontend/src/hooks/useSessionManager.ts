@@ -18,6 +18,8 @@ import {
   loadDisplayName,
   saveDisplayName,
   consumeRejoinFlag,
+  loadOrCreateClientId,
+  loadPeerVolume,
 } from "../utils/storage";
 import { makeGuestName } from "../utils/clamp";
 import { loadAppConfig, buildWsUrl } from "../config";
@@ -73,6 +75,12 @@ export function useSessionManager({
   // Imperative refs — internal only, not exposed to callers.
   const micGraphRef = useRef<MicGraph | null>(null);
   const peerIdRef = useRef<string | null>(null);
+
+  // Stable per-install id. Created once on first launch, persisted in
+  // localStorage. Survives reconnects, deploys, and OS restarts; only
+  // clearing browser storage / reinstalling resets it. Sent in every
+  // `hello` so peers can key per-peer UI prefs (e.g. volume) by it.
+  const clientIdRef = useRef<string>(loadOrCreateClientId());
 
   // Reconnect state.
   const userLeavingRef = useRef<boolean>(false);
@@ -220,27 +228,45 @@ export function useSessionManager({
         },
         onWelcome: ({ id, peers }) => {
           peerIdRef.current = id;
-          store.upsertParticipant({ id, display, isSelf: true });
+          store.upsertParticipant({
+            id,
+            display,
+            isSelf: true,
+            clientId: clientIdRef.current,
+          });
           for (const p of peers ?? []) {
+            const stored = p.clientId ? loadPeerVolume(p.clientId) : null;
             store.upsertParticipant({
               id: p.id,
               display: p.displayName ?? `peer-${p.id}`,
+              clientId: p.clientId,
+              ...(stored !== null ? { localVolume: stored } : {}),
             });
           }
         },
-        onPeerJoined: ({ id, displayName: peerDisplay }) => {
+        onPeerJoined: ({ id, displayName: peerDisplay, clientId }) => {
+          const stored = clientId ? loadPeerVolume(clientId) : null;
           store.upsertParticipant({
             id,
             display: peerDisplay ?? `peer-${id}`,
+            clientId,
+            ...(stored !== null ? { localVolume: stored } : {}),
           });
         },
         onPeerLeft: ({ id }) => {
           audio.detachRemoteStream(id);
           store.removeParticipant(id);
         },
-        onPeerInfo: ({ id, displayName: peerDisplay }) => {
-          if (peerDisplay) {
-            store.updateParticipant(id, { display: peerDisplay });
+        onPeerInfo: ({ id, displayName: peerDisplay, clientId }) => {
+          const patch: { display?: string; clientId?: string } = {};
+          if (peerDisplay) patch.display = peerDisplay;
+          // Defensive: if onTrack created the entry before peer-joined arrived,
+          // clientId would be missing. peer-info carries it on every broadcast,
+          // so backfill if absent. clientId never changes mid-session, so
+          // overwriting with the same value is safe.
+          if (clientId) patch.clientId = clientId;
+          if (patch.display !== undefined || patch.clientId !== undefined) {
+            store.updateParticipant(id, patch);
           }
         },
         onTrack: ({ track, stream, peerId }) => {
@@ -258,6 +284,7 @@ export function useSessionManager({
         iceServers: cfg.iceServers,
         localStream: graph.processedLocalStream,
         displayName: display,
+        clientId: clientIdRef.current,
       });
 
       const track = graph.processedLocalStream.getAudioTracks()[0];

@@ -1,4 +1,5 @@
 {
   "id": "11223344aabbccdd",
-  "displayName": "Bob"
+  "displayName": "Bob",
+  "clientId": "cli_alice_uuid"
 }

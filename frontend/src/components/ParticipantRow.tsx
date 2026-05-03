@@ -1,4 +1,5 @@
 import { useStore } from "../store/useStore";
+import { savePeerVolume } from "../utils/storage";
 import type { ParticipantUI } from "../types";
 
 interface Props {
@@ -51,6 +52,9 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
   function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const volume = Number(e.target.value);
     updateParticipant(participant.id, { localVolume: volume });
+    if (participant.clientId) {
+      savePeerVolume(participant.clientId, volume);
+    }
     onRemoteGainChange();
   }
 

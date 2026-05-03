@@ -1,3 +1,4 @@
 {
-  "displayName": "Alice"
+  "displayName": "Alice",
+  "clientId": "cli_alice_uuid"
 }

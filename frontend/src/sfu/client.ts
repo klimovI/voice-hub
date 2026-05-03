@@ -29,6 +29,7 @@ export type ConnectOptions = {
   iceServers: RTCIceServer[];
   localStream: MediaStream;
   displayName: string;
+  clientId: string;
 };
 
 export type SFUClient = {
@@ -106,7 +107,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
       ws.onopen = () => {
         on.onState("connecting");
-        ws!.send(JSON.stringify({ event: "hello", data: { displayName: opts.displayName ?? "" } }));
+        ws!.send(
+          JSON.stringify({
+            event: "hello",
+            data: { displayName: opts.displayName ?? "", clientId: opts.clientId },
+          }),
+        );
       };
 
       ws.onerror = (event) => {

@@ -35,14 +35,14 @@ var fixtureCases = []fixtureCase{
 		payload: protocol.WelcomePayload{
 			ID: "abc12345def56789",
 			Peers: []protocol.PeerInfo{
-				{ID: "11223344aabbccdd", DisplayName: "Alice"},
-				{ID: "99887766ffeeddcc"}, // omitempty: no displayName in JSON
+				{ID: "11223344aabbccdd", DisplayName: "Alice", ClientID: "cli_alice_uuid"},
+				{ID: "99887766ffeeddcc"}, // omitempty: no displayName / clientId in JSON
 			},
 		},
 	},
 	{
 		name:    "peer-joined",
-		payload: protocol.PeerInfo{ID: "11223344aabbccdd", DisplayName: "Alice"},
+		payload: protocol.PeerInfo{ID: "11223344aabbccdd", DisplayName: "Alice", ClientID: "cli_alice_uuid"},
 	},
 	{
 		name:    "peer-left",
@@ -50,11 +50,11 @@ var fixtureCases = []fixtureCase{
 	},
 	{
 		name:    "peer-info",
-		payload: protocol.PeerInfo{ID: "11223344aabbccdd", DisplayName: "Bob"},
+		payload: protocol.PeerInfo{ID: "11223344aabbccdd", DisplayName: "Bob", ClientID: "cli_alice_uuid"},
 	},
 	{
 		name:    "hello",
-		payload: protocol.HelloPayload{DisplayName: "Alice"},
+		payload: protocol.HelloPayload{DisplayName: "Alice", ClientID: "cli_alice_uuid"},
 	},
 	{
 		name:    "set-displayname",
@@ -157,9 +157,10 @@ func TestEnvelopeRoundtrip(t *testing.T) {
 	}
 }
 
-// TestPeerInfoOmitEmpty asserts that a PeerInfo with an empty DisplayName
-// does not emit a "displayName" key. This mirrors the peer-left wire format
-// where the server sends PeerInfo{ID: id} with no display name.
+// TestPeerInfoOmitEmpty asserts that a PeerInfo with empty optional fields
+// does not emit those keys. This mirrors the peer-left wire format where the
+// server sends PeerInfo{ID: id} with no display name and no client id, and
+// guards against accidental removal of the `omitempty` tags.
 func TestPeerInfoOmitEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -169,5 +170,8 @@ func TestPeerInfoOmitEmpty(t *testing.T) {
 	}
 	if bytes.Contains(b, []byte("displayName")) {
 		t.Errorf("expected no displayName key, got: %s", b)
+	}
+	if bytes.Contains(b, []byte("clientId")) {
+		t.Errorf("expected no clientId key, got: %s", b)
 	}
 }

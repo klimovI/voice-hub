@@ -20,6 +20,13 @@ export type Envelope = {
 export type PeerInfo = {
   id: string;
   displayName?: string;
+  /**
+   * Stable per-install identifier the peer reported in its `hello`. Survives
+   * reconnects (unlike `id`, which is regenerated per WS connection). Use
+   * this to key per-peer UI prefs (e.g. local volume slider). May be absent
+   * for older clients.
+   */
+  clientId?: string;
 };
 
 // Server → Client payloads
@@ -42,6 +49,12 @@ export type PeerLeftPayload = {
 /** Data field of "hello" — first message after WS open. */
 export type HelloPayload = {
   displayName: string;
+  /**
+   * Stable per-install identifier generated once on first launch and stored
+   * in localStorage. Echoed back by the server in PeerInfo so peers can key
+   * per-peer UI prefs by something that survives reconnects.
+   */
+  clientId: string;
 };
 
 /** Data field of "set-displayname" — mid-session display name update. */

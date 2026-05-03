@@ -14,6 +14,10 @@ export type AppConfig = {
 export type ParticipantUI = {
   id: string;
   display: string;
+  // Stable per-install identifier reported by the peer in `hello`. Used as
+  // the localStorage key for per-peer prefs (e.g. localVolume). Absent only
+  // for older clients that did not send one.
+  clientId?: string;
   isSelf: boolean;
   selfMuted: boolean;
   speaking: boolean;

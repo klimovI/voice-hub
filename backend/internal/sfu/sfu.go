@@ -62,6 +62,11 @@ func (cfg Config) originPatterns() []string {
 type peer struct {
 	id          string
 	displayName string
+	// clientID is the stable per-install identifier reported by the client
+	// in HelloPayload. Echoed in PeerInfo broadcasts so other peers can key
+	// per-peer UI state by something that survives reconnects. Empty for
+	// older clients that don't send it.
+	clientID string
 
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
@@ -179,6 +184,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	p := &peer{
 		id:          newPeerID(),
 		displayName: hello.DisplayName,
+		clientID:    hello.ClientID,
 		pc:          pc,
 		ws:          ws,
 		ctx:         ctx,
@@ -289,7 +295,7 @@ func (r *Room) Peers() []protocol.PeerInfo {
 	defer r.mu.Unlock()
 	out := make([]protocol.PeerInfo, 0, len(r.peers))
 	for _, p := range r.peers {
-		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName})
+		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID})
 	}
 	return out
 }
@@ -299,19 +305,19 @@ func (r *Room) addPeer(p *peer) {
 	existing := make([]protocol.PeerInfo, 0, len(r.peers))
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
-		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName})
+		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName, ClientID: op.clientID})
 		others = append(others, op)
 	}
 	r.peers[p.id] = p
 	count := len(r.peers)
 	r.mu.Unlock()
 
-	log.Printf("sfu: peer joined id=%s name=%q peers=%d", p.id, p.displayName, count)
+	log.Printf("sfu: peer joined id=%s name=%q clientId=%q peers=%d", p.id, p.displayName, p.clientID, count)
 
 	welcome, _ := json.Marshal(protocol.WelcomePayload{ID: p.id, Peers: existing})
 	_ = p.write(protocol.Envelope{Event: "welcome", Data: welcome})
 
-	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName})
+	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-joined", Data: joined})
 	}
@@ -376,6 +382,7 @@ func (r *Room) setDisplayName(id, name string) {
 		return
 	}
 	p.displayName = name
+	clientID := p.clientID
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		if op.id != id {
@@ -384,7 +391,7 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	r.mu.Unlock()
 
-	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name})
+	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name, ClientID: clientID})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-info", Data: info})
 	}

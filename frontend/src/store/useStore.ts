@@ -144,6 +144,7 @@ export const useStore = create<AppState>((set, get) => ({
         : {
             id: partial.id,
             display: partial.display ?? `user-${partial.id}`,
+            clientId: partial.clientId,
             isSelf: Boolean(partial.isSelf),
             selfMuted: partial.selfMuted ?? false,
             speaking: partial.speaking ?? false,

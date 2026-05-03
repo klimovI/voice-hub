@@ -13,11 +13,20 @@ export const KEYS = {
   engine: "voice-hub.engine",
   // Identity
   displayName: "voice-hub.display-name",
+  // Stable per-install identifier (UUID) generated once on first launch.
+  // Sent to the SFU in `hello` so peers can key per-peer UI prefs by
+  // something that survives reconnects (peer IDs are ephemeral per WS).
+  clientId: "voice-hub.client-id",
   // Hotkey binding (JSON-serialised InputBinding | null)
   shortcut: "voice-hub.shortcut",
   // One-shot flag set before reload so the app can auto-rejoin on startup.
   rejoinOnLoad: "voice-hub.rejoin-on-load",
 } as const;
+
+// Prefix for per-peer volume entries: voice-hub.peer-volume.<clientId> = number.
+// Keyed by the peer's stable clientId, not the ephemeral SFU peer ID, so the
+// setting survives both their reconnects and ours.
+const PEER_VOLUME_PREFIX = "voice-hub.peer-volume.";
 
 // ---------------------------------------------------------------------------
 // Primitive loaders (key-agnostic, used by typed helpers below)
@@ -60,6 +69,33 @@ export function saveDisplayName(name: string): void {
 
 export function clearDisplayName(): void {
   localStorage.removeItem(KEYS.displayName);
+}
+
+// Stable client identifier. Generated once on first launch via
+// crypto.randomUUID() (available in all Tauri webviews and modern browsers
+// over a secure context) and persisted forever. Clearing localStorage =
+// new identity, which is the same effect as a fresh install — by design.
+export function loadOrCreateClientId(): string {
+  const existing = localStorage.getItem(KEYS.clientId);
+  if (existing && existing.length > 0) return existing;
+  const fresh = crypto.randomUUID();
+  localStorage.setItem(KEYS.clientId, fresh);
+  return fresh;
+}
+
+// Per-peer volume keyed by the peer's stable clientId. Returns null when no
+// preference has been saved so callers can fall back to their own default.
+export function loadPeerVolume(clientId: string): number | null {
+  if (!clientId) return null;
+  const raw = localStorage.getItem(PEER_VOLUME_PREFIX + clientId);
+  if (raw === null || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function savePeerVolume(clientId: string, volume: number): void {
+  if (!clientId) return;
+  localStorage.setItem(PEER_VOLUME_PREFIX + clientId, String(volume));
 }
 
 export function saveOutputMuted(v: boolean): void {

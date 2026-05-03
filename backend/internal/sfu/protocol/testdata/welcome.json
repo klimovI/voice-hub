@@ -3,7 +3,8 @@
   "peers": [
     {
       "id": "11223344aabbccdd",
-      "displayName": "Alice"
+      "displayName": "Alice",
+      "clientId": "cli_alice_uuid"
     },
     {
       "id": "99887766ffeeddcc"
