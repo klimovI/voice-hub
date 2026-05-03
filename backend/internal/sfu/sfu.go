@@ -82,13 +82,15 @@ type peer struct {
 	cancel context.CancelFunc
 }
 
-// peerOutBufLen bounds per-peer outbound queue depth. Sized for worst-case
-// state-change bursts: a synchronized fan-out from N peers in the same
-// tick can push up to ~N messages onto each recipient's queue before its
-// writeLoop drains any. 512 covers rooms up to a few hundred peers
-// without false drops; a peer that exceeds it is genuinely stuck and is
-// dropped instead of blocking room-wide broadcasts.
-const peerOutBufLen = 512
+// peerOutBufLen bounds per-peer outbound queue depth. Sized for the
+// pathological synthetic case: every peer in a large room toggling state
+// in a tight loop produces a burst of N×K messages per recipient before
+// any writeLoop drain. Real human-driven toggle frequency is ~1 Hz, so
+// queues stay near zero in practice; this bound only matters when a
+// subscriber's TCP socket is genuinely stalled, in which case we cancel
+// the peer instead of blocking room-wide broadcasts. ~1024 × ~200B per
+// message ≈ 200 KB max buffer per stuck peer — acceptable.
+const peerOutBufLen = 1024
 
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
