@@ -1,9 +1,10 @@
 import { useCallback } from "react";
-import { useIsAdmin } from "../hooks/useIsAdmin";
 
-export function AdminLogoutButton() {
-  const isAdmin = useIsAdmin();
-
+// POST /api/logout expires the session cookie; the server has no session
+// table so nothing else needs cleaning. The redirect lands on /login.html
+// where the user can log back in (or, on Tauri, switch server via the
+// adjacent ChangeServerButton).
+export function LogoutButton() {
   const handleLogout = useCallback(async () => {
     try {
       await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
@@ -13,15 +14,13 @@ export function AdminLogoutButton() {
     window.location.replace("/login.html");
   }, []);
 
-  if (!isAdmin) return null;
-
   return (
     <button
       type="button"
       onClick={handleLogout}
       title="Выйти"
       aria-label="Выйти"
-      className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-3 border border-line-strong text-muted hover:text-text hover:border-line transition-colors"
+      className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-3 border border-line-strong text-danger/70 hover:text-danger hover:border-[rgba(248,113,113,0.3)] hover:bg-[rgba(248,113,113,0.08)] transition-colors"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

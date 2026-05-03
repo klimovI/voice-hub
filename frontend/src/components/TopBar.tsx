@@ -1,5 +1,6 @@
 import { AdminKeyButton } from "./AdminKeyButton";
-import { AdminLogoutButton } from "./AdminLogoutButton";
+import { ChangeServerButton } from "./ChangeServerButton";
+import { LogoutButton } from "./LogoutButton";
 import { StatusPill } from "./StatusPill";
 
 export function TopBar() {
@@ -16,7 +17,8 @@ export function TopBar() {
       <div className="flex items-center gap-2">
         <StatusPill />
         <AdminKeyButton />
-        <AdminLogoutButton />
+        <ChangeServerButton />
+        <LogoutButton />
       </div>
     </header>
   );
