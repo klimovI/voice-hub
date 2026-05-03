@@ -52,7 +52,15 @@ export function AudioCard({
       try {
         const all = await md.enumerateDevices();
         if (cancelled) return;
-        setMicDevices(all.filter((d) => d.kind === "audioinput" && d.deviceId));
+        setMicDevices(
+          all.filter(
+            (d) =>
+              d.kind === "audioinput" &&
+              d.deviceId &&
+              d.deviceId !== "default" &&
+              d.deviceId !== "communications",
+          ),
+        );
       } catch {
         // enumerateDevices can throw in restricted contexts; leave list empty.
       }
