@@ -61,17 +61,32 @@ export function useAudioEngine() {
   const acquireMic = useCallback(async () => {
     const r = refs.current;
     const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === "live");
-    if (!haveLiveMic) {
-      r.rawLocalStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: true,
-        },
-        video: false,
-      });
+    if (haveLiveMic) return;
+    const deviceId = useStore.getState().micDeviceId;
+    const baseConstraints: MediaTrackConstraints = {
+      channelCount: 1,
+      sampleRate: 48000,
+      echoCancellation: true,
+      noiseSuppression: false,
+      autoGainControl: true,
+    };
+    try {
+      const audio: MediaTrackConstraints = deviceId
+        ? { ...baseConstraints, deviceId: { exact: deviceId } }
+        : baseConstraints;
+      r.rawLocalStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    } catch (err) {
+      // Saved deviceId may refer to an unplugged/revoked device. Drop the
+      // pinned id and retry with system default rather than failing the join.
+      if (deviceId && err instanceof Error && err.name === "OverconstrainedError") {
+        useStore.getState().setMicDeviceId(null);
+        r.rawLocalStream = await navigator.mediaDevices.getUserMedia({
+          audio: baseConstraints,
+          video: false,
+        });
+        return;
+      }
+      throw err;
     }
   }, []);
 
@@ -139,6 +154,31 @@ export function useAudioEngine() {
       return graph;
     },
     [teardownGraph, buildGraph],
+  );
+
+  const switchMicDevice = useCallback(
+    async (
+      engine: EngineKind,
+      selfMuted: boolean,
+      getSFUPeerConnection: () => RTCPeerConnection | null,
+    ) => {
+      const r = refs.current;
+      teardownGraph();
+      r.rawLocalStream?.getTracks().forEach((t) => t.stop());
+      r.rawLocalStream = null;
+      await acquireMic();
+      const graph = await buildGraph(engine);
+      const newTrack = graph.processedLocalStream.getAudioTracks()[0];
+      if (!newTrack) throw new Error("No audio track after device switch");
+      newTrack.enabled = !selfMuted;
+      const pc = getSFUPeerConnection();
+      if (pc) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        if (sender) await sender.replaceTrack(newTrack);
+      }
+      return graph;
+    },
+    [acquireMic, buildGraph, teardownGraph],
   );
 
   const updateSendGain = useCallback(() => {
@@ -249,6 +289,7 @@ export function useAudioEngine() {
   return {
     prepareLocalAudio,
     rebuildLocalAudio,
+    switchMicDevice,
     teardownGraph,
     updateSendGain,
     updateRnnoiseMix,

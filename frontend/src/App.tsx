@@ -128,6 +128,31 @@ export function App() {
     [session],
   );
 
+  // ---- Mic device switch ----
+
+  const handleMicDeviceSelect = useCallback(
+    async (deviceId: string | null) => {
+      const s = useStore.getState();
+      if (deviceId === s.micDeviceId) return;
+      s.setMicDeviceId(deviceId);
+      if (s.joinState !== "joined") return;
+      s.setStatus("Переключаю микрофон…");
+      try {
+        await session.switchMicDevice();
+        useStore.getState().setStatus("Микрофон переключён.", false, true);
+      } catch (err) {
+        useStore
+          .getState()
+          .setStatus(
+            `Не удалось переключить микрофон: ${err instanceof Error ? err.message : String(err)}`,
+            true,
+            true,
+          );
+      }
+    },
+    [session],
+  );
+
   // ---- Audio controls ----
 
   const handleSendVolumeChange = useCallback(
@@ -166,9 +191,12 @@ export function App() {
     if (s.engine !== "rnnoise") {
       void handleEngineSelect("rnnoise");
     }
+    if (s.micDeviceId !== null) {
+      void handleMicDeviceSelect(null);
+    }
 
     s.setStatus("Настройки звука сброшены.", false, s.joinState === "joined");
-  }, [audio, handleEngineSelect]);
+  }, [audio, handleEngineSelect, handleMicDeviceSelect]);
 
   const handleStatusMessage = useCallback((msg: string) => {
     const s = useStore.getState();
@@ -208,6 +236,7 @@ export function App() {
           />
           <AudioCard
             onEngineSelect={handleEngineSelect}
+            onMicDeviceSelect={handleMicDeviceSelect}
             onSendVolumeChange={handleSendVolumeChange}
             onRnnoiseMixChange={handleRnnoiseMixChange}
             onOutputVolumeChange={handleOutputVolumeChange}

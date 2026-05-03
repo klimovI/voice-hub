@@ -57,6 +57,12 @@ export type UseSessionManagerReturn = {
    */
   switchEngine: (engine: EngineKind) => Promise<void>;
   /**
+   * Re-acquire the mic on the currently selected device (read from the store)
+   * and replace the SFU sender track. Caller must update store.micDeviceId
+   * before calling. Throws on failure; caller wraps in try/catch.
+   */
+  switchMicDevice: () => Promise<void>;
+  /**
    * Sync the display name to the SFU and update the self-participant in the
    * store. No-op when not joined.
    */
@@ -168,6 +174,15 @@ export function useSessionManager({
     },
     [audio, sfu, attachSpeakingLoop],
   );
+
+  const switchMicDevice = useCallback(async (): Promise<void> => {
+    const s = useStore.getState();
+    const graph = await audio.switchMicDevice(s.engine, s.selfMuted, () =>
+      sfu.getPeerConnection(),
+    );
+    micGraphRef.current = graph;
+    attachSpeakingLoop(graph);
+  }, [audio, sfu, attachSpeakingLoop]);
 
   const setRemoteDisplayName = useCallback(
     (name: string): void => {
@@ -476,6 +491,7 @@ export function useSessionManager({
     getPeerId,
     setMicEnabled,
     switchEngine,
+    switchMicDevice,
     setRemoteDisplayName,
     sendSetState,
   };

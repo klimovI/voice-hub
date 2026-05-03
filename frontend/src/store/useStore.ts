@@ -9,6 +9,7 @@ import {
   KEYS,
   loadBoolean,
   loadEngine,
+  loadMicDeviceId,
   loadNumber,
   loadPercentage,
   saveOutputMuted,
@@ -16,6 +17,7 @@ import {
   saveRnnoiseMix,
   saveOutputVolume,
   saveEngine,
+  saveMicDeviceId,
 } from "../utils/storage";
 
 export type JoinState = "idle" | "joining" | "joined";
@@ -51,6 +53,10 @@ export interface AppState {
 
   engine: EngineKind;
   setEngine: (e: EngineKind) => void;
+
+  // Selected microphone deviceId. null = system default (no deviceId constraint).
+  micDeviceId: string | null;
+  setMicDeviceId: (id: string | null) => void;
 
   shortcut: InputBinding | null;
   setShortcut: (s: InputBinding | null) => void;
@@ -117,6 +123,12 @@ export const useStore = create<AppState>((set, get) => ({
   setEngine: (e) => {
     saveEngine(e);
     set({ engine: e });
+  },
+
+  micDeviceId: loadMicDeviceId(),
+  setMicDeviceId: (id) => {
+    saveMicDeviceId(id);
+    set({ micDeviceId: id });
   },
 
   shortcut: loadBinding(),

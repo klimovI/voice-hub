@@ -11,6 +11,8 @@ export const KEYS = {
   sendVolume: "voice-hub.send-volume",
   rnnoiseMix: "voice-hub.rnnoise-mix",
   engine: "voice-hub.engine",
+  // Selected microphone deviceId, or empty string for system default.
+  micDeviceId: "voice-hub.mic-device-id",
   // Identity
   displayName: "voice-hub.display-name",
   // Stable per-install identifier (UUID) generated once on first launch.
@@ -135,6 +137,17 @@ export function loadEngine(): EngineKind {
 
 export function saveEngine(e: EngineKind): void {
   localStorage.setItem(KEYS.engine, e);
+}
+
+// Selected microphone deviceId. null = use system default.
+export function loadMicDeviceId(): string | null {
+  const raw = localStorage.getItem(KEYS.micDeviceId);
+  return raw && raw.length > 0 ? raw : null;
+}
+
+export function saveMicDeviceId(id: string | null): void {
+  if (id) localStorage.setItem(KEYS.micDeviceId, id);
+  else localStorage.removeItem(KEYS.micDeviceId);
 }
 
 // Shortcut binding (JSON-serialised InputBinding | null).

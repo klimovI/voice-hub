@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
 import { clampPercentage } from "../utils/storage";
 import { formatRnnoiseMix, formatEngine } from "../utils/clamp";
@@ -7,6 +8,7 @@ const ENGINES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
+  onMicDeviceSelect: (deviceId: string | null) => void;
   onSendVolumeChange: (v: number) => void;
   onRnnoiseMixChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
@@ -26,6 +28,7 @@ function SliderHead({ label, value }: { label: string; value: string }) {
 
 export function AudioCard({
   onEngineSelect,
+  onMicDeviceSelect,
   onSendVolumeChange,
   onRnnoiseMixChange,
   onOutputVolumeChange,
@@ -35,6 +38,42 @@ export function AudioCard({
   const sendVolume = useStore((s) => s.sendVolume);
   const rnnoiseMix = useStore((s) => s.rnnoiseMix);
   const outputVolume = useStore((s) => s.outputVolume);
+  const micDeviceId = useStore((s) => s.micDeviceId);
+
+  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+
+  useEffect(() => {
+    const md = navigator.mediaDevices;
+    if (!md?.enumerateDevices) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const all = await md.enumerateDevices();
+        if (cancelled) return;
+        setMicDevices(all.filter((d) => d.kind === "audioinput" && d.deviceId));
+      } catch {
+        // enumerateDevices can throw in restricted contexts; leave list empty.
+      }
+    };
+    void refresh();
+    md.addEventListener?.("devicechange", refresh);
+    return () => {
+      cancelled = true;
+      md.removeEventListener?.("devicechange", refresh);
+    };
+  }, []);
+
+  // Drop the selected device if it disappeared (unplugged, permission revoked).
+  useEffect(() => {
+    if (!micDeviceId || micDevices.length === 0) return;
+    const stillPresent = micDevices.some((d) => d.deviceId === micDeviceId);
+    if (!stillPresent) onMicDeviceSelect(null);
+  }, [micDeviceId, micDevices, onMicDeviceSelect]);
+
+  // Hide picker when there is at most one input device — picker would be noise.
+  // Labels are empty strings until the user grants mic permission, so before
+  // first join the list still renders but with placeholder labels.
+  const showMicPicker = micDevices.length > 1;
 
   return (
     <section className="card grid gap-[14px]">
@@ -49,6 +88,27 @@ export function AudioCard({
           Сбросить
         </button>
       </div>
+
+      {showMicPicker && (
+        <div className="grid gap-2">
+          <label htmlFor="mic-device" className="text-[13px] text-muted">
+            Микрофон
+          </label>
+          <select
+            id="mic-device"
+            value={micDeviceId ?? ""}
+            onChange={(e) => onMicDeviceSelect(e.target.value || null)}
+            className="w-full px-3 py-2 text-[13px] bg-bg-input border border-line rounded-[10px] text-text focus:outline-none focus:border-accent"
+          >
+            <option value="">Системный по умолчанию</option>
+            {micDevices.map((d, i) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Микрофон ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="grid gap-2">
         <span className="text-[13px] text-muted">Шумоподавление</span>
