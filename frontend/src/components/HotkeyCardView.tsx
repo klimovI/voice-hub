@@ -28,8 +28,8 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
         />
       </label>
       <p className="text-[11px] text-muted leading-snug -mt-1">
-        Совет: модификатор (Ctrl / Shift / Alt) и клавиша или боковая кнопка мыши. Комбинацию нужно
-        удерживать — короткие нажатия не сработают.
+        Совет: модификатор (Ctrl / Shift / Alt) и клавиша или боковая кнопка мыши. Зажмите комбинацию
+        одновременно и отпустите — запишется при отпускании.
       </p>
       <div className="flex flex-wrap gap-2.5">
         <button

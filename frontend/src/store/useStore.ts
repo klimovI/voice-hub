@@ -124,7 +124,7 @@ export const useStore = create<AppState>((set, get) => ({
   capturingShortcut: false,
   setCapturingShortcut: (v) => set({ capturingShortcut: v }),
 
-  statusText: "Готово",
+  statusText: "Загрузка…",
   statusState: "idle",
   setStatus: (text, isError = false, joined) => {
     const currentJoined = joined ?? get().joinState === "joined";
