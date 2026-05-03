@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import "./styles/main.css";
 import { useStore } from "./store/useStore";
-import { useAudioEngine, preloadEngine } from "./hooks/useAudioEngine";
+import { useAudioEngine } from "./hooks/useAudioEngine";
+import { preloadEngine } from "./audio/engine";
 import { useSFU } from "./hooks/useSFU";
 import { useSessionManager } from "./hooks/useSessionManager";
 import { useGlobalShortcut } from "./hooks/useShortcut";
@@ -19,7 +20,9 @@ import { Footer } from "./components/Footer";
 import { useAppVersion } from "./hooks/useAppVersion";
 
 export function App() {
-  const store = useStore();
+  // App does not render any store field directly — children subscribe per-card.
+  // Callbacks read fresh state via useStore.getState() to avoid re-rendering App
+  // (and recreating every handler) on every speaking/participant update.
   const audio = useAudioEngine();
   const sfu = useSFU();
   const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
@@ -59,133 +62,132 @@ export function App() {
 
   const handleToggleSelfMute = useCallback(() => {
     if (!session.getPeerId()) return;
-    if (store.deafened) {
-      store.setDeafened(false);
-      store.setOutputMuted(store.preDeafenOutputMuted);
+    const s = useStore.getState();
+    if (s.deafened) {
+      s.setDeafened(false);
+      s.setOutputMuted(s.preDeafenOutputMuted);
       audio.applyAllRemoteGains();
     }
-    const nextMuted = !store.selfMuted;
-    store.setSelfMuted(nextMuted);
+    const nextMuted = !s.selfMuted;
+    s.setSelfMuted(nextMuted);
     session.setMicEnabled(!nextMuted);
     if (nextMuted) playMuteSound();
     else playUnmuteSound();
-  }, [store, audio, session]);
+  }, [audio, session]);
 
   // Keep the ref in sync so triggerToggleSelfMute (defined before session) can
   // call the latest version without capturing session in its own dep array.
   handleToggleSelfMuteRef.current = handleToggleSelfMute;
 
   const handleToggleOutputMute = useCallback(() => {
-    const { deafened, preDeafenSelfMuted } = store;
-    if (deafened) {
-      store.setDeafened(false);
-      store.setSelfMuted(preDeafenSelfMuted);
-      session.setMicEnabled(!preDeafenSelfMuted);
+    const s = useStore.getState();
+    if (s.deafened) {
+      s.setDeafened(false);
+      s.setSelfMuted(s.preDeafenSelfMuted);
+      session.setMicEnabled(!s.preDeafenSelfMuted);
     }
-    store.setOutputMuted(!store.outputMuted);
+    s.setOutputMuted(!s.outputMuted);
     audio.applyAllRemoteGains();
-  }, [store, audio, session]);
+  }, [audio, session]);
 
   const handleToggleDeafen = useCallback(() => {
-    if (store.deafened) {
-      store.setDeafened(false);
-      store.setSelfMuted(store.preDeafenSelfMuted);
-      session.setMicEnabled(!store.preDeafenSelfMuted);
-      store.setOutputMuted(store.preDeafenOutputMuted);
+    const s = useStore.getState();
+    if (s.deafened) {
+      s.setDeafened(false);
+      s.setSelfMuted(s.preDeafenSelfMuted);
+      session.setMicEnabled(!s.preDeafenSelfMuted);
+      s.setOutputMuted(s.preDeafenOutputMuted);
     } else {
-      store.enterDeafen();
+      s.enterDeafen();
       session.setMicEnabled(false);
     }
     audio.applyAllRemoteGains();
-  }, [store, audio, session]);
+  }, [audio, session]);
 
   // ---- Engine switch ----
 
   const handleEngineSelect = useCallback(
     async (engine: EngineKind) => {
-      if (engine === store.engine) return;
-      store.setEngine(engine);
+      const s = useStore.getState();
+      if (engine === s.engine) return;
+      s.setEngine(engine);
       preloadEngine(engine);
-      if (store.joinState !== "joined") {
-        store.setStatus(`Denoiser: ${engine}`);
+      if (s.joinState !== "joined") {
+        s.setStatus(`Denoiser: ${engine}`);
         return;
       }
-      store.setStatus(`Switching to ${engine}...`);
+      s.setStatus(`Switching to ${engine}...`);
       try {
         await session.switchEngine(engine);
-        store.setStatus(`Denoiser: ${engine}`, false, true);
+        useStore.getState().setStatus(`Denoiser: ${engine}`, false, true);
       } catch (err) {
-        store.setStatus(
+        useStore.getState().setStatus(
           `Denoiser switch failed: ${err instanceof Error ? err.message : String(err)}`,
           true,
           true,
         );
       }
     },
-    [store, session],
+    [session],
   );
 
   // ---- Audio controls ----
 
   const handleSendVolumeChange = useCallback(
     (v: number) => {
-      store.setSendVolume(v);
+      useStore.getState().setSendVolume(v);
       audio.updateSendGain();
     },
-    [store, audio],
+    [audio],
   );
 
-  const handleRnnoiseMixChange = useCallback(
-    (v: number) => {
-      store.setRnnoiseMix(v);
-      // RNNoise mix is read live by the ScriptProcessor — no rebuild needed.
-    },
-    [store],
-  );
+  const handleRnnoiseMixChange = useCallback((v: number) => {
+    useStore.getState().setRnnoiseMix(v);
+    // RNNoise mix is read live by the ScriptProcessor — no rebuild needed.
+  }, []);
 
   const handleOutputVolumeChange = useCallback(
     (v: number) => {
-      store.setOutputVolume(v);
+      useStore.getState().setOutputVolume(v);
       audio.applyAllRemoteGains();
     },
-    [store, audio],
+    [audio],
   );
 
   const handleAudioReset = useCallback(() => {
-    store.setSendVolume(100);
-    store.setRnnoiseMix(90);
-    store.setOutputVolume(100);
+    const s = useStore.getState();
+    s.setSendVolume(100);
+    s.setRnnoiseMix(90);
+    s.setOutputVolume(100);
     audio.updateSendGain();
     audio.applyAllRemoteGains();
 
-    if (store.engine !== "rnnoise") {
+    if (s.engine !== "rnnoise") {
       void handleEngineSelect("rnnoise");
     }
 
-    if (store.joinState === "joined") {
-      store.setStatus("Audio tuning reset. Reconnect to apply mic path changes.", false, true);
+    if (s.joinState === "joined") {
+      s.setStatus("Audio tuning reset. Reconnect to apply mic path changes.", false, true);
     } else {
-      store.setStatus("Audio tuning reset to defaults.");
+      s.setStatus("Audio tuning reset to defaults.");
     }
-  }, [store, audio, handleEngineSelect]);
+  }, [audio, handleEngineSelect]);
 
-  const handleStatusMessage = useCallback(
-    (msg: string) => {
-      store.setStatus(msg, false, store.joinState === "joined");
-    },
-    [store],
-  );
+  const handleStatusMessage = useCallback((msg: string) => {
+    const s = useStore.getState();
+    s.setStatus(msg, false, s.joinState === "joined");
+  }, []);
 
   // ---- Display name sync back to SFU ----
 
   const handleDisplayNameChange = useCallback(
     (value: string) => {
       setDisplayName(value);
-      if (store.joinState === "joined" && value.trim()) {
+      if (useStore.getState().joinState === "joined" && value.trim()) {
         session.setRemoteDisplayName(value.trim());
       }
     },
-    [store, session],
+    [session],
   );
 
   return (

@@ -22,22 +22,7 @@ import {
   type RemoteParticipantAudio,
   type RemoteSpeakingLoop,
 } from "../audio/remote";
-import { preloadRnnoise, isRnnoiseReady } from "../audio/rnnoise";
-import { preloadDtln, isDtlnReady } from "../audio/dtln";
-import { DTLN_ASSET_BASE } from "../config";
-
-export function preloadEngine(engine: EngineKind): Promise<void> {
-  if (engine === "rnnoise") return preloadRnnoise();
-  if (engine === "dtln") return preloadDtln(DTLN_ASSET_BASE);
-  return Promise.resolve();
-}
-
-export function isEngineReady(engine: EngineKind): boolean {
-  if (engine === "off") return true;
-  if (engine === "rnnoise") return isRnnoiseReady();
-  if (engine === "dtln") return isDtlnReady();
-  return true;
-}
+import { preloadEngine } from "../audio/engine";
 
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
@@ -174,6 +159,21 @@ export function useAudioEngine() {
 
   // ---- Remote audio ----
 
+  const applyAllRemoteGains = useCallback(() => {
+    const r = refs.current;
+    const { outputVolume, outputMuted, participants } = useStore.getState();
+    for (const [id, audio] of r.remoteAudio.entries()) {
+      const p = participants.get(id);
+      applyParticipantGain(
+        audio,
+        outputVolume,
+        outputMuted,
+        p?.localMuted ?? false,
+        p?.localVolume ?? 100,
+      );
+    }
+  }, []);
+
   const attachRemoteStream = useCallback(
     (participantId: string, stream: MediaStream) => {
       const r = refs.current;
@@ -202,8 +202,7 @@ export function useAudioEngine() {
         },
       );
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [applyAllRemoteGains],
   );
 
   const detachRemoteStream = useCallback((participantId: string) => {
@@ -212,21 +211,6 @@ export function useAudioEngine() {
     if (audio) {
       teardownParticipantAudio(audio);
       r.remoteAudio.delete(participantId);
-    }
-  }, []);
-
-  const applyAllRemoteGains = useCallback(() => {
-    const r = refs.current;
-    const { outputVolume, outputMuted, participants } = useStore.getState();
-    for (const [id, audio] of r.remoteAudio.entries()) {
-      const p = participants.get(id);
-      applyParticipantGain(
-        audio,
-        outputVolume,
-        outputMuted,
-        p?.localMuted ?? false,
-        p?.localVolume ?? 100,
-      );
     }
   }, []);
 
@@ -250,7 +234,6 @@ export function useAudioEngine() {
   }, [teardownGraph, cleanupAllRemote]);
 
   return {
-    refs,
     prepareLocalAudio,
     rebuildLocalAudio,
     teardownGraph,

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 
 interface ConnPassStatus {
   exists: boolean;
@@ -32,7 +33,7 @@ function relativeTime(iso: string): string {
 }
 
 export function AdminKeyButton() {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = useIsAdmin();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("info");
   const [status, setStatus] = useState<ConnPassStatus | null>(null);
@@ -41,23 +42,22 @@ export function AdminKeyButton() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  // Detect admin role at mount by probing the admin endpoint.
-  // 200 → admin; 403 → user (hide button).
+  // Once useIsAdmin flips true, fetch the current connection-password status
+  // for the initial info panel. Refresh-on-open is handled separately by
+  // refreshStatus, so this effect only seeds the first render.
   useEffect(() => {
+    if (!isAdmin) return;
     let cancelled = false;
     fetch(ENDPOINT, { credentials: "same-origin" })
-      .then((res) => {
-        if (cancelled) return;
-        if (res.status === 200) {
-          setIsAdmin(true);
-          return res.json().then((s: ConnPassStatus) => setStatus(s));
-        }
+      .then((res) => (res.ok ? res.json() : null))
+      .then((s: ConnPassStatus | null) => {
+        if (!cancelled && s) setStatus(s);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdmin]);
 
   const refreshStatus = useCallback(async () => {
     const res = await fetch(ENDPOINT, { credentials: "same-origin" });

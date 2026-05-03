@@ -30,18 +30,14 @@ export function useGlobalShortcut(onTrigger: () => void): void {
   const lastFireRef = useRef(0);
   const focusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
 
-  useEffect(() => {
-    onTriggerRef.current = onTrigger;
-  }, [onTrigger]);
-  useEffect(() => {
-    shortcutRef.current = shortcut;
-  }, [shortcut]);
-  useEffect(() => {
-    capturingRef.current = capturingShortcut;
-  }, [capturingShortcut]);
-  useEffect(() => {
-    joinStateRef.current = joinState;
-  }, [joinState]);
+  // Refs always reflect the latest values; the listener-attach effect below
+  // runs once and reads via the refs. Direct assignment is safe at render
+  // time because nothing else in this hook reads these refs synchronously
+  // during render — they are read inside event-handler closures only.
+  onTriggerRef.current = onTrigger;
+  shortcutRef.current = shortcut;
+  capturingRef.current = capturingShortcut;
+  joinStateRef.current = joinState;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

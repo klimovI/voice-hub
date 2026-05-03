@@ -160,68 +160,41 @@ export function applySendGain(graph: MicGraph, sendVolumeRef: () => number): voi
   graph.localGainNode.gain.value = (sendVolume / 100) * VOICE_BOOST_RATIO;
 }
 
+// Disconnects a Web Audio node, swallowing the InvalidAccessError that
+// `disconnect()` throws when the node was never connected (or already torn
+// down). Teardown crosses async paths where the connection state can vary,
+// so this is the documented way to make it idempotent.
+function safeDisconnect(node: { disconnect(): void } | null | undefined): void {
+  if (!node) return;
+  try {
+    node.disconnect();
+  } catch {
+    /* ignore */
+  }
+}
+
 export function teardownMicGraph(graph: MicGraph): void {
   if (graph.speakingFrameId !== null) {
     cancelAnimationFrame(graph.speakingFrameId);
     graph.speakingFrameId = null;
   }
 
-  try {
-    graph.rnnoiseProcessorNode?.disconnect();
-  } catch {
-    /* ignore */
-  }
+  safeDisconnect(graph.rnnoiseProcessorNode);
   resetRnnoiseGraphState(graph.rnnoiseGraphState);
   graph.rnnoiseProcessorNode = null;
 
-  try {
-    graph.dtln?.dtlnInputSource.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.dtln?.dtlnProcessorNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.dtln?.denoisedSourceNode.disconnect();
-  } catch {
-    /* ignore */
-  }
+  safeDisconnect(graph.dtln?.dtlnInputSource);
+  safeDisconnect(graph.dtln?.dtlnProcessorNode);
+  safeDisconnect(graph.dtln?.denoisedSourceNode);
   void graph.dtln?.dtlnContext.close().catch(() => undefined);
   graph.dtln = null;
 
-  try {
-    graph.localSourceNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.localHighPassNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.localLowPassNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.localCompressorNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.localGainNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    graph.localMonitorAnalyser.disconnect();
-  } catch {
-    /* ignore */
-  }
+  safeDisconnect(graph.localSourceNode);
+  safeDisconnect(graph.localHighPassNode);
+  safeDisconnect(graph.localLowPassNode);
+  safeDisconnect(graph.localCompressorNode);
+  safeDisconnect(graph.localGainNode);
+  safeDisconnect(graph.localMonitorAnalyser);
 
   graph.processedLocalStream.getTracks().forEach((t) => t.stop());
   void graph.localAudioContext.close().catch(() => undefined);

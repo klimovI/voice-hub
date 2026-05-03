@@ -136,32 +136,27 @@ export const useStore = create<AppState>((set, get) => ({
 
   participants: new Map(),
   upsertParticipant: (partial) => {
-    const existing = get().participants.get(partial.id);
-    if (existing) {
-      const updated = { ...existing, ...partial };
-      set((s) => {
-        const m = new Map(s.participants);
-        m.set(partial.id, updated);
-        return { participants: m };
-      });
-      return updated;
-    }
-    const fresh: ParticipantUI = {
-      id: partial.id,
-      display: partial.display ?? `user-${partial.id}`,
-      isSelf: Boolean(partial.isSelf),
-      selfMuted: partial.selfMuted ?? false,
-      speaking: partial.speaking ?? false,
-      localMuted: partial.localMuted ?? false,
-      localVolume: partial.localVolume ?? 100,
-      hasStream: partial.hasStream ?? false,
-    };
+    let result!: ParticipantUI;
     set((s) => {
+      const existing = s.participants.get(partial.id);
+      const merged: ParticipantUI = existing
+        ? { ...existing, ...partial }
+        : {
+            id: partial.id,
+            display: partial.display ?? `user-${partial.id}`,
+            isSelf: Boolean(partial.isSelf),
+            selfMuted: partial.selfMuted ?? false,
+            speaking: partial.speaking ?? false,
+            localMuted: partial.localMuted ?? false,
+            localVolume: partial.localVolume ?? 100,
+            hasStream: partial.hasStream ?? false,
+          };
       const m = new Map(s.participants);
-      m.set(partial.id, fresh);
+      m.set(partial.id, merged);
+      result = merged;
       return { participants: m };
     });
-    return fresh;
+    return result;
   },
   removeParticipant: (id) =>
     set((s) => {

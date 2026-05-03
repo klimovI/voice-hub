@@ -10,7 +10,8 @@
 
 import { useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store/useStore";
-import { useAudioEngine, preloadEngine, isEngineReady } from "./useAudioEngine";
+import { useAudioEngine } from "./useAudioEngine";
+import { preloadEngine, isEngineReady } from "../audio/engine";
 import { useSFU } from "./useSFU";
 import {
   clearLegacyStorage,
@@ -119,15 +120,11 @@ export function useSessionManager({
     [store],
   );
 
-  const switchEngine = useCallback(
-    async (engine: EngineKind): Promise<void> => {
-      const graph = await audio.rebuildLocalAudio(
-        engine,
-        useStore.getState().selfMuted,
-        peerIdRef.current,
-        () => sfu.getPeerConnection(),
-      );
-      micGraphRef.current = graph;
+  // Single attach point for the local-mic speaking-detect RAF loop.
+  // Used by both initial join and engine hot-swap; keeps the speaking-state
+  // write path identical and avoids two RAF loops racing on the same graph.
+  const attachSpeakingLoop = useCallback(
+    (graph: MicGraph): void => {
       audio.startSpeaking(
         graph,
         () => useStore.getState().selfMuted,
@@ -142,7 +139,21 @@ export function useSessionManager({
         },
       );
     },
-    [audio, sfu, store],
+    [audio, store],
+  );
+
+  const switchEngine = useCallback(
+    async (engine: EngineKind): Promise<void> => {
+      const graph = await audio.rebuildLocalAudio(
+        engine,
+        useStore.getState().selfMuted,
+        peerIdRef.current,
+        () => sfu.getPeerConnection(),
+      );
+      micGraphRef.current = graph;
+      attachSpeakingLoop(graph);
+    },
+    [audio, sfu, attachSpeakingLoop],
   );
 
   const setRemoteDisplayName = useCallback(
@@ -349,26 +360,13 @@ export function useSessionManager({
         }
 
         // Start speaking loop (graph survives reconnects — fires once per join).
-        audio.startSpeaking(
-          graph,
-          () => useStore.getState().selfMuted,
-          () => peerIdRef.current,
-          (speaking) => {
-            const pid = peerIdRef.current;
-            if (!pid) return;
-            const current = useStore.getState().participants.get(pid);
-            if (current && current.speaking !== speaking) {
-              store.updateParticipant(pid, { speaking });
-            }
-          },
-        );
+        attachSpeakingLoop(graph);
       } catch (error) {
         handleLeave();
         store.setStatus(error instanceof Error ? error.message : String(error), true);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, audio, connectSfu, handleLeave, switchEngine],
+    [store, audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop],
   );
 
   useEffect(() => {
