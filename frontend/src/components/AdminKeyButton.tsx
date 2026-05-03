@@ -221,7 +221,7 @@ export function AdminKeyButton() {
                   Скопируйте сейчас — больше не будет показан.
                 </div>
                 <pre className="px-3 py-2.5 mb-3 rounded-[14px] bg-bg-3 border border-line-strong text-[12px] font-mono whitespace-pre-wrap break-all">
-{shareBlock}
+                  {shareBlock}
                 </pre>
                 <div className="flex gap-2 mb-2">
                   <button

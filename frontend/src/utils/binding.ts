@@ -29,10 +29,25 @@ export function loadBinding(): InputBinding | null {
     return def;
   }
   try {
-    return JSON.parse(raw) as InputBinding | null;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null) return null;
+    if (isInputBinding(parsed)) return parsed;
+    return defaultBinding();
   } catch {
     return defaultBinding();
   }
+}
+
+function isInputBinding(v: unknown): v is InputBinding {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as { kind?: unknown; keys?: unknown; button?: unknown };
+  if (o.kind === "keyboard") {
+    return Array.isArray(o.keys) && o.keys.every((k) => typeof k === "string");
+  }
+  if (o.kind === "mouse") {
+    return typeof o.button === "string";
+  }
+  return false;
 }
 
 export function saveBinding(binding: InputBinding | null): void {

@@ -5,26 +5,16 @@
 const PEAK = 0.15;
 const DURATION = 0.09;
 
-// Dedicated lightweight context for UI feedback tones. Not tied to any stream;
-// holds no external resources, so a module-level singleton is appropriate here.
-let uiAudioCtx: AudioContext | null = null;
-
-function getUiAudioContext(): AudioContext | null {
-  if (uiAudioCtx) return uiAudioCtx;
+function playGlide(from: number, to: number): void {
+  let ctx: AudioContext;
   try {
     const Ctor =
       (window as Window & typeof globalThis).AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    uiAudioCtx = new Ctor({ sampleRate: 48000 });
-    return uiAudioCtx;
+    ctx = new Ctor({ sampleRate: 48000 });
   } catch {
-    return null;
+    return;
   }
-}
-
-function playGlide(from: number, to: number): void {
-  const ctx = getUiAudioContext();
-  if (!ctx) return;
   const t0 = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -36,6 +26,7 @@ function playGlide(from: number, to: number): void {
   gain.gain.linearRampToValueAtTime(0, t0 + DURATION);
   osc.connect(gain);
   gain.connect(ctx.destination);
+  osc.onended = () => void ctx.close().catch(() => undefined);
   osc.start(t0);
   osc.stop(t0 + DURATION + 0.02);
 }
