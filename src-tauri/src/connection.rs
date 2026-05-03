@@ -82,7 +82,11 @@ fn local_url(path: &str) -> Url {
     let base = "tauri://localhost/";
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let base = "http://tauri.localhost/";
-    Url::parse(&format!("{base}{path}")).expect("local url")
+    // Both base strings are compile-time constants that are valid URL prefixes,
+    // and path is always CONNECT_PATH ("connect.html") — a simple filename with
+    // no characters that would break URL parsing. This cannot fail in practice.
+    Url::parse(&format!("{base}{path}"))
+        .unwrap_or_else(|e| unreachable!("local_url: constant base + path failed to parse: {e}"))
 }
 
 #[derive(Serialize)]
@@ -137,4 +141,83 @@ fn navigate_to(app: &AppHandle, url: Url) -> Result<(), String> {
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_host;
+
+    fn ok(input: &str) {
+        assert!(
+            normalize_host(input).is_ok(),
+            "expected Ok for {:?}, got Err",
+            input
+        );
+    }
+
+    fn err(input: &str) {
+        assert!(
+            normalize_host(input).is_err(),
+            "expected Err for {:?}, got Ok",
+            input
+        );
+    }
+
+    #[test]
+    fn https_host_accepted() {
+        ok("https://voicehub.example.com");
+    }
+
+    #[test]
+    fn https_host_with_port_accepted() {
+        ok("https://voicehub.example.com:443");
+    }
+
+    #[test]
+    fn http_localhost_accepted() {
+        ok("http://localhost");
+    }
+
+    #[test]
+    fn http_loopback_ipv4_accepted() {
+        ok("http://127.0.0.1");
+    }
+
+    #[test]
+    fn http_non_local_rejected() {
+        err("http://example.com");
+    }
+
+    #[test]
+    fn bare_hostname_defaults_to_https() {
+        let url = normalize_host("voicehub.example.com").expect("bare hostname should be Ok");
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn bare_hostname_with_port_accepted() {
+        let url = normalize_host("host:8080").expect("bare hostname:port should be Ok");
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.port(), Some(8080));
+    }
+
+    #[test]
+    fn garbage_input_rejected() {
+        err("not a url !!@@##");
+    }
+
+    #[test]
+    fn empty_input_rejected() {
+        err("");
+        err("   ");
+    }
+
+    #[test]
+    fn trailing_slash_path_stripped() {
+        // normalize_host does not strip the path — it validates scheme and host.
+        // A trailing slash is valid and kept. Verify the result is Ok and the
+        // host is correct.
+        let url = normalize_host("https://voicehub.example.com/").expect("trailing slash Ok");
+        assert_eq!(url.host_str(), Some("voicehub.example.com"));
+    }
 }

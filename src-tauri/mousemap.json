@@ -1,0 +1,21 @@
+{
+  "_schema": {
+    "description": "Canonical mouse-button label contract between Rust (src-tauri/src/listener.rs::button_label) and TypeScript (frontend/src/utils/binding.ts). The 'label' strings are persisted verbatim in shortcut.json (Rust) and voice-hub.shortcut localStorage (TS). Do not rename labels without updating both sides.",
+    "authority": "Rust listener.rs is authoritative; TS must mirror.",
+    "coverage_test": "Rust: listener.rs::tests::mousemap_json_coverage asserts every static entry round-trips through button_label. TS: binding.test.ts asserts formatBinding produces the label string for each entry.",
+    "side_label_pattern": "Side buttons are dynamic: rdev::Button::Unknown(n) => 'Side{n}'. Only the most common variants (Side6, Side7) are listed here as documentation. The pattern itself is the contract — both sides must accept any 'Side' followed by a decimal integer.",
+    "excluded": "Button::Left is intentionally excluded; it would block normal mouse clicks."
+  },
+  "buttons": [
+    { "label": "Right",  "rdev_variant": "Button::Right",      "notes": "Right mouse button" },
+    { "label": "Middle", "rdev_variant": "Button::Middle",     "notes": "Middle mouse button / scroll wheel click" },
+    { "label": "Side6",  "rdev_variant": "Button::Unknown(6)", "notes": "Common thumb-back button (X1 / Back)" },
+    { "label": "Side7",  "rdev_variant": "Button::Unknown(7)", "notes": "Common thumb-forward button (X2 / Forward)" },
+    { "label": "Side8",  "rdev_variant": "Button::Unknown(8)", "notes": "Extended side button; present on some gaming mice" }
+  ],
+  "side_pattern": {
+    "format": "Side{n}",
+    "regex": "^Side\\d+$",
+    "n_type": "u32 (rdev Button::Unknown payload)"
+  }
+}

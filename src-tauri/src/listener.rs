@@ -47,10 +47,10 @@ pub fn start(app: AppHandle, state: SharedState) {
         let cb_state = state.clone();
         let cb_app = app.clone();
         let result = rdev::listen(move |event: Event| {
-            let mut s = match cb_state.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
+            let mut s = cb_state.lock().unwrap_or_else(|p| {
+                log::error!("listener: state mutex poisoned, recovering stale state");
+                p.into_inner()
+            });
             handle_event(&mut s, &cb_app, &event);
         });
         if let Err(err) = result {
@@ -388,5 +388,50 @@ mod tests {
                 label
             );
         }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MousemapButton {
+        label: String,
+        rdev_variant: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Mousemap {
+        buttons: Vec<MousemapButton>,
+    }
+
+    #[test]
+    fn mousemap_json_coverage() {
+        let mousemap: Mousemap = serde_json::from_str(include_str!("../mousemap.json"))
+            .expect("mousemap.json is valid JSON");
+
+        for entry in &mousemap.buttons {
+            let btn = match entry.rdev_variant.as_str() {
+                "Button::Right" => Button::Right,
+                "Button::Middle" => Button::Middle,
+                "Button::Unknown(6)" => Button::Unknown(6),
+                "Button::Unknown(7)" => Button::Unknown(7),
+                "Button::Unknown(8)" => Button::Unknown(8),
+                other => panic!("mousemap.json has unrecognised rdev_variant {:?} — update this test", other),
+            };
+            let got = button_label(&btn).unwrap_or_else(|| {
+                panic!(
+                    "button_label returned None for rdev_variant {:?} (label {:?})",
+                    entry.rdev_variant, entry.label
+                )
+            });
+            assert_eq!(
+                got, entry.label,
+                "button_label({:?}) = {:?}, want {:?}",
+                entry.rdev_variant, got, entry.label
+            );
+        }
+
+        // Verify the Side{n} pattern for a synthetic value not listed in the static entries.
+        let synthetic = Button::Unknown(42);
+        let label = button_label(&synthetic)
+            .expect("button_label must return Some for Button::Unknown(42)");
+        assert_eq!(label, "Side42", "side_pattern: Button::Unknown(42) must produce \"Side42\"");
     }
 }

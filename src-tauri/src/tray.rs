@@ -24,10 +24,13 @@ const ITEM_DISCONNECT: &str = "disconnect";
 const ITEM_QUIT: &str = "quit";
 
 /// Build the tray menu. When `update_version` is `Some`, an "Install vX.Y.Z"
-/// item appears at the top separated from the rest.
-pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Result<Menu<Wry>> {
-    let connected = connection::load_host().is_some();
-
+/// item appears at the top separated from the rest. `connected` controls
+/// whether the "Disconnect" item is enabled; callers must pass `load_host().is_some()`.
+pub fn build_menu(
+    app: &AppHandle,
+    update_version: Option<&str>,
+    connected: bool,
+) -> tauri::Result<Menu<Wry>> {
     let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
     let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
     let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
@@ -59,9 +62,16 @@ pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Resul
 
 /// Construct the tray icon and attach event handlers. Called once at startup.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app, None)?;
+    let menu = build_menu(app, None, connection::load_host().is_some())?;
+    // default_window_icon() is None only when no icon is configured in
+    // tauri.conf.json. Voice Hub always ships with icons (icons/32x32.png
+    // etc.), so None is unreachable in a correctly-built package.
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"));
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(app.default_window_icon().cloned().expect("default icon"))
+        .icon(icon)
         .tooltip("Voice Hub")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -82,7 +92,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 
 /// Replace the tray menu and tooltip to reflect an available update.
 pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
-    let menu = build_menu(app, Some(version))?;
+    let menu = build_menu(app, Some(version), connection::load_host().is_some())?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
         tray.set_tooltip(Some(format!("Voice Hub — v{version} available")))?;

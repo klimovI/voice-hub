@@ -58,3 +58,47 @@ pub fn save(app: &tauri::AppHandle, binding: Option<&InputBinding>) -> Result<()
     let json = serde_json::to_vec_pretty(&binding).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that each binding fixture file round-trips through
+    /// `serde_json::from_str` → `serde_json::to_string_pretty` byte-for-byte.
+    /// The fixture files are the authoritative storage contract; this test
+    /// locks down that Rust serde never silently changes the on-disk format.
+    #[test]
+    fn binding_fixtures_roundtrip() {
+        let fixtures: &[(&str, &str)] = &[
+            (
+                "binding-keyboard-plain",
+                include_str!("../testdata/binding-keyboard-plain.json"),
+            ),
+            (
+                "binding-keyboard-modifiers",
+                include_str!("../testdata/binding-keyboard-modifiers.json"),
+            ),
+            (
+                "binding-mouse",
+                include_str!("../testdata/binding-mouse.json"),
+            ),
+            (
+                "binding-cleared",
+                include_str!("../testdata/binding-cleared.json"),
+            ),
+        ];
+
+        for (name, content) in fixtures {
+            let parsed: Option<InputBinding> = serde_json::from_str(content)
+                .unwrap_or_else(|e| panic!("fixture {name}: failed to parse: {e}"));
+            let serialised = serde_json::to_string_pretty(&parsed)
+                .unwrap_or_else(|e| panic!("fixture {name}: failed to serialise: {e}"));
+            assert_eq!(
+                serialised, *content,
+                "fixture {name}: re-serialised output does not match fixture bytes\n\
+                 got:  {serialised:?}\n\
+                 want: {content:?}"
+            );
+        }
+    }
+}
