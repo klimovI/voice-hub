@@ -8,10 +8,12 @@ import (
 // AuthLimiter tracks failed login attempts per IP and blocks IPs that exceed
 // the threshold within the sliding window.
 type AuthLimiter struct {
-	mu       sync.Mutex
-	attempts map[string]*authAttempt
-	max      int
-	window   time.Duration
+	mu        sync.Mutex
+	attempts  map[string]*authAttempt
+	max       int
+	window    time.Duration
+	lastSweep time.Time
+	now       func() time.Time
 }
 
 type authAttempt struct {
@@ -26,6 +28,7 @@ func NewAuthLimiter(max int, window time.Duration) *AuthLimiter {
 		attempts: make(map[string]*authAttempt),
 		max:      max,
 		window:   window,
+		now:      time.Now,
 	}
 }
 
@@ -37,7 +40,7 @@ func (l *AuthLimiter) Blocked(ip string) bool {
 	if !ok {
 		return false
 	}
-	if time.Since(a.first) > l.window {
+	if l.now().Sub(a.first) > l.window {
 		delete(l.attempts, ip)
 		return false
 	}
@@ -48,9 +51,11 @@ func (l *AuthLimiter) Blocked(ip string) bool {
 func (l *AuthLimiter) Fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := l.now()
+	l.sweepLocked(now)
 	a, ok := l.attempts[ip]
-	if !ok || time.Since(a.first) > l.window {
-		l.attempts[ip] = &authAttempt{count: 1, first: time.Now()}
+	if !ok || now.Sub(a.first) > l.window {
+		l.attempts[ip] = &authAttempt{count: 1, first: now}
 		return
 	}
 	a.count++
@@ -61,4 +66,17 @@ func (l *AuthLimiter) Success(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.attempts, ip)
+}
+
+// sweepLocked evicts stale entries at most once per window. Caller holds l.mu.
+func (l *AuthLimiter) sweepLocked(now time.Time) {
+	if now.Sub(l.lastSweep) < l.window {
+		return
+	}
+	l.lastSweep = now
+	for ip, a := range l.attempts {
+		if now.Sub(a.first) > l.window {
+			delete(l.attempts, ip)
+		}
+	}
 }
