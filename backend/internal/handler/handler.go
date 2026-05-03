@@ -16,10 +16,15 @@ import (
 
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/middleware"
-	"voice-hub/backend/internal/sfu"
 	"voice-hub/backend/internal/sfu/protocol"
 	turnsrv "voice-hub/backend/internal/turn"
 )
+
+// RoomPeerLister is the subset of *sfu.Room needed by the room-peers endpoint.
+// Consumer-defined so the handler package does not import sfu directly.
+type RoomPeerLister interface {
+	Peers() []protocol.PeerInfo
+}
 
 const turnCredsTTL = 6 * time.Hour
 
@@ -165,7 +170,7 @@ func Logout(cookieSecure bool) http.HandlerFunc {
 }
 
 // RoomPeersOf handles GET /api/room/peers.
-func RoomPeersOf(room *sfu.Room) http.HandlerFunc {
+func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
