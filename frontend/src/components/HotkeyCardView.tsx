@@ -4,7 +4,7 @@ import { type HotkeyApi } from "../hooks/useKeyboardCapture";
 export function HotkeyCardView({ api }: { api: HotkeyApi }) {
   let display: string;
   if (api.capturing) {
-    display = api.liveKeys.length > 0 ? api.liveKeys.join(" + ") : "Press a combo…";
+    display = api.liveKeys.length > 0 ? api.liveKeys.join(" + ") : "Зажмите комбинацию…";
   } else {
     display = formatBinding(api.binding);
   }
@@ -12,11 +12,11 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
   return (
     <section className="card grid gap-[14px]">
       <div className="flex items-center justify-between gap-3 mb-2">
-        <h2 className="card-title">Hotkey</h2>
-        <span className="card-hint">Toggle mute</span>
+        <h2 className="card-title">Горячая клавиша</h2>
+        <span className="card-hint">Переключение микрофона</span>
       </div>
       <label className="block text-[12px] font-medium text-muted">
-        Click input, then press &amp; release a combo
+        Нажмите на поле и зажмите комбинацию
         <input
           id="shortcut-input"
           type="text"
@@ -28,8 +28,8 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
         />
       </label>
       <p className="text-[11px] text-muted leading-snug -mt-1">
-        Tip: bind a modifier (Ctrl / Shift / Alt) plus a key, or a side-mouse button. Combos must be
-        held — fast taps won&apos;t fire.
+        Совет: модификатор (Ctrl / Shift / Alt) и клавиша или боковая кнопка мыши. Комбинацию нужно
+        удерживать — короткие нажатия не сработают.
       </p>
       <div className="flex flex-wrap gap-2.5">
         <button
@@ -39,7 +39,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
           disabled={api.capturing}
           className="btn btn-secondary btn-mini"
         >
-          Reset to default
+          По умолчанию
         </button>
         <button
           id="shortcut-clear"
@@ -48,7 +48,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
           disabled={api.capturing || !api.binding}
           className="btn btn-danger btn-mini"
         >
-          Clear
+          Очистить
         </button>
         {api.capturing ? (
           <button
@@ -57,7 +57,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
             onClick={api.cancel}
             className="btn btn-secondary btn-mini"
           >
-            Cancel
+            Отмена
           </button>
         ) : null}
       </div>

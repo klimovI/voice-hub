@@ -17,28 +17,28 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
   let metaTone: "good" | "danger" | "muted" | "connecting";
   if (participant.isSelf) {
     if (participant.selfMuted) {
-      metaText = "muted locally";
+      metaText = "микрофон выключен";
       metaTone = "danger";
     } else if (participant.speaking) {
-      metaText = "speaking";
+      metaText = "говорит";
       metaTone = "good";
     } else {
-      metaText = "live";
+      metaText = "в эфире";
       metaTone = "muted";
     }
   } else if (participant.hasStream) {
     if (participant.localMuted) {
-      metaText = "muted locally";
+      metaText = "заглушён вами";
       metaTone = "danger";
     } else if (participant.speaking) {
-      metaText = "speaking";
+      metaText = "говорит";
       metaTone = "good";
     } else {
-      metaText = "receiving";
+      metaText = "слышно";
       metaTone = "muted";
     }
   } else {
-    metaText = "connecting";
+    metaText = "подключается";
     metaTone = "connecting";
   }
 
@@ -89,7 +89,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
         </div>
         <div className="min-w-0">
           <div className="text-[14px] font-semibold text-text whitespace-nowrap overflow-hidden text-ellipsis">
-            {participant.isSelf ? `${participant.display} (you)` : participant.display}
+            {participant.isSelf ? `${participant.display} (вы)` : participant.display}
           </div>
           <div className={`mt-0.5 text-[12px] inline-flex items-center gap-1.5 ${metaTextClass}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${metaDotClass}`} />
@@ -106,11 +106,11 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
               onClick={handleToggleMute}
               className={`btn btn-mini ${participant.localMuted ? "btn-toggle-on" : "btn-secondary"}`}
             >
-              {participant.localMuted ? "Unmute User" : "Mute User"}
+              {participant.localMuted ? "Слушать" : "Заглушить"}
             </button>
             <label className="grid gap-1 w-50 max-[640px]:w-full">
               <span className="whitespace-nowrap tabular-nums text-[11px] text-muted">
-                Volume {participant.localVolume}%
+                Громкость {participant.localVolume}%
               </span>
               <input
                 type="range"

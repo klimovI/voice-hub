@@ -321,7 +321,7 @@ export function useSessionManager({
       if (store.joinState === "joined") return;
       const cfg = configRef.current;
       if (!cfg) {
-        store.setStatus("Config not loaded", true);
+        store.setStatus("Конфигурация не загружена", true);
         return;
       }
 
@@ -335,7 +335,7 @@ export function useSessionManager({
       lastDisplayNameRef.current = display;
 
       store.setJoinState("joining");
-      store.setStatus("Запрашиваю микрофон...");
+      store.setStatus("Запрашиваю микрофон…");
 
       // Hot-swap path: join with engine=off if WASM not ready yet, rebuild in
       // background so users enter the room without waiting for the vendor fetch.
@@ -349,17 +349,17 @@ export function useSessionManager({
       try {
         const graph = await audio.prepareLocalAudio(initialEngine, (stage) => {
           if (stage === "mic-ready" && initialEngine !== "off") {
-            store.setStatus("Загрузка шумоподавителя…");
+            store.setStatus("Загружаю шумоподавление…");
           }
         });
         micGraphRef.current = graph;
 
-        store.setStatus("Подключаюсь...");
+        store.setStatus("Подключаюсь…");
         await connectSfu(graph, display);
 
         store.setJoinState("joined");
         if (!denoiserReady) {
-          store.setStatus("Подключено. Шумоподавитель грузится…", false, true);
+          store.setStatus("Подключено. Шумоподавление загружается…", false, true);
         } else {
           store.setStatus("Подключено", false, true);
         }
@@ -375,7 +375,7 @@ export function useSessionManager({
             if (s.engine !== targetEngine) return;
             try {
               await switchEngine(targetEngine);
-              store.setStatus(`Шумоподавитель: ${targetEngine}`, false, true);
+              store.setStatus(`Шумоподавление: ${targetEngine}`, false, true);
             } catch (err) {
               store.setStatus(
                 `Не удалось включить ${targetEngine}: ${err instanceof Error ? err.message : String(err)}`,
@@ -409,7 +409,7 @@ export function useSessionManager({
       .then((cfg) => {
         configRef.current = cfg;
         store.setConfigReady(true);
-        store.setStatus("Ready");
+        store.setStatus("Готово");
         if (shouldRejoin) {
           void handleJoinRef.current?.(loadDisplayName());
         }

@@ -87,7 +87,7 @@ export function Login() {
           Voice Hub
         </div>
         <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
-        <div className="text-muted text-[13px] mb-5">Введите пароль доступа.</div>
+        <div className="text-muted text-[13px] mb-5">Введите пароль для входа.</div>
         <form
           id="login-form"
           ref={formRef}

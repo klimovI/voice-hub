@@ -31,19 +31,19 @@ pub fn build_menu(
     update_version: Option<&str>,
     connected: bool,
 ) -> tauri::Result<Menu<Wry>> {
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Show Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Check for updates", true, None::<&str>)?;
-    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Change server", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, ITEM_SHOW, "Открыть Voice Hub", true, None::<&str>)?;
+    let check = MenuItem::with_id(app, ITEM_CHECK, "Проверить обновления", true, None::<&str>)?;
+    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Сменить сервер", true, None::<&str>)?;
     let disconnect =
-        MenuItem::with_id(app, ITEM_DISCONNECT, "Disconnect", connected, None::<&str>)?;
+        MenuItem::with_id(app, ITEM_DISCONNECT, "Отключиться", connected, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, ITEM_QUIT, "Выход", true, None::<&str>)?;
 
     let mut builder = MenuBuilder::new(app);
 
     if let Some(version) = update_version {
-        let label = format!("Install v{version}");
+        let label = format!("Установить v{version}");
         let apply = MenuItem::with_id(app, ITEM_UPDATE, &label, true, None::<&str>)?;
         let sep0 = PredefinedMenuItem::separator(app)?;
         builder = builder.item(&apply).item(&sep0);
@@ -95,7 +95,7 @@ pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()>
     let menu = build_menu(app, Some(version), connection::load_host().is_some())?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
-        tray.set_tooltip(Some(format!("Voice Hub — v{version} available")))?;
+        tray.set_tooltip(Some(format!("Voice Hub — доступна v{version}")))?;
     }
     Ok(())
 }

@@ -42,23 +42,23 @@ export function AudioCard({
   return (
     <section className="card grid gap-[14px]">
       <div className="flex items-center justify-between gap-3 mb-2">
-        <h2 className="card-title">Audio</h2>
+        <h2 className="card-title">Звук</h2>
         <button
           id="audio-reset"
           type="button"
           onClick={onReset}
           className="btn btn-secondary btn-mini"
         >
-          Reset
+          Сбросить
         </button>
       </div>
 
       <div className="grid gap-2">
-        <span className="text-[13px] text-muted">Denoiser</span>
+        <span className="text-[13px] text-muted">Шумоподавление</span>
         <div
           id="denoiser-engine"
           role="radiogroup"
-          aria-label="Denoiser engine"
+          aria-label="Движок шумоподавления"
           className="grid grid-cols-3 gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
         >
           {ENGINES.map((eng) => {
@@ -85,7 +85,7 @@ export function AudioCard({
       </div>
 
       <div className="grid gap-2">
-        <SliderHead label="Suppression strength" value={formatRnnoiseMix(rnnoiseMix)} />
+        <SliderHead label="Сила подавления" value={formatRnnoiseMix(rnnoiseMix)} />
         <input
           id="rnnoise-mix"
           type="range"
@@ -100,7 +100,7 @@ export function AudioCard({
       </div>
 
       <div className="grid gap-2">
-        <SliderHead label="Mic send volume" value={`${sendVolume}%`} />
+        <SliderHead label="Громкость микрофона" value={`${sendVolume}%`} />
         <input
           id="send-volume"
           type="range"
@@ -114,7 +114,7 @@ export function AudioCard({
       </div>
 
       <div className="grid gap-2">
-        <SliderHead label="Master output" value={`${outputVolume}%`} />
+        <SliderHead label="Общая громкость" value={`${outputVolume}%`} />
         <input
           id="output-volume"
           type="range"
@@ -133,7 +133,7 @@ export function AudioCard({
             onClick={onOutputMuteToggle}
             className={`btn btn-mini ${outputMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {outputMuted ? "Unmute Output" : "Mute Output"}
+            {outputMuted ? "Включить звук" : "Выключить звук"}
           </button>
         </div>
       </div>

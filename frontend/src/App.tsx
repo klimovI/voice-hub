@@ -113,19 +113,21 @@ export function App() {
       s.setEngine(engine);
       preloadEngine(engine);
       if (s.joinState !== "joined") {
-        s.setStatus(`Denoiser: ${engine}`);
+        s.setStatus(`Шумоподавление: ${engine}`);
         return;
       }
-      s.setStatus(`Switching to ${engine}...`);
+      s.setStatus(`Переключаюсь на ${engine}…`);
       try {
         await session.switchEngine(engine);
-        useStore.getState().setStatus(`Denoiser: ${engine}`, false, true);
+        useStore.getState().setStatus(`Шумоподавление: ${engine}`, false, true);
       } catch (err) {
-        useStore.getState().setStatus(
-          `Denoiser switch failed: ${err instanceof Error ? err.message : String(err)}`,
-          true,
-          true,
-        );
+        useStore
+          .getState()
+          .setStatus(
+            `Не удалось переключить шумоподавление: ${err instanceof Error ? err.message : String(err)}`,
+            true,
+            true,
+          );
       }
     },
     [session],
@@ -167,9 +169,13 @@ export function App() {
     }
 
     if (s.joinState === "joined") {
-      s.setStatus("Audio tuning reset. Reconnect to apply mic path changes.", false, true);
+      s.setStatus(
+        "Настройки звука сброшены. Перезайдите, чтобы применить изменения микрофона.",
+        false,
+        true,
+      );
     } else {
-      s.setStatus("Audio tuning reset to defaults.");
+      s.setStatus("Настройки звука сброшены.");
     }
   }, [audio, handleEngineSelect]);
 

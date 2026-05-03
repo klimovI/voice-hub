@@ -23,7 +23,7 @@ export function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi 
       setShortcut(b);
       saveBinding(b);
       setCapturing(false);
-      onStatusMessage(`Hotkey: ${formatBinding(b)}`);
+      onStatusMessage(`Горячая клавиша: ${formatBinding(b)}`);
     },
     [setShortcut, setCapturing, onStatusMessage],
   );
@@ -33,14 +33,14 @@ export function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi 
   const clear = useCallback(() => {
     setShortcut(null);
     saveBinding(null);
-    onStatusMessage("Hotkey cleared");
+    onStatusMessage("Горячая клавиша очищена");
   }, [setShortcut, onStatusMessage]);
 
   const reset = useCallback(() => {
     const def = defaultBinding();
     setShortcut(def);
     saveBinding(def);
-    onStatusMessage(`Hotkey reset: ${formatBinding(def)}`);
+    onStatusMessage(`Горячая клавиша сброшена: ${formatBinding(def)}`);
   }, [setShortcut, onStatusMessage]);
 
   return { binding, capturing, liveKeys, start, cancel, clear, reset };

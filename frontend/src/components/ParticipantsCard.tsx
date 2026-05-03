@@ -23,15 +23,15 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
   return (
     <section className="card">
       <div className="flex items-center justify-between gap-3 mb-4">
-        <h2 className="card-title">Participants</h2>
+        <h2 className="card-title">Участники</h2>
         <span className="card-hint">
-          {showPreview ? "In room — connect to talk" : "Per-user volume & mute"}
+          {showPreview ? "В комнате — войдите, чтобы говорить" : "Громкость по участникам"}
         </span>
       </div>
       <div id="participants" className="grid gap-2.5">
         {showEmpty && (
           <div className="p-7 text-center text-muted border border-dashed border-line-strong rounded-[14px] bg-bg-2 text-[13px]">
-            No one here yet — share the room link to invite people.
+            Пока никого нет — пригласите кого-нибудь, поделившись адресом сервера.
           </div>
         )}
         {showPreview && preview.map((p) => <PeerPreviewRow key={p.id} peer={p} />)}
@@ -56,8 +56,7 @@ function PeerPreviewRow({ peer }: { peer: PeerPreview }) {
             {peer.displayName}
           </div>
           <div className="mt-0.5 text-[12px] inline-flex items-center gap-1.5 text-muted">
-            <span className="w-1.5 h-1.5 rounded-full bg-muted-2" />
-            in room
+            <span className="w-1.5 h-1.5 rounded-full bg-muted-2" />в комнате
           </div>
         </div>
       </div>

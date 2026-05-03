@@ -38,17 +38,17 @@ export function SessionCard({
   return (
     <section className="card">
       <div className="flex items-center justify-between gap-3 mb-4">
-        <h2 className="card-title">Session</h2>
-        <span className="card-hint">Microphone &amp; room</span>
+        <h2 className="card-title">Комната</h2>
+        <span className="card-hint">Голос и подключение</span>
       </div>
       <form id="join-form" onSubmit={handleSubmit} className="grid gap-[14px]">
         <label className="block text-[12px] font-medium text-muted">
-          Display name
+          Имя
           <input
             id="display-name"
             name="displayName"
             type="text"
-            placeholder="e.g. Ilya"
+            placeholder="например, Илья"
             autoComplete="off"
             value={displayName}
             onChange={handleNameChange}
@@ -62,7 +62,7 @@ export function SessionCard({
             disabled={joining || joined || !configReady}
             className="btn btn-primary"
           >
-            {configReady ? "Join Room" : "Loading…"}
+            {configReady ? "Войти в комнату" : "Загрузка…"}
           </button>
           <button
             id="self-mute-button"
@@ -72,7 +72,7 @@ export function SessionCard({
             onClick={onToggleSelfMute}
             className={`btn ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {selfMuted ? "Unmute Me" : "Mute Me"}
+            {selfMuted ? "Включить микрофон" : "Выключить микрофон"}
           </button>
           <button
             id="deafen-button"
@@ -82,7 +82,7 @@ export function SessionCard({
             onClick={onToggleDeafen}
             className={`btn ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {deafened ? "Undeafen" : "Deafen"}
+            {deafened ? "Слушать всех" : "Заглушить всех"}
           </button>
           <button
             id="leave-button"
@@ -91,7 +91,7 @@ export function SessionCard({
             onClick={onLeave}
             className="btn btn-danger"
           >
-            Leave
+            Выйти
           </button>
         </div>
       </form>

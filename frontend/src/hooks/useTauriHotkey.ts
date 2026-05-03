@@ -41,7 +41,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
       const off = await listen<InputBinding>("input-captured", (event) => {
         setShortcut(event.payload);
         setCapturing(false);
-        onStatusMessage(`Hotkey: ${formatBinding(event.payload)}`);
+        onStatusMessage(`Горячая клавиша: ${formatBinding(event.payload)}`);
       });
 
       if (cancelled) off();
@@ -85,7 +85,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
         await invoke("cancel_capture");
         setShortcut(b);
         setCapturing(false);
-        onStatusMessage(`Hotkey: ${formatBinding(b)}`);
+        onStatusMessage(`Горячая клавиша: ${formatBinding(b)}`);
       } catch (err) {
         console.error("set_shortcut failed", err);
       }
@@ -100,7 +100,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("clear_shortcut");
       setShortcut(null);
-      onStatusMessage("Hotkey cleared");
+      onStatusMessage("Горячая клавиша очищена");
     } catch (err) {
       console.error("clear_shortcut failed", err);
     }
@@ -112,7 +112,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
       const def = defaultBinding();
       await invoke("set_shortcut", { binding: def });
       setShortcut(def);
-      onStatusMessage(`Hotkey reset: ${formatBinding(def)}`);
+      onStatusMessage(`Горячая клавиша сброшена: ${formatBinding(def)}`);
     } catch (err) {
       console.error("set_shortcut failed", err);
     }
