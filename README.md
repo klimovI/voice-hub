@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="voice-hub" width="128" height="128">
+</p>
+
 # voice-hub
 
 [![Latest release](https://img.shields.io/github/v/release/klimovI/voice-hub?label=release&color=blue)](https://github.com/klimovI/voice-hub/releases/latest)
@@ -16,6 +20,8 @@ Self-hosted голосовая комната для маленьких комп
 ⬇ **[Последний релиз](https://github.com/klimovI/voice-hub/releases/latest)** → `Voice.Hub_<version>_x64-setup.exe`.
 
 NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует. Auto-update встроен.
+
+> При первом запуске Windows SmartScreen может показать предупреждение (бинарь без Authenticode-сертификата). Нажмите **«Подробнее»** → **«Выполнить в любом случае»**.
 
 ## Local dev
 

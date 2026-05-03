@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="128" height="128">
+  <!-- Глубокий черный фон со скруглением -->
+  <rect width="100" height="100" rx="22" fill="#0d0d0d"/>
+
+  <!-- Неоново-зеленые полосы -->
+  <g fill="#00FF66">
+    <!-- Левая часть: формирует букву V -->
+    <rect x="7"  y="20" width="10" height="32" rx="5"/>
+    <rect x="19" y="34" width="10" height="32" rx="5"/>
+    <rect x="31" y="48" width="10" height="32" rx="5"/>
+    <rect x="43" y="34" width="10" height="32" rx="5"/>
+
+    <!-- Правая часть: формирует букву H -->
+    <rect x="59" y="20" width="10" height="60" rx="5"/>
+    <rect x="71" y="42" width="10" height="16" rx="5"/>
+    <rect x="83" y="20" width="10" height="60" rx="5"/>
+  </g>
+</svg>
