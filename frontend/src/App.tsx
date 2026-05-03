@@ -1,18 +1,13 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import "./styles/main.css";
 import { useStore } from "./store/useStore";
-import { useAudioEngine } from "./hooks/useAudioEngine";
+import { useAudioEngine, preloadEngine } from "./hooks/useAudioEngine";
 import { useSFU } from "./hooks/useSFU";
+import { useSessionManager } from "./hooks/useSessionManager";
 import { useGlobalShortcut } from "./hooks/useShortcut";
-import { loadAppConfig, buildWsUrl } from "./config";
-import { clearLegacyStorage, loadDisplayName, saveDisplayName } from "./utils/storage";
-import { makeGuestName } from "./utils/clamp";
-import { preloadEngine, isEngineReady } from "./hooks/useAudioEngine";
-import { isTauri } from "./utils/tauri";
-import { consumeRejoinFlag } from "./utils/storage";
+import { loadDisplayName } from "./utils/storage";
 import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
-import type { MicGraph } from "./audio/mic-graph";
 
 import { TopBar } from "./components/TopBar";
 import { SessionCard } from "./components/SessionCard";
@@ -29,82 +24,43 @@ export function App() {
   const sfu = useSFU();
   const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
 
-  // Track current mic graph for self-mute updates.
-  const micGraphRef = useRef<MicGraph | null>(null);
-  // Track peerId imperatively (also stored in store via participants).
-  const peerIdRef = useRef<string | null>(null);
-
-  // Reconnect state. micGraph is preserved across attempts so we don't re-acquire mic.
-  const reconnectTimerRef = useRef<number | null>(null);
-  const reconnectAttemptRef = useRef<number>(0);
-  const userLeavingRef = useRef<boolean>(false);
-  const lastDisplayNameRef = useRef<string>("");
-  const scheduleReconnectRef = useRef<() => void>(() => {
-    /* set after scheduleReconnect is defined */
-  });
-  // Auto-rejoin after reload triggered by UpdateBanner. Set after handleJoin is defined.
-  const handleJoinRef = useRef<((name: string) => Promise<void>) | null>(null);
-
-  const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000];
-
   // Display name local state (synced to localStorage).
   const [displayName, setDisplayName] = useState<string>(() => loadDisplayName());
 
-  // Initialize config and legacy storage on mount.
-  useEffect(() => {
-    clearLegacyStorage();
-    const shouldRejoin = consumeRejoinFlag();
-    loadAppConfig()
-      .then((cfg) => {
-        // Store config for use at join time.
-        configRef.current = cfg;
-        store.setConfigReady(true);
-        store.setStatus("Ready");
-        if (shouldRejoin) {
-          void handleJoinRef.current?.(loadDisplayName());
-        }
-      })
-      .catch((err: unknown) => {
-        store.setStatus(err instanceof Error ? err.message : String(err), true);
-      });
-    // Warm up the selected engine while user enters their name —
-    // shifts wasm fetch + init off the Join critical path.
-    preloadEngine(useStore.getState().engine);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const configRef = useRef<{ iceServers: RTCIceServer[] } | null>(null);
-
   // ---- Self-mute helpers ----
 
-  const applySelfMutedToStream = useCallback((muted: boolean) => {
-    const graph = micGraphRef.current;
-    if (!graph) return;
-    for (const track of graph.processedLocalStream.getAudioTracks()) {
-      track.enabled = !muted;
-    }
-  }, []);
+  const applySelfMutedToStream = useCallback(
+    (muted: boolean) => {
+      const graph = session.micGraphRef.current;
+      if (!graph) return;
+      for (const track of graph.processedLocalStream.getAudioTracks()) {
+        track.enabled = !muted;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const setSelfMuted = useCallback(
     (muted: boolean) => {
       store.setSelfMuted(muted);
       applySelfMutedToStream(muted);
-      // Update self participant speaking+selfMuted
-      if (peerIdRef.current) {
-        store.updateParticipant(peerIdRef.current, {
+      const peerId = session.peerIdRef.current;
+      if (peerId) {
+        store.updateParticipant(peerId, {
           selfMuted: muted,
           speaking: muted ? false : undefined,
         });
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, applySelfMutedToStream],
   );
 
   // ---- Toggle handlers ----
 
   const handleToggleSelfMute = useCallback(() => {
-    const graph = micGraphRef.current;
-    if (!graph) return;
+    if (!session.micGraphRef.current) return;
     if (store.deafened) {
       store.setDeafened(false);
       store.setOutputMuted(store.preDeafenOutputMuted);
@@ -114,6 +70,7 @@ export function App() {
     setSelfMuted(nextMuted);
     if (nextMuted) playMuteSound();
     else playUnmuteSound();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, audio, setSelfMuted]);
 
   const handleToggleOutputMute = useCallback(() => {
@@ -140,11 +97,9 @@ export function App() {
     audio.applyAllRemoteGains();
   }, [store, audio, setSelfMuted]);
 
-  // Single dedup point for the mute toggle, shared between the in-window
-  // keyboard listener (useGlobalShortcut) and the Tauri OS-level event
-  // bridge below. Guards against a focus-race where both paths fire within
-  // the cooldown window — each path has its own short-circuit, but this is
-  // the authoritative gate.
+  // Single dedup gate shared between in-window keyboard listener and the Tauri
+  // OS-level event bridge. Each path has its own short-circuit; this is the
+  // authoritative gate against a focus-race where both paths fire together.
   const lastToggleAtRef = useRef(0);
   const TOGGLE_COOLDOWN_MS = 200;
   const triggerToggleSelfMute = useCallback(() => {
@@ -156,278 +111,14 @@ export function App() {
 
   useGlobalShortcut(triggerToggleSelfMute);
 
-  // ---- Tauri global hotkey bridge ----
-  // OS-level listener (rdev) emits "toggle-mute" when the window is unfocused.
-  // (Under focus, the in-window listener owns the keyboard path.) Mouse
-  // events come through here regardless of focus.
-  const toggleHandlerRef = useRef(triggerToggleSelfMute);
-  useEffect(() => {
-    toggleHandlerRef.current = triggerToggleSelfMute;
-  }, [triggerToggleSelfMute]);
+  // ---- Session manager ----
+  // Owns join/leave/reconnect/config/Tauri event subscription.
 
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen("toggle-mute", () => {
-        if (useStore.getState().joinState !== "joined") return;
-        toggleHandlerRef.current();
-      }).then((off) => {
-        if (cancelled) off();
-        else unlisten = off;
-      }),
-    );
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  // ---- Reconnect ----
-
-  const clearReconnectTimer = useCallback(() => {
-    if (reconnectTimerRef.current !== null) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-  }, []);
-
-  // Connect (or reconnect) the SFU client using an already-built mic graph.
-  // Reused by initial join and by the reconnect path so we don't re-acquire mic.
-  const connectSfu = useCallback(
-    async (graph: MicGraph, display: string): Promise<void> => {
-      const cfg = configRef.current;
-      if (!cfg) throw new Error("Config not loaded");
-
-      const client = sfu.createClient({
-        onState: (s) => {
-          if (s === "connected") {
-            reconnectAttemptRef.current = 0;
-            store.setStatus("Подключено", false, true);
-          } else if (s === "failed" || s === "closed") {
-            if (useStore.getState().joinState === "joined" && !userLeavingRef.current) {
-              scheduleReconnectRef.current();
-            }
-          }
-        },
-        onWelcome: ({ id, peers }) => {
-          peerIdRef.current = id;
-          store.upsertParticipant({ id, display, isSelf: true });
-          for (const p of peers ?? []) {
-            store.upsertParticipant({
-              id: p.id,
-              display: p.displayName ?? `peer-${p.id}`,
-            });
-          }
-        },
-        onPeerJoined: ({ id, displayName: peerDisplay }) => {
-          store.upsertParticipant({
-            id,
-            display: peerDisplay ?? `peer-${id}`,
-          });
-        },
-        onPeerLeft: ({ id }) => {
-          audio.detachRemoteStream(id);
-          store.removeParticipant(id);
-        },
-        onPeerInfo: ({ id, displayName: peerDisplay }) => {
-          if (peerDisplay) {
-            store.updateParticipant(id, { display: peerDisplay });
-          }
-        },
-        onTrack: ({ track, stream, peerId }) => {
-          if (!peerId || track.kind !== "audio") return;
-          store.upsertParticipant({ id: peerId, hasStream: true });
-          audio.attachRemoteStream(peerId, stream);
-        },
-        onError: () => {
-          // onState handles user-visible errors
-        },
-      });
-
-      await client.connect({
-        wsUrl: buildWsUrl(),
-        iceServers: cfg.iceServers,
-        localStream: graph.processedLocalStream,
-        displayName: display,
-      });
-
-      const track = graph.processedLocalStream.getAudioTracks()[0];
-      if (track) track.enabled = !useStore.getState().selfMuted;
-    },
-    [store, audio, sfu],
-  );
-
-  const scheduleReconnect = useCallback(() => {
-    if (userLeavingRef.current) return;
-    if (reconnectTimerRef.current !== null) return;
-    const attempt = reconnectAttemptRef.current;
-    if (attempt >= RECONNECT_DELAYS_MS.length) {
-      store.setStatus("Не удалось переподключиться. Перезайдите вручную.", true, true);
-      return;
-    }
-    const delay = RECONNECT_DELAYS_MS[attempt];
-    reconnectAttemptRef.current = attempt + 1;
-    store.setStatus(`Соединение оборвалось, переподключаюсь (попытка ${attempt + 1})…`, true, true);
-    reconnectTimerRef.current = window.setTimeout(async () => {
-      reconnectTimerRef.current = null;
-      if (userLeavingRef.current) return;
-      const graph = micGraphRef.current;
-      if (!graph) {
-        reconnectAttemptRef.current = 0;
-        return;
-      }
-      sfu.disconnect();
-      audio.cleanupAllRemote();
-      store.clearParticipants();
-      peerIdRef.current = null;
-      try {
-        await connectSfu(graph, lastDisplayNameRef.current);
-      } catch {
-        scheduleReconnect();
-      }
-    }, delay);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, audio, sfu, connectSfu]);
-
-  useEffect(() => {
-    scheduleReconnectRef.current = scheduleReconnect;
-  }, [scheduleReconnect]);
-
-  // ---- Join ----
-
-  const handleJoin = useCallback(
-    async (name: string) => {
-      if (store.joinState === "joined") return;
-      const cfg = configRef.current;
-      if (!cfg) {
-        store.setStatus("Config not loaded", true);
-        return;
-      }
-      const display = name.trim() || makeGuestName();
-      if (name.trim()) {
-        saveDisplayName(name.trim());
-      }
-
-      userLeavingRef.current = false;
-      reconnectAttemptRef.current = 0;
-      lastDisplayNameRef.current = display;
-
-      store.setJoinState("joining");
-      store.setStatus("Запрашиваю микрофон...");
-
-      // Hot-swap path: if WASM denoiser isn't loaded yet (cold first visit on
-      // a slow link), join with engine=off so the user gets into the room
-      // immediately, then rebuild the graph with the selected engine when
-      // WASM finishes loading in the background. Avoids holding Join behind
-      // a multi-MB vendor fetch.
-      const targetEngine = store.engine;
-      const denoiserReady = isEngineReady(targetEngine);
-      const initialEngine: EngineKind = denoiserReady ? targetEngine : "off";
-      if (!denoiserReady) {
-        void preloadEngine(targetEngine);
-      }
-
-      try {
-        const graph = await audio.prepareLocalAudio(initialEngine, (stage) => {
-          if (stage === "mic-ready" && initialEngine !== "off") {
-            store.setStatus("Загрузка шумоподавителя…");
-          }
-        });
-        micGraphRef.current = graph;
-
-        store.setStatus("Подключаюсь...");
-        await connectSfu(graph, display);
-
-        store.setJoinState("joined");
-        if (!denoiserReady) {
-          store.setStatus("Подключено. Шумоподавитель грузится…", false, true);
-        } else {
-          store.setStatus("Подключено", false, true);
-        }
-
-        if (!denoiserReady) {
-          void preloadEngine(targetEngine).then(async () => {
-            const s = useStore.getState();
-            if (s.joinState !== "joined") return;
-            if (s.engine !== targetEngine) return;
-            try {
-              const upgraded = await audio.rebuildLocalAudio(
-                targetEngine,
-                s.selfMuted,
-                peerIdRef.current,
-                () => sfu.getPeerConnection(),
-              );
-              micGraphRef.current = upgraded;
-              // Old graph's speaking loop was cancelled in teardown — restart on the new graph.
-              audio.startSpeaking(
-                upgraded,
-                () => useStore.getState().selfMuted,
-                () => peerIdRef.current,
-                (speaking) => {
-                  const pid = peerIdRef.current;
-                  if (!pid) return;
-                  const current = useStore.getState().participants.get(pid);
-                  if (current && current.speaking !== speaking) {
-                    store.updateParticipant(pid, { speaking });
-                  }
-                },
-              );
-              store.setStatus(`Шумоподавитель: ${targetEngine}`, false, true);
-            } catch (err) {
-              store.setStatus(
-                `Не удалось включить ${targetEngine}: ${err instanceof Error ? err.message : String(err)}`,
-                true,
-                true,
-              );
-            }
-          });
-        }
-
-        // Start speaking loop (graph is preserved across reconnects, so this fires once).
-        audio.startSpeaking(
-          graph,
-          () => useStore.getState().selfMuted,
-          () => peerIdRef.current,
-          (speaking) => {
-            const pid = peerIdRef.current;
-            if (!pid) return;
-            const current = useStore.getState().participants.get(pid);
-            if (current && current.speaking !== speaking) {
-              store.updateParticipant(pid, { speaking });
-            }
-          },
-        );
-      } catch (error) {
-        handleLeave();
-        store.setStatus(error instanceof Error ? error.message : String(error), true);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, audio, connectSfu],
-  );
-
-  useEffect(() => {
-    handleJoinRef.current = handleJoin;
-  }, [handleJoin]);
-
-  // ---- Leave ----
-
-  const handleLeave = useCallback(() => {
-    userLeavingRef.current = true;
-    clearReconnectTimer();
-    reconnectAttemptRef.current = 0;
-    sfu.disconnect();
-    audio.fullCleanup();
-    micGraphRef.current = null;
-    peerIdRef.current = null;
-    store.clearParticipants();
-    store.setJoinState("idle");
-    store.setSelfMuted(false);
-    store.setDeafened(false);
-    store.setStatus("Отключено");
-  }, [sfu, audio, store, clearReconnectTimer]);
+  const session = useSessionManager({
+    audio,
+    sfu,
+    onTauriToggleMute: triggerToggleSelfMute,
+  });
 
   // ---- Engine switch ----
 
@@ -435,7 +126,6 @@ export function App() {
     async (engine: EngineKind) => {
       if (engine === store.engine) return;
       store.setEngine(engine);
-      // Warm up newly selected engine ahead of next Join / rebuild.
       preloadEngine(engine);
       if (store.joinState !== "joined") {
         store.setStatus(`Denoiser: ${engine}`);
@@ -446,17 +136,16 @@ export function App() {
         const graph = await audio.rebuildLocalAudio(
           engine,
           store.selfMuted,
-          peerIdRef.current,
+          session.peerIdRef.current,
           () => sfu.getPeerConnection(),
         );
-        micGraphRef.current = graph;
-        // Old graph's speaking loop was cancelled in teardown — restart on the new graph.
+        session.micGraphRef.current = graph;
         audio.startSpeaking(
           graph,
-          () => useStore.getState().selfMuted,
-          () => peerIdRef.current,
+          () => store.selfMuted,
+          () => session.peerIdRef.current,
           (speaking) => {
-            const pid = peerIdRef.current;
+            const pid = session.peerIdRef.current;
             if (!pid) return;
             const current = useStore.getState().participants.get(pid);
             if (current && current.speaking !== speaking) {
@@ -473,6 +162,7 @@ export function App() {
         );
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, audio, sfu],
   );
 
@@ -489,7 +179,7 @@ export function App() {
   const handleRnnoiseMixChange = useCallback(
     (v: number) => {
       store.setRnnoiseMix(v);
-      // RNNoise mix is read live by the ScriptProcessor callback — no rebuild needed.
+      // RNNoise mix is read live by the ScriptProcessor — no rebuild needed.
     },
     [store],
   );
@@ -534,11 +224,13 @@ export function App() {
       setDisplayName(value);
       if (store.joinState === "joined" && value.trim()) {
         sfu.getClient()?.setDisplayName(value.trim());
-        if (peerIdRef.current) {
-          store.updateParticipant(peerIdRef.current, { display: value.trim() });
+        const peerId = session.peerIdRef.current;
+        if (peerId) {
+          store.updateParticipant(peerId, { display: value.trim() });
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, sfu],
   );
 
@@ -554,8 +246,8 @@ export function App() {
       <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
         <div className="grid gap-[22px] content-start">
           <SessionCard
-            onJoin={handleJoin}
-            onLeave={handleLeave}
+            onJoin={session.join}
+            onLeave={session.leave}
             onToggleSelfMute={handleToggleSelfMute}
             onToggleDeafen={handleToggleDeafen}
             displayName={displayName}

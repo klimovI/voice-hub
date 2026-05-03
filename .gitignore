@@ -9,3 +9,4 @@ tmp/
 backend/.env
 src-tauri/target/
 src-tauri/gen/schemas/
+scratch
