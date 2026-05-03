@@ -29,6 +29,7 @@ type fixtureCase struct {
 //   - peer-joined / peer-info: PeerInfo with displayName present
 //   - peer-left: PeerLeftPayload — no displayName field at all
 //   - hello / set-displayname: single displayName field
+//   - set-state / peer-state: audio state toggle payloads
 var fixtureCases = []fixtureCase{
 	{
 		name: "welcome",
@@ -59,6 +60,14 @@ var fixtureCases = []fixtureCase{
 	{
 		name:    "set-displayname",
 		payload: protocol.SetDisplayNamePayload{DisplayName: "Bob"},
+	},
+	{
+		name:    "set-state",
+		payload: protocol.SetStatePayload{SelfMuted: true, Deafened: false},
+	},
+	{
+		name:    "peer-state",
+		payload: protocol.PeerStatePayload{ID: "11223344aabbccdd", SelfMuted: true, Deafened: false},
 	},
 }
 
@@ -173,5 +182,29 @@ func TestPeerInfoOmitEmpty(t *testing.T) {
 	}
 	if bytes.Contains(b, []byte("clientId")) {
 		t.Errorf("expected no clientId key, got: %s", b)
+	}
+	if bytes.Contains(b, []byte("selfMuted")) {
+		t.Errorf("expected no selfMuted key when false, got: %s", b)
+	}
+	if bytes.Contains(b, []byte("deafened")) {
+		t.Errorf("expected no deafened key when false, got: %s", b)
+	}
+}
+
+// TestPeerStateNoOmitEmpty asserts that PeerStatePayload always serializes
+// selfMuted and deafened, even when both are false (no omitempty — peer-state
+// is a delta and consumers must see the explicit false values).
+func TestPeerStateNoOmitEmpty(t *testing.T) {
+	t.Parallel()
+
+	b, err := json.Marshal(protocol.PeerStatePayload{ID: "x", SelfMuted: false, Deafened: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte("selfMuted")) {
+		t.Errorf("expected selfMuted key present, got: %s", b)
+	}
+	if !bytes.Contains(b, []byte("deafened")) {
+		t.Errorf("expected deafened key present, got: %s", b)
 	}
 }

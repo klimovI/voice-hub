@@ -12,6 +12,7 @@ import {
   type WelcomePayload,
   type PeerInfo,
   type PeerLeftPayload,
+  type PeerStatePayload,
 } from "./protocol";
 
 export type SFUHandlers = {
@@ -20,6 +21,7 @@ export type SFUHandlers = {
   onPeerJoined: (data: PeerInfo) => void;
   onPeerLeft: (data: PeerLeftPayload) => void;
   onPeerInfo: (data: PeerInfo) => void;
+  onPeerState: (data: PeerStatePayload) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
   onError: (err: unknown) => void;
 };
@@ -36,6 +38,7 @@ export type SFUClient = {
   connect(opts: ConnectOptions): Promise<void>;
   disconnect(): void;
   setDisplayName(name: string): void;
+  sendSetState(selfMuted: boolean, deafened: boolean): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
 };
@@ -51,6 +54,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onPeerJoined: handlers.onPeerJoined ?? noop,
     onPeerLeft: handlers.onPeerLeft ?? noop,
     onPeerInfo: handlers.onPeerInfo ?? noop,
+    onPeerState: handlers.onPeerState ?? noop,
     onTrack: handlers.onTrack ?? noop,
     onError: handlers.onError ?? noop,
   };
@@ -160,6 +164,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       case "peer-info":
         on.onPeerInfo(msg.data);
         break;
+      case "peer-state":
+        on.onPeerState(msg.data);
+        break;
       case "offer": {
         if (!pc) return;
         await pc.setRemoteDescription(msg.data);
@@ -181,6 +188,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function setDisplayName(name: string): void {
     send("set-displayname", { displayName: name });
+  }
+
+  function sendSetState(selfMuted: boolean, deafened: boolean): void {
+    send("set-state", { selfMuted, deafened });
   }
 
   function getPeerConnection(): RTCPeerConnection | null {
@@ -212,5 +223,5 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     myId = null;
   }
 
-  return { connect, disconnect, setDisplayName, getPeerConnection, getId };
+  return { connect, disconnect, setDisplayName, sendSetState, getPeerConnection, getId };
 }

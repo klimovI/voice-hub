@@ -61,6 +61,11 @@ export type UseSessionManagerReturn = {
    * store. No-op when not joined.
    */
   setRemoteDisplayName: (name: string) => void;
+  /**
+   * Broadcast local mic/deafen state to all peers. No-op when not joined.
+   * outputMuted-only changes are NOT broadcast — that is a local listener mute.
+   */
+  sendSetState: (selfMuted: boolean, deafened: boolean) => void;
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
@@ -179,6 +184,13 @@ export function useSessionManager({
     [sfu, store],
   );
 
+  const sendSetState = useCallback(
+    (selfMuted: boolean, deafened: boolean): void => {
+      sfu.getClient()?.sendSetState(selfMuted, deafened);
+    },
+    [sfu],
+  );
+
   // ---- Reconnect scheduler ----
   // Created once; options that need freshness use refs (isLeaving, onAttempt).
 
@@ -244,16 +256,20 @@ export function useSessionManager({
               id: p.id,
               display: p.displayName ?? `peer-${p.id}`,
               clientId: p.clientId,
+              remoteMuted: p.selfMuted ?? false,
+              remoteDeafened: p.deafened ?? false,
               ...(stored !== null ? { localVolume: stored } : {}),
             });
           }
         },
-        onPeerJoined: ({ id, displayName: peerDisplay, clientId }) => {
+        onPeerJoined: ({ id, displayName: peerDisplay, clientId, selfMuted, deafened }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
           store.upsertParticipant({
             id,
             display: peerDisplay ?? `peer-${id}`,
             clientId,
+            remoteMuted: selfMuted ?? false,
+            remoteDeafened: deafened ?? false,
             ...(stored !== null ? { localVolume: stored } : {}),
           });
         },
@@ -272,6 +288,9 @@ export function useSessionManager({
           if (patch.display !== undefined || patch.clientId !== undefined) {
             store.updateParticipant(id, patch);
           }
+        },
+        onPeerState: ({ id, selfMuted, deafened }) => {
+          store.updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== "audio") return;
@@ -458,5 +477,6 @@ export function useSessionManager({
     setMicEnabled,
     switchEngine,
     setRemoteDisplayName,
+    sendSetState,
   };
 }

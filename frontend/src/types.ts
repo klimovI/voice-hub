@@ -24,4 +24,6 @@ export type ParticipantUI = {
   localMuted: boolean;
   localVolume: number; // 0–500 (WebAudio can exceed 100%)
   hasStream: boolean;
+  remoteMuted?: boolean;
+  remoteDeafened?: boolean;
 };

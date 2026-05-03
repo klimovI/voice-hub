@@ -74,6 +74,7 @@ export function App() {
     const nextMuted = !s.selfMuted;
     s.setSelfMuted(nextMuted);
     session.setMicEnabled(!nextMuted);
+    session.sendSetState(nextMuted, false);
     if (nextMuted) playMuteSound();
     else playUnmuteSound();
   }, [audio, session]);
@@ -100,9 +101,11 @@ export function App() {
       s.setSelfMuted(s.preDeafenSelfMuted);
       session.setMicEnabled(!s.preDeafenSelfMuted);
       s.setOutputMuted(s.preDeafenOutputMuted);
+      session.sendSetState(s.preDeafenSelfMuted, false);
     } else {
       s.enterDeafen();
       session.setMicEnabled(false);
+      session.sendSetState(true, true);
     }
     audio.applyAllRemoteGains();
   }, [audio, session]);

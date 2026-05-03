@@ -31,10 +31,14 @@ type Envelope struct {
 // identifier reported by the client in HelloPayload; it is echoed in
 // every peer descriptor so other clients can key per-peer UI prefs
 // (e.g. volume sliders) by something that survives reconnects.
+// SelfMuted and Deafened default to false on join and reflect the peer's
+// last reported audio state as set via set-state.
 type PeerInfo struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName,omitempty"`
 	ClientID    string `json:"clientId,omitempty"`
+	SelfMuted   bool   `json:"selfMuted,omitempty"`
+	Deafened    bool   `json:"deafened,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -84,4 +88,20 @@ type HelloPayload struct {
 // set-displayname is a mid-session update with different server-side handling.
 type SetDisplayNamePayload struct {
 	DisplayName string `json:"displayName"`
+}
+
+// SetStatePayload is the data field of the "set-state" message, sent
+// mid-session whenever the peer toggles mic mute or self-deafen. Server
+// updates the peer's stored state and broadcasts "peer-state" to others.
+type SetStatePayload struct {
+	SelfMuted bool `json:"selfMuted"`
+	Deafened  bool `json:"deafened"`
+}
+
+// PeerStatePayload is the data field of the "peer-state" message,
+// broadcast when a peer toggles mic mute or self-deafen.
+type PeerStatePayload struct {
+	ID        string `json:"id"`
+	SelfMuted bool   `json:"selfMuted"`
+	Deafened  bool   `json:"deafened"`
 }

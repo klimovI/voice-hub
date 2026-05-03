@@ -66,7 +66,9 @@ type peer struct {
 	// in HelloPayload. Echoed in PeerInfo broadcasts so other peers can key
 	// per-peer UI state by something that survives reconnects. Empty for
 	// older clients that don't send it.
-	clientID string
+	clientID  string
+	selfMuted bool
+	deafened  bool
 
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
@@ -285,6 +287,12 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.setDisplayName(p.id, dn.DisplayName)
+	case "set-state":
+		var ss protocol.SetStatePayload
+		if err := json.Unmarshal(msg.Data, &ss); err != nil {
+			return
+		}
+		r.setState(p.id, ss.SelfMuted, ss.Deafened)
 	}
 }
 
@@ -295,7 +303,7 @@ func (r *Room) Peers() []protocol.PeerInfo {
 	defer r.mu.Unlock()
 	out := make([]protocol.PeerInfo, 0, len(r.peers))
 	for _, p := range r.peers {
-		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID})
+		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID, SelfMuted: p.selfMuted, Deafened: p.deafened})
 	}
 	return out
 }
@@ -318,7 +326,7 @@ func (r *Room) addPeer(p *peer) {
 	existing := make([]protocol.PeerInfo, 0, len(r.peers))
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
-		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName, ClientID: op.clientID})
+		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName, ClientID: op.clientID, SelfMuted: op.selfMuted, Deafened: op.deafened})
 		others = append(others, op)
 	}
 	r.peers[p.id] = p
@@ -341,7 +349,7 @@ func (r *Room) addPeer(p *peer) {
 	welcome, _ := json.Marshal(protocol.WelcomePayload{ID: p.id, Peers: existing})
 	_ = p.write(protocol.Envelope{Event: "welcome", Data: welcome})
 
-	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID})
+	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID, SelfMuted: p.selfMuted, Deafened: p.deafened})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-joined", Data: joined})
 	}
@@ -411,6 +419,8 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	p.displayName = name
 	clientID := p.clientID
+	selfMuted := p.selfMuted
+	deafened := p.deafened
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		if op.id != id {
@@ -419,9 +429,32 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	r.mu.Unlock()
 
-	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name, ClientID: clientID})
+	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name, ClientID: clientID, SelfMuted: selfMuted, Deafened: deafened})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-info", Data: info})
+	}
+}
+
+func (r *Room) setState(id string, selfMuted, deafened bool) {
+	r.mu.Lock()
+	p, ok := r.peers[id]
+	if !ok {
+		r.mu.Unlock()
+		return
+	}
+	p.selfMuted = selfMuted
+	p.deafened = deafened
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != id {
+			others = append(others, op)
+		}
+	}
+	r.mu.Unlock()
+
+	state, _ := json.Marshal(protocol.PeerStatePayload{ID: id, SelfMuted: selfMuted, Deafened: deafened})
+	for _, op := range others {
+		_ = op.write(protocol.Envelope{Event: "peer-state", Data: state})
 	}
 }
 

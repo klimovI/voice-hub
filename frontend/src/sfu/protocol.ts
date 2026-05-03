@@ -27,6 +27,8 @@ export type PeerInfo = {
    * for older clients.
    */
   clientId?: string;
+  selfMuted?: boolean;
+  deafened?: boolean;
 };
 
 // Server → Client payloads
@@ -43,6 +45,13 @@ export type PeerLeftPayload = {
 };
 
 // peer-joined and peer-info reuse PeerInfo directly (no wrapper).
+
+/** Data field of "peer-state" — broadcast when a peer's mic/deafen state changes. */
+export type PeerStatePayload = {
+  id: string;
+  selfMuted: boolean;
+  deafened: boolean;
+};
 
 // Client → Server payloads
 
@@ -62,6 +71,12 @@ export type SetDisplayNamePayload = {
   displayName: string;
 };
 
+/** Data field of "set-state" — sent when local mic mute or deafen state changes. */
+export type SetStatePayload = {
+  selfMuted: boolean;
+  deafened: boolean;
+};
+
 // Discriminated union — all server→client variants
 
 export type ServerMessage =
@@ -69,6 +84,7 @@ export type ServerMessage =
   | { event: "peer-joined"; data: PeerInfo }
   | { event: "peer-left"; data: PeerLeftPayload }
   | { event: "peer-info"; data: PeerInfo }
+  | { event: "peer-state"; data: PeerStatePayload }
   | { event: "offer"; data: RTCSessionDescriptionInit }
   | { event: "candidate"; data: RTCIceCandidateInit };
 
@@ -78,7 +94,8 @@ export type ClientMessage =
   | { event: "hello"; data: HelloPayload }
   | { event: "answer"; data: RTCSessionDescriptionInit }
   | { event: "candidate"; data: RTCIceCandidateInit }
-  | { event: "set-displayname"; data: SetDisplayNamePayload };
+  | { event: "set-displayname"; data: SetDisplayNamePayload }
+  | { event: "set-state"; data: SetStatePayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -140,6 +157,20 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         return null;
       }
       return { event, data: data as PeerInfo };
+    }
+
+    case "peer-state": {
+      if (
+        typeof data !== "object" ||
+        data === null ||
+        typeof (data as Record<string, unknown>).id !== "string" ||
+        typeof (data as Record<string, unknown>).selfMuted !== "boolean" ||
+        typeof (data as Record<string, unknown>).deafened !== "boolean"
+      ) {
+        console.warn("[protocol] malformed 'peer-state' payload:", data);
+        return null;
+      }
+      return { event, data: data as PeerStatePayload };
     }
 
     case "peer-left": {

@@ -14,6 +14,8 @@ import {
   type PeerLeftPayload,
   type HelloPayload,
   type SetDisplayNamePayload,
+  type PeerStatePayload,
+  type SetStatePayload,
 } from "./protocol";
 
 // ---------------------------------------------------------------------------
@@ -178,6 +180,55 @@ describe("set-displayname fixture", () => {
   it("matches exact fixture values", () => {
     const data = readFixture("set-displayname.json") as SetDisplayNamePayload;
     expect(data.displayName).toBe("Bob");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: peer-state.json  →  PeerStatePayload (server→client)
+// ---------------------------------------------------------------------------
+
+describe("peer-state fixture", () => {
+  it("has required PeerStatePayload shape", () => {
+    const data = readFixture("peer-state.json") as PeerStatePayload;
+    expect(typeof data.id).toBe("string");
+    expect(typeof data.selfMuted).toBe("boolean");
+    expect(typeof data.deafened).toBe("boolean");
+  });
+
+  it("parseServerMessage accepts peer-state envelope", () => {
+    const data = readFixture("peer-state.json");
+    const msg = parseServerMessage(envelope("peer-state", data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("peer-state");
+    const ps = msg as { event: "peer-state"; data: PeerStatePayload };
+    expect(typeof ps.data.id).toBe("string");
+    expect(typeof ps.data.selfMuted).toBe("boolean");
+    expect(typeof ps.data.deafened).toBe("boolean");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("peer-state.json") as PeerStatePayload;
+    expect(data.id).toBe("11223344aabbccdd");
+    expect(data.selfMuted).toBe(true);
+    expect(data.deafened).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: set-state.json  →  SetStatePayload (client→server, shape check only)
+// ---------------------------------------------------------------------------
+
+describe("set-state fixture", () => {
+  it("has required SetStatePayload shape", () => {
+    const data = readFixture("set-state.json") as SetStatePayload;
+    expect(typeof data.selfMuted).toBe("boolean");
+    expect(typeof data.deafened).toBe("boolean");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("set-state.json") as SetStatePayload;
+    expect(data.selfMuted).toBe(true);
+    expect(data.deafened).toBe(false);
   });
 });
 

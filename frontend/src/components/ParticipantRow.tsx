@@ -1,7 +1,7 @@
 import { useStore } from "../store/useStore";
 import { savePeerVolume } from "../utils/storage";
 import type { ParticipantUI } from "../types";
-import { VolumeIcon, VolumeOffIcon } from "./icons";
+import { VolumeIcon, VolumeOffIcon, MicOffIcon, HeadphonesOffIcon } from "./icons";
 
 interface Props {
   participant: ParticipantUI;
@@ -30,6 +30,12 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
   } else if (participant.hasStream) {
     if (participant.localMuted) {
       metaText = "заглушён вами";
+      metaTone = "danger";
+    } else if (participant.remoteDeafened) {
+      metaText = "в наушниках";
+      metaTone = "danger";
+    } else if (participant.remoteMuted) {
+      metaText = "микрофон выключен";
       metaTone = "danger";
     } else if (participant.speaking) {
       metaText = "говорит";
@@ -102,6 +108,26 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
       <div className="flex gap-3.5 items-center justify-end max-[640px]:justify-start max-[640px]:flex-wrap">
         {!participant.isSelf && (
           <>
+            {(participant.remoteMuted || participant.remoteDeafened) && (
+              <div className="flex gap-1.5 items-center">
+                <span
+                  aria-label="Микрофон выключен"
+                  title="Микрофон выключен"
+                  className="grid place-items-center w-9 h-9 rounded-full btn-toggle-on"
+                >
+                  <MicOffIcon />
+                </span>
+                {participant.remoteDeafened && (
+                  <span
+                    aria-label="В наушниках"
+                    title="В наушниках"
+                    className="grid place-items-center w-9 h-9 rounded-full btn-toggle-on"
+                  >
+                    <HeadphonesOffIcon />
+                  </span>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={handleToggleMute}
