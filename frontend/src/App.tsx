@@ -168,15 +168,7 @@ export function App() {
       void handleEngineSelect("rnnoise");
     }
 
-    if (s.joinState === "joined") {
-      s.setStatus(
-        "Настройки звука сброшены. Перезайдите, чтобы применить изменения микрофона.",
-        false,
-        true,
-      );
-    } else {
-      s.setStatus("Настройки звука сброшены.");
-    }
+    s.setStatus("Настройки звука сброшены.", false, s.joinState === "joined");
   }, [audio, handleEngineSelect]);
 
   const handleStatusMessage = useCallback((msg: string) => {
