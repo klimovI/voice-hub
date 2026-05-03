@@ -1,11 +1,9 @@
 // Unified input binding shape for both web and Tauri builds.
 // Mirrors src-tauri/src/shortcut.rs InputBinding DTO.
 
-export type InputBinding =
-  | { kind: "keyboard"; keys: string[] }
-  | { kind: "mouse"; button: string };
+import { loadShortcutRaw, saveShortcutRaw } from "./storage";
 
-const STORAGE_KEY = "voice-hub.shortcut";
+export type InputBinding = { kind: "keyboard"; keys: string[] } | { kind: "mouse"; button: string };
 
 export function defaultBinding(): InputBinding {
   const mac = /Mac|iPhone|iPad/i.test(navigator.platform);
@@ -24,7 +22,7 @@ export function formatBinding(binding: InputBinding | null): string {
 // localStorage stores `null` literal to mean "user explicitly cleared",
 // distinct from missing key (first run → default).
 export function loadBinding(): InputBinding | null {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = loadShortcutRaw();
   if (raw === null) {
     const def = defaultBinding();
     saveBinding(def);
@@ -38,7 +36,7 @@ export function loadBinding(): InputBinding | null {
 }
 
 export function saveBinding(binding: InputBinding | null): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(binding));
+  saveShortcutRaw(JSON.stringify(binding));
 }
 
 // Canonical label for a modifier code (left/right collapsed).
@@ -163,4 +161,3 @@ export function canonicalizeKeys(keys: string[]): string[] {
   const rest = keys.filter((k) => !order.includes(k));
   return [...mods, ...rest];
 }
-

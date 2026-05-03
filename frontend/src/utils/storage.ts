@@ -1,3 +1,28 @@
+// Central registry of every voice-hub.* localStorage key the frontend uses.
+// All reads and writes go through the typed helpers below — no inline
+// localStorage calls in components, hooks, or the store.
+
+import type { EngineKind } from "../types";
+
+export const KEYS = {
+  // Audio / engine
+  outputVolume: "voice-hub.output-volume",
+  outputMuted: "voice-hub.output-muted",
+  sendVolume: "voice-hub.send-volume",
+  rnnoiseMix: "voice-hub.rnnoise-mix",
+  engine: "voice-hub.engine",
+  // Identity
+  displayName: "voice-hub.display-name",
+  // Hotkey binding (JSON-serialised InputBinding | null)
+  shortcut: "voice-hub.shortcut",
+  // One-shot flag set before reload so the app can auto-rejoin on startup.
+  rejoinOnLoad: "voice-hub.rejoin-on-load",
+} as const;
+
+// ---------------------------------------------------------------------------
+// Primitive loaders (key-agnostic, used by typed helpers below)
+// ---------------------------------------------------------------------------
+
 export function loadNumber(key: string, fallback: number): number {
   const raw = localStorage.getItem(key);
   if (raw === null || raw === "") return fallback;
@@ -20,6 +45,74 @@ export function clampPercentage(value: number | string): number {
   if (!Number.isFinite(numeric)) return 90; // DEFAULT_RNNOISE_MIX
   return Math.min(100, Math.max(0, Math.round(numeric)));
 }
+
+// ---------------------------------------------------------------------------
+// Typed helpers — one load/save pair per persisted domain value
+// ---------------------------------------------------------------------------
+
+export function loadDisplayName(): string {
+  return localStorage.getItem(KEYS.displayName) ?? "";
+}
+
+export function saveDisplayName(name: string): void {
+  localStorage.setItem(KEYS.displayName, name.trim());
+}
+
+export function clearDisplayName(): void {
+  localStorage.removeItem(KEYS.displayName);
+}
+
+export function saveOutputMuted(v: boolean): void {
+  localStorage.setItem(KEYS.outputMuted, String(v));
+}
+
+export function saveSendVolume(v: number): void {
+  localStorage.setItem(KEYS.sendVolume, String(v));
+}
+
+export function saveRnnoiseMix(v: number): void {
+  localStorage.setItem(KEYS.rnnoiseMix, String(v));
+}
+
+export function saveOutputVolume(v: number): void {
+  localStorage.setItem(KEYS.outputVolume, String(v));
+}
+
+const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise", "dtln"];
+
+export function loadEngine(): EngineKind {
+  const raw = localStorage.getItem(KEYS.engine);
+  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
+}
+
+export function saveEngine(e: string): void {
+  localStorage.setItem(KEYS.engine, e);
+}
+
+// Shortcut binding (JSON-serialised InputBinding | null).
+// Returns the raw JSON string or null if not set.
+export function loadShortcutRaw(): string | null {
+  return localStorage.getItem(KEYS.shortcut);
+}
+
+export function saveShortcutRaw(json: string): void {
+  localStorage.setItem(KEYS.shortcut, json);
+}
+
+// rejoin-on-load flag: set before a reload so the app auto-rejoins on startup.
+export function setRejoinFlag(): void {
+  localStorage.setItem(KEYS.rejoinOnLoad, "1");
+}
+
+export function consumeRejoinFlag(): boolean {
+  if (localStorage.getItem(KEYS.rejoinOnLoad) !== "1") return false;
+  localStorage.removeItem(KEYS.rejoinOnLoad);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Migration: remove keys written by old code versions
+// ---------------------------------------------------------------------------
 
 export function clearLegacyStorage(): void {
   localStorage.removeItem("voice-hub.mic-mode");

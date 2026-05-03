@@ -5,11 +5,11 @@ import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSFU } from "./hooks/useSFU";
 import { useGlobalShortcut } from "./hooks/useShortcut";
 import { loadAppConfig, buildWsUrl } from "./config";
-import { clearLegacyStorage } from "./utils/storage";
+import { clearLegacyStorage, loadDisplayName, saveDisplayName } from "./utils/storage";
 import { makeGuestName } from "./utils/clamp";
 import { preloadEngine, isEngineReady } from "./hooks/useAudioEngine";
 import { isTauri } from "./utils/tauri";
-import { consumeRejoinFlag } from "./utils/rejoin";
+import { consumeRejoinFlag } from "./utils/storage";
 import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
 import type { MicGraph } from "./audio/mic-graph";
@@ -48,9 +48,7 @@ export function App() {
   const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000];
 
   // Display name local state (synced to localStorage).
-  const [displayName, setDisplayName] = useState<string>(
-    () => localStorage.getItem("voice-hub.display-name") ?? "",
-  );
+  const [displayName, setDisplayName] = useState<string>(() => loadDisplayName());
 
   // Initialize config and legacy storage on mount.
   useEffect(() => {
@@ -63,8 +61,7 @@ export function App() {
         store.setConfigReady(true);
         store.setStatus("Ready");
         if (shouldRejoin) {
-          const name = localStorage.getItem("voice-hub.display-name") ?? "";
-          void handleJoinRef.current?.(name);
+          void handleJoinRef.current?.(loadDisplayName());
         }
       })
       .catch((err: unknown) => {
@@ -111,7 +108,6 @@ export function App() {
     if (store.deafened) {
       store.setDeafened(false);
       store.setOutputMuted(store.preDeafenOutputMuted);
-      localStorage.setItem("voice-hub.output-muted", String(store.preDeafenOutputMuted));
       audio.applyAllRemoteGains();
     }
     const nextMuted = !store.selfMuted;
@@ -140,8 +136,6 @@ export function App() {
       store.setDeafened(true);
       setSelfMuted(true);
       store.setOutputMuted(true);
-      // Persist outputMuted=true immediately.
-      localStorage.setItem("voice-hub.output-muted", "true");
     }
     audio.applyAllRemoteGains();
   }, [store, audio, setSelfMuted]);
@@ -313,7 +307,7 @@ export function App() {
       }
       const display = name.trim() || makeGuestName();
       if (name.trim()) {
-        localStorage.setItem("voice-hub.display-name", name.trim());
+        saveDisplayName(name.trim());
       }
 
       userLeavingRef.current = false;

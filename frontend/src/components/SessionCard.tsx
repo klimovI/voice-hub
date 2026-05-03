@@ -1,4 +1,5 @@
 import { useStore } from "../store/useStore";
+import { clearDisplayName, saveDisplayName } from "../utils/storage";
 
 interface Props {
   onJoin: (displayName: string) => void;
@@ -34,11 +35,8 @@ export function SessionCard({
   function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
     const value = e.target.value;
     onDisplayNameChange(value);
-    if (value.trim()) {
-      localStorage.setItem("voice-hub.display-name", value.trim());
-    } else {
-      localStorage.removeItem("voice-hub.display-name");
-    }
+    if (value.trim()) saveDisplayName(value);
+    else clearDisplayName();
   }
 
   return (

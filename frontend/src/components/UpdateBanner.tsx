@@ -1,6 +1,6 @@
 import type { AppUpdate, DesktopApplyState, DesktopUpdateProgress } from "../hooks/useAppVersion";
 import { useStore } from "../store/useStore";
-import { REJOIN_ON_LOAD_KEY } from "../utils/rejoin";
+import { setRejoinFlag } from "../utils/storage";
 
 interface Props {
   update: AppUpdate | null;
@@ -68,7 +68,7 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
   const onAction = () => {
     if (actionDisabled) return;
     if (joinState === "joined") {
-      localStorage.setItem(REJOIN_ON_LOAD_KEY, "1");
+      setRejoinFlag();
     }
     if (isDesktop) applyDesktopUpdate();
     else reload();

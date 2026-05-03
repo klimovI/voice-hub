@@ -5,23 +5,18 @@ import { create } from "zustand";
 import type { EngineKind, ParticipantUI } from "../types";
 import type { InputBinding } from "../utils/binding";
 import { loadBinding } from "../utils/binding";
-import { loadBoolean, loadNumber, loadPercentage } from "../utils/storage";
-
-const STORAGE_KEYS = {
-  outputVolume: "voice-hub.output-volume",
-  outputMuted: "voice-hub.output-muted",
-  sendVolume: "voice-hub.send-volume",
-  rnnoiseMix: "voice-hub.rnnoise-mix",
-  engine: "voice-hub.engine",
-  displayName: "voice-hub.display-name",
-} as const;
-
-const ENGINES: EngineKind[] = ["off", "rnnoise", "dtln"];
-
-function loadEngine(): EngineKind {
-  const raw = localStorage.getItem(STORAGE_KEYS.engine);
-  return ENGINES.includes(raw as EngineKind) ? (raw as EngineKind) : "rnnoise";
-}
+import {
+  KEYS,
+  loadBoolean,
+  loadEngine,
+  loadNumber,
+  loadPercentage,
+  saveOutputMuted,
+  saveSendVolume,
+  saveRnnoiseMix,
+  saveOutputVolume,
+  saveEngine,
+} from "../utils/storage";
 
 export type JoinState = "idle" | "joining" | "joined";
 export type StatusState = "idle" | "ok" | "err";
@@ -88,9 +83,9 @@ export const useStore = create<AppState>((set, get) => ({
   // Self audio controls
   selfMuted: false,
   setSelfMuted: (v) => set({ selfMuted: v }),
-  outputMuted: loadBoolean(STORAGE_KEYS.outputMuted, false),
+  outputMuted: loadBoolean(KEYS.outputMuted, false),
   setOutputMuted: (v) => {
-    localStorage.setItem(STORAGE_KEYS.outputMuted, String(v));
+    saveOutputMuted(v);
     set({ outputMuted: v });
   },
   deafened: false,
@@ -104,26 +99,26 @@ export const useStore = create<AppState>((set, get) => ({
     })),
 
   // Sliders
-  sendVolume: loadNumber(STORAGE_KEYS.sendVolume, 100),
+  sendVolume: loadNumber(KEYS.sendVolume, 100),
   setSendVolume: (v) => {
-    localStorage.setItem(STORAGE_KEYS.sendVolume, String(v));
+    saveSendVolume(v);
     set({ sendVolume: v });
   },
-  rnnoiseMix: loadPercentage(STORAGE_KEYS.rnnoiseMix, 90),
+  rnnoiseMix: loadPercentage(KEYS.rnnoiseMix, 90),
   setRnnoiseMix: (v) => {
-    localStorage.setItem(STORAGE_KEYS.rnnoiseMix, String(v));
+    saveRnnoiseMix(v);
     set({ rnnoiseMix: v });
   },
-  outputVolume: loadNumber(STORAGE_KEYS.outputVolume, 100),
+  outputVolume: loadNumber(KEYS.outputVolume, 100),
   setOutputVolume: (v) => {
-    localStorage.setItem(STORAGE_KEYS.outputVolume, String(v));
+    saveOutputVolume(v);
     set({ outputVolume: v });
   },
 
   // Engine
   engine: loadEngine(),
   setEngine: (e) => {
-    localStorage.setItem(STORAGE_KEYS.engine, e);
+    saveEngine(e);
     set({ engine: e });
   },
 
