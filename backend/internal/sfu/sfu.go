@@ -302,6 +302,19 @@ func (r *Room) Peers() []protocol.PeerInfo {
 
 func (r *Room) addPeer(p *peer) {
 	r.mu.Lock()
+	// Evict prior sessions sharing this clientID so reconnects (e.g. network
+	// switch) replace the stale peer immediately instead of waiting for ICE
+	// timeout, which would otherwise show a phantom self in the room.
+	var evicted []*peer
+	if p.clientID != "" {
+		for id, op := range r.peers {
+			if op.clientID == p.clientID {
+				delete(r.peers, id)
+				delete(r.tracks, id)
+				evicted = append(evicted, op)
+			}
+		}
+	}
 	existing := make([]protocol.PeerInfo, 0, len(r.peers))
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
@@ -312,6 +325,17 @@ func (r *Room) addPeer(p *peer) {
 	count := len(r.peers)
 	r.mu.Unlock()
 
+	for _, ev := range evicted {
+		log.Printf("sfu: evicting prior session id=%s clientId=%q (replaced)", ev.id, ev.clientID)
+		if ev.cancel != nil {
+			ev.cancel()
+		}
+		left, _ := json.Marshal(protocol.PeerLeftPayload{ID: ev.id})
+		for _, op := range others {
+			_ = op.write(protocol.Envelope{Event: "peer-left", Data: left})
+		}
+	}
+
 	log.Printf("sfu: peer joined id=%s name=%q clientId=%q peers=%d", p.id, p.displayName, p.clientID, count)
 
 	welcome, _ := json.Marshal(protocol.WelcomePayload{ID: p.id, Peers: existing})
@@ -320,6 +344,10 @@ func (r *Room) addPeer(p *peer) {
 	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID})
 	for _, op := range others {
 		_ = op.write(protocol.Envelope{Event: "peer-joined", Data: joined})
+	}
+
+	if len(evicted) > 0 {
+		r.signalPeerConnections()
 	}
 }
 
