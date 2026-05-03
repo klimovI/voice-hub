@@ -126,7 +126,7 @@ export function saveOutputVolume(v: number): void {
   localStorage.setItem(KEYS.outputVolume, String(v));
 }
 
-const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise", "dtln"];
+const ENGINE_VALUES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);

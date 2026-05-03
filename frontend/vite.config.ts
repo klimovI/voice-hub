@@ -39,7 +39,7 @@ export default defineConfig({
       },
       // Vendor modules are served as static assets at runtime — not bundled.
       // TypeScript paths map these to .d.ts stubs for type-checking only.
-      external: ["/vendor/rnnoise/rnnoise.js", "/vendor/dtln/dtln.mjs"],
+      external: ["/vendor/rnnoise/rnnoise.js", "/vendor/dtln/dtln.mjs", "/vendor/dfn3/dfn3.mjs"],
     },
   },
 });

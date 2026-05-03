@@ -3,7 +3,7 @@ import { clampPercentage } from "../utils/storage";
 import { formatRnnoiseMix, formatEngine } from "../utils/clamp";
 import type { EngineKind } from "../types";
 
-const ENGINES: EngineKind[] = ["off", "rnnoise", "dtln"];
+const ENGINES: EngineKind[] = ["off", "rnnoise", "dtln", "dfn3"];
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -59,7 +59,7 @@ export function AudioCard({
           id="denoiser-engine"
           role="radiogroup"
           aria-label="Движок шумоподавления"
-          className="grid grid-cols-3 gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
+          className="grid grid-cols-4 gap-1.5 p-1 bg-bg-input border border-line rounded-[14px]"
         >
           {ENGINES.map((eng) => {
             const active = engine === eng;

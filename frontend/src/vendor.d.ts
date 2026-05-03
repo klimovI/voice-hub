@@ -24,5 +24,11 @@ declare module "/vendor/dtln/dtln.mjs" {
   ): AudioNode;
 }
 
+declare module "/vendor/dfn3/dfn3.mjs" {
+  export const sampleRate: number;
+  export function setup(assetBase: string): Promise<void>;
+  export function createProcessorNode(ctx: AudioContext, opts: { channelCount: number }): AudioNode;
+}
+
 // Side-effect CSS imports (resolved by Vite at build time).
 declare module "*.css";
