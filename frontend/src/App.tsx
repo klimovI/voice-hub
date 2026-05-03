@@ -138,10 +138,13 @@ export function App() {
     [audio],
   );
 
-  const handleRnnoiseMixChange = useCallback((v: number) => {
-    useStore.getState().setRnnoiseMix(v);
-    // RNNoise mix is read live by the ScriptProcessor — no rebuild needed.
-  }, []);
+  const handleRnnoiseMixChange = useCallback(
+    (v: number) => {
+      useStore.getState().setRnnoiseMix(v);
+      audio.updateRnnoiseMix();
+    },
+    [audio],
+  );
 
   const handleOutputVolumeChange = useCallback(
     (v: number) => {
@@ -157,6 +160,7 @@ export function App() {
     s.setRnnoiseMix(90);
     s.setOutputVolume(100);
     audio.updateSendGain();
+    audio.updateRnnoiseMix();
     audio.applyAllRemoteGains();
 
     if (s.engine !== "rnnoise") {

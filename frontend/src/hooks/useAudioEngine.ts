@@ -13,6 +13,7 @@ import {
   createLocalAudioContext,
   type MicGraph,
 } from "../audio/mic-graph";
+import { setRnnoiseMix } from "../audio/rnnoise";
 import {
   createRemoteAudioContext,
   setupParticipantAudio,
@@ -82,6 +83,7 @@ export function useAudioEngine() {
         r.rawLocalStream,
         engine,
         () => refs.current.rnnoiseMix,
+        () => refs.current.sendVolume,
         (msg, isError) => setStatus(msg, isError),
         prebuiltContext,
       );
@@ -142,7 +144,18 @@ export function useAudioEngine() {
   const updateSendGain = useCallback(() => {
     const r = refs.current;
     if (!r.micGraph) return;
-    applySendGain(r.micGraph, () => refs.current.sendVolume);
+    // Read store directly — refs.current.sendVolume is sync'd during render,
+    // so within the same handler turn it still holds the pre-update value.
+    applySendGain(r.micGraph, () => useStore.getState().sendVolume);
+  }, []);
+
+  const updateRnnoiseMix = useCallback(() => {
+    const r = refs.current;
+    if (r.micGraph?.rnnoiseProcessorNode) {
+      // Read store directly — refs.current.rnnoiseMix is sync'd during render,
+      // so within the same handler turn it still holds the pre-update value.
+      setRnnoiseMix(r.micGraph.rnnoiseProcessorNode, useStore.getState().rnnoiseMix);
+    }
   }, []);
 
   const startSpeaking = useCallback(
@@ -238,6 +251,7 @@ export function useAudioEngine() {
     rebuildLocalAudio,
     teardownGraph,
     updateSendGain,
+    updateRnnoiseMix,
     startSpeaking,
     attachRemoteStream,
     detachRemoteStream,

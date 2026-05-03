@@ -5,7 +5,7 @@ import type { EngineKind } from "../types";
 import { DTLN_ASSET_BASE, DFN3_ASSET_BASE } from "../config";
 import { prepareDtlnHead, type DtlnHandle } from "./dtln";
 import { prepareDfn3Head, type Dfn3Handle } from "./dfn3";
-import { createRnnoiseProcessor, resetRnnoiseGraphState, type RnnoiseGraphState } from "./rnnoise";
+import { createRnnoiseProcessor } from "./rnnoise";
 import { detectLevel, SPEAKING_THRESHOLD } from "./level-detect";
 
 const VOICE_BOOST_RATIO = 1.4;
@@ -24,8 +24,7 @@ export interface MicGraph {
   // Optional denoiser handles:
   dtln: DtlnHandle | null;
   dfn3: Dfn3Handle | null;
-  rnnoiseProcessorNode: ScriptProcessorNode | null;
-  rnnoiseGraphState: RnnoiseGraphState;
+  rnnoiseProcessorNode: AudioWorkletNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
 }
@@ -46,6 +45,7 @@ export async function buildMicGraph(
   rawLocalStream: MediaStream,
   engine: EngineKind,
   rnnoiseMixRef: () => number,
+  sendVolumeRef: () => number,
   onStatusMessage: (msg: string, isError?: boolean) => void,
   prebuiltContext?: AudioContext,
 ): Promise<MicGraph> {
@@ -81,24 +81,6 @@ export async function buildMicGraph(
   localCompressorNode.attack.value = 0.005;
   localCompressorNode.release.value = 0.1;
 
-  // Initialize RNNoise graph state (shared mutable object).
-  // Ring buffers + scratch frames get sized on createRnnoiseProcessor when frameSize is known.
-  const rnnoiseGraphState: RnnoiseGraphState = {
-    rnnoiseState: null,
-    rnnoiseFrameSize: 0,
-    inputRing: new Float32Array(0),
-    inputRingLen: 0,
-    outputRing: new Float32Array(0),
-    outputRingLen: 0,
-    scratchFrame: new Float32Array(0),
-    scratchOriginal: new Float32Array(0),
-    gateEnv: 1,
-    gateHold: 0,
-    gateOpen: true,
-    rnnoiseMixRef,
-    localAudioContextRef: () => localAudioContext,
-  };
-
   // Build chain head (possibly DTLN or DFN3 denoiser).
   let chainHead: AudioNode = localSourceNode;
   let dtlnHandle: DtlnHandle | null = null;
@@ -130,10 +112,10 @@ export async function buildMicGraph(
 
   // Build chain tail (possibly RNNoise).
   let chainTail: AudioNode = localCompressorNode;
-  let rnnoiseProcessorNode: ScriptProcessorNode | null = null;
+  let rnnoiseProcessorNode: AudioWorkletNode | null = null;
 
   if (engine === "rnnoise") {
-    rnnoiseProcessorNode = await createRnnoiseProcessor(localAudioContext, rnnoiseGraphState);
+    rnnoiseProcessorNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
     if (rnnoiseProcessorNode) {
       localCompressorNode.connect(rnnoiseProcessorNode);
       chainTail = rnnoiseProcessorNode;
@@ -159,11 +141,10 @@ export async function buildMicGraph(
     dtln: dtlnHandle,
     dfn3: dfn3Handle,
     rnnoiseProcessorNode,
-    rnnoiseGraphState,
     speakingFrameId: null,
   };
 
-  applySendGain(graph, rnnoiseMixRef);
+  applySendGain(graph, sendVolumeRef);
 
   return graph;
 }
@@ -192,8 +173,14 @@ export function teardownMicGraph(graph: MicGraph): void {
     graph.speakingFrameId = null;
   }
 
+  if (graph.rnnoiseProcessorNode) {
+    try {
+      graph.rnnoiseProcessorNode.port.postMessage({ type: "destroy" });
+    } catch {
+      /* ignore */
+    }
+  }
   safeDisconnect(graph.rnnoiseProcessorNode);
-  resetRnnoiseGraphState(graph.rnnoiseGraphState);
   graph.rnnoiseProcessorNode = null;
 
   safeDisconnect(graph.dtln?.dtlnInputSource);
