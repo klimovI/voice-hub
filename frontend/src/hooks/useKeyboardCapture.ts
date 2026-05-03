@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { canonicalizeKeys, labelFromCode, type InputBinding } from "../utils/binding";
+import { useEffect, useRef } from 'react';
+import { canonicalizeKeys, labelFromCode, type InputBinding } from '../utils/binding';
 
 export type HotkeyApi = {
   binding: InputBinding | null;
@@ -72,7 +72,7 @@ export function useKeyboardCapture(opts: {
       if (stateRef.current.pressedCodes.size === 0) {
         const peak = stateRef.current.peakKeys;
         if (peak.length > 0) {
-          onCommit({ kind: "keyboard", keys: peak });
+          onCommit({ kind: 'keyboard', keys: peak });
         }
       }
     }
@@ -86,13 +86,13 @@ export function useKeyboardCapture(opts: {
       onLiveChange([]);
     }
 
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", onBlur);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
     return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("blur", onBlur);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
     };
   }, [active, onCommit, onLiveChange]);
 }

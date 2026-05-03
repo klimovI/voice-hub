@@ -14,28 +14,28 @@
 //   - InputBinding fixture roundtrip (Test L): asserts parsed fixtures match
 //     expected shapes and re-serialise to byte-identical JSON.
 
-import { describe, it, expect } from "vitest";
-import keymap from "../../../src-tauri/keymap.json";
-import mousemap from "../../../src-tauri/mousemap.json";
-import bindingKeyboardPlain from "../../../src-tauri/testdata/binding-keyboard-plain.json";
-import bindingKeyboardPlainRaw from "../../../src-tauri/testdata/binding-keyboard-plain.json?raw";
-import bindingKeyboardModifiers from "../../../src-tauri/testdata/binding-keyboard-modifiers.json";
-import bindingKeyboardModifiersRaw from "../../../src-tauri/testdata/binding-keyboard-modifiers.json?raw";
-import bindingMouse from "../../../src-tauri/testdata/binding-mouse.json";
-import bindingMouseRaw from "../../../src-tauri/testdata/binding-mouse.json?raw";
-import bindingClearedRaw from "../../../src-tauri/testdata/binding-cleared.json?raw";
-import { labelFromCode, formatBinding } from "./binding";
-import type { InputBinding } from "./binding";
+import { describe, it, expect } from 'vitest';
+import keymap from '../../../src-tauri/keymap.json';
+import mousemap from '../../../src-tauri/mousemap.json';
+import bindingKeyboardPlain from '../../../src-tauri/testdata/binding-keyboard-plain.json';
+import bindingKeyboardPlainRaw from '../../../src-tauri/testdata/binding-keyboard-plain.json?raw';
+import bindingKeyboardModifiers from '../../../src-tauri/testdata/binding-keyboard-modifiers.json';
+import bindingKeyboardModifiersRaw from '../../../src-tauri/testdata/binding-keyboard-modifiers.json?raw';
+import bindingMouse from '../../../src-tauri/testdata/binding-mouse.json';
+import bindingMouseRaw from '../../../src-tauri/testdata/binding-mouse.json?raw';
+import bindingClearedRaw from '../../../src-tauri/testdata/binding-cleared.json?raw';
+import { labelFromCode, formatBinding } from './binding';
+import type { InputBinding } from './binding';
 
 const entries = (keymap as { labels: Array<{ label: string; web_codes: string[] }> }).labels;
 
-describe("keymap.json coverage — labelFromCode", () => {
+describe('keymap.json coverage — labelFromCode', () => {
   for (const entry of entries) {
     it(`produces "${entry.label}" from at least one web_code`, () => {
       const reached = entry.web_codes.some((code) => labelFromCode(code) === entry.label);
       expect(
         reached,
-        `labelFromCode did not produce "${entry.label}" — tried: ${entry.web_codes.join(", ")}`,
+        `labelFromCode did not produce "${entry.label}" — tried: ${entry.web_codes.join(', ')}`,
       ).toBe(true);
     });
   }
@@ -56,17 +56,17 @@ type Mousemap = {
 
 const mm = mousemap as Mousemap;
 
-describe("mousemap.json coverage — formatBinding", () => {
+describe('mousemap.json coverage — formatBinding', () => {
   for (const btn of mm.buttons) {
     it(`formatBinding renders static label "${btn.label}" as "Mouse ${btn.label}"`, () => {
-      const binding: InputBinding = { kind: "mouse", button: btn.label };
+      const binding: InputBinding = { kind: 'mouse', button: btn.label };
       expect(formatBinding(binding)).toBe(`Mouse ${btn.label}`);
     });
   }
 
   it('static labels match the Side{n} pattern or are "Right"/"Middle"', () => {
     const sideRe = new RegExp(mm.side_pattern.regex);
-    const knownNonSide = new Set(["Right", "Middle"]);
+    const knownNonSide = new Set(['Right', 'Middle']);
     for (const btn of mm.buttons) {
       const valid = knownNonSide.has(btn.label) || sideRe.test(btn.label);
       expect(valid, `unexpected label format: "${btn.label}"`).toBe(true);
@@ -75,9 +75,9 @@ describe("mousemap.json coverage — formatBinding", () => {
 
   it('synthesised "Side42" passes the side_pattern regex and formatBinding', () => {
     const sideRe = new RegExp(mm.side_pattern.regex);
-    expect(sideRe.test("Side42")).toBe(true);
-    const binding: InputBinding = { kind: "mouse", button: "Side42" };
-    expect(formatBinding(binding)).toBe("Mouse Side42");
+    expect(sideRe.test('Side42')).toBe(true);
+    const binding: InputBinding = { kind: 'mouse', button: 'Side42' };
+    expect(formatBinding(binding)).toBe('Mouse Side42');
   });
 });
 
@@ -103,33 +103,33 @@ function canonical(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-describe("InputBinding fixture roundtrip", () => {
-  it("binding-keyboard-plain.json — shape and structure roundtrip", () => {
+describe('InputBinding fixture roundtrip', () => {
+  it('binding-keyboard-plain.json — shape and structure roundtrip', () => {
     const parsed = bindingKeyboardPlain as InputBinding;
-    expect(parsed.kind).toBe("keyboard");
-    if (parsed.kind !== "keyboard") throw new Error("unreachable");
+    expect(parsed.kind).toBe('keyboard');
+    if (parsed.kind !== 'keyboard') throw new Error('unreachable');
     expect(Array.isArray(parsed.keys)).toBe(true);
     // canonical(raw) === canonical(parsed): catches field drift on either side
     expect(canonical(parsed)).toBe(canonical(JSON.parse(bindingKeyboardPlainRaw)));
   });
 
-  it("binding-keyboard-modifiers.json — shape and structure roundtrip", () => {
+  it('binding-keyboard-modifiers.json — shape and structure roundtrip', () => {
     const parsed = bindingKeyboardModifiers as InputBinding;
-    expect(parsed.kind).toBe("keyboard");
-    if (parsed.kind !== "keyboard") throw new Error("unreachable");
+    expect(parsed.kind).toBe('keyboard');
+    if (parsed.kind !== 'keyboard') throw new Error('unreachable');
     expect(Array.isArray(parsed.keys)).toBe(true);
     expect(canonical(parsed)).toBe(canonical(JSON.parse(bindingKeyboardModifiersRaw)));
   });
 
-  it("binding-mouse.json — shape and structure roundtrip", () => {
+  it('binding-mouse.json — shape and structure roundtrip', () => {
     const parsed = bindingMouse as InputBinding;
-    expect(parsed.kind).toBe("mouse");
-    if (parsed.kind !== "mouse") throw new Error("unreachable");
-    expect(typeof parsed.button).toBe("string");
+    expect(parsed.kind).toBe('mouse');
+    if (parsed.kind !== 'mouse') throw new Error('unreachable');
+    expect(typeof parsed.button).toBe('string');
     expect(canonical(parsed)).toBe(canonical(JSON.parse(bindingMouseRaw)));
   });
 
-  it("binding-cleared.json — null and structure roundtrip", () => {
+  it('binding-cleared.json — null and structure roundtrip', () => {
     // The cleared fixture is a bare JSON null literal.
     const parsed: InputBinding | null = JSON.parse(bindingClearedRaw) as InputBinding | null;
     expect(parsed).toBeNull();

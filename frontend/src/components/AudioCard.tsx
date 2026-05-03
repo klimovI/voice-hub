@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { useStore } from "../store/useStore";
-import { clampPercentage } from "../utils/storage";
-import { formatRnnoiseMix } from "../utils/clamp";
-import type { EngineKind } from "../types";
+import { useEffect, useState } from 'react';
+import { useStore } from '../store/useStore';
+import { clampPercentage } from '../utils/storage';
+import { formatRnnoiseMix } from '../utils/clamp';
+import type { EngineKind } from '../types';
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -51,10 +51,10 @@ export function AudioCard({
         setMicDevices(
           all.filter(
             (d) =>
-              d.kind === "audioinput" &&
+              d.kind === 'audioinput' &&
               d.deviceId &&
-              d.deviceId !== "default" &&
-              d.deviceId !== "communications",
+              d.deviceId !== 'default' &&
+              d.deviceId !== 'communications',
           ),
         );
       } catch {
@@ -62,10 +62,10 @@ export function AudioCard({
       }
     };
     void refresh();
-    md.addEventListener?.("devicechange", refresh);
+    md.addEventListener?.('devicechange', refresh);
     return () => {
       cancelled = true;
-      md.removeEventListener?.("devicechange", refresh);
+      md.removeEventListener?.('devicechange', refresh);
     };
   }, []);
 
@@ -102,13 +102,13 @@ export function AudioCard({
           </label>
           <select
             id="mic-device"
-            value={micDeviceId ?? ""}
+            value={micDeviceId ?? ''}
             onChange={(e) => onMicDeviceSelect(e.target.value || null)}
             style={{
               backgroundImage:
                 "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%239aa8a2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>\")",
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "right 14px center",
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 14px center',
             }}
             className="appearance-none w-full pl-3 pr-10 py-2 text-[13px] bg-bg-input border border-line rounded-[10px] text-text cursor-pointer hover:border-muted-2 focus:outline-none focus:border-accent transition-colors duration-100"
           >
@@ -127,24 +127,24 @@ export function AudioCard({
         <button
           type="button"
           role="switch"
-          aria-checked={engine !== "off" ? "true" : "false"}
+          aria-checked={engine !== 'off' ? 'true' : 'false'}
           aria-label="Шумоподавление"
-          onClick={() => onEngineSelect(engine === "off" ? "rnnoise" : "off")}
+          onClick={() => onEngineSelect(engine === 'off' ? 'rnnoise' : 'off')}
           className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border cursor-pointer transition-colors duration-150 focus:outline-none focus-visible:shadow-[0_0_0_3px_rgba(34,197,94,0.16)] ${
-            engine !== "off"
-              ? "bg-accent border-accent hover:bg-accent-hover hover:border-accent-hover"
-              : "bg-bg-input border-line hover:border-muted-2"
+            engine !== 'off'
+              ? 'bg-accent border-accent hover:bg-accent-hover hover:border-accent-hover'
+              : 'bg-bg-input border-line hover:border-muted-2'
           }`}
         >
           <span
             className={`inline-block h-[16px] w-[16px] rounded-full bg-white shadow transition-transform duration-150 ${
-              engine !== "off" ? "translate-x-[20px]" : "translate-x-[2px]"
+              engine !== 'off' ? 'translate-x-[20px]' : 'translate-x-[2px]'
             }`}
           />
         </button>
       </div>
 
-      {engine === "rnnoise" && (
+      {engine === 'rnnoise' && (
         <div className="grid gap-2">
           <SliderHead label="Сила подавления" value={formatRnnoiseMix(rnnoiseMix)} />
           <input

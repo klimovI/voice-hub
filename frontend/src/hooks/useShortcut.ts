@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
-import { useStore } from "../store/useStore";
-import { labelFromCode } from "../utils/binding";
+import { useEffect, useRef } from 'react';
+import { useStore } from '../store/useStore';
+import { labelFromCode } from '../utils/binding';
 
 const COOLDOWN_MS = 50;
 
@@ -28,7 +28,7 @@ export function useGlobalShortcut(onTrigger: () => void): void {
   const joinStateRef = useRef(joinState);
   const pressedRef = useRef<Set<string>>(new Set());
   const lastFireRef = useRef(0);
-  const focusedRef = useRef(typeof document === "undefined" ? true : document.hasFocus());
+  const focusedRef = useRef(typeof document === 'undefined' ? true : document.hasFocus());
 
   // Refs always reflect the latest values; the listener-attach effect below
   // runs once and reads via the refs. Direct assignment is safe at render
@@ -51,14 +51,14 @@ export function useGlobalShortcut(onTrigger: () => void): void {
       if (!focusedRef.current) return;
 
       const sc = shortcutRef.current;
-      if (!sc || sc.kind !== "keyboard") return;
-      if (capturingRef.current || joinStateRef.current !== "joined") return;
+      if (!sc || sc.kind !== 'keyboard') return;
+      if (capturingRef.current || joinStateRef.current !== 'joined') return;
 
       const required = sc.keys;
-      if (required.includes("Ctrl") !== event.ctrlKey) return;
-      if (required.includes("Shift") !== event.shiftKey) return;
-      if (required.includes("Alt") !== event.altKey) return;
-      if (required.includes("Meta") !== event.metaKey) return;
+      if (required.includes('Ctrl') !== event.ctrlKey) return;
+      if (required.includes('Shift') !== event.shiftKey) return;
+      if (required.includes('Alt') !== event.altKey) return;
+      if (required.includes('Meta') !== event.metaKey) return;
 
       // The trigger key must itself be part of the binding — otherwise typing
       // unrelated characters while modifiers are held would fire.
@@ -68,7 +68,7 @@ export function useGlobalShortcut(onTrigger: () => void): void {
       // alone only tells us about the single key being pressed, so we keep a
       // pressed-set across keydown/keyup events.
       for (const k of required) {
-        if (k === "Ctrl" || k === "Shift" || k === "Alt" || k === "Meta") continue;
+        if (k === 'Ctrl' || k === 'Shift' || k === 'Alt' || k === 'Meta') continue;
         if (!pressedRef.current.has(k)) return;
       }
 
@@ -94,15 +94,15 @@ export function useGlobalShortcut(onTrigger: () => void): void {
       focusedRef.current = true;
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", onFocus);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 }

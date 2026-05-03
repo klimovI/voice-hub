@@ -1,26 +1,26 @@
-import type { AppConfig, Role } from "./types";
+import type { AppConfig, Role } from './types';
 
 export async function loadAppConfig(): Promise<AppConfig> {
-  const response = await fetch("/api/config", { credentials: "same-origin" });
+  const response = await fetch('/api/config', { credentials: 'same-origin' });
   if (response.status === 401) {
     const next = encodeURIComponent(window.location.pathname + window.location.search);
-    window.location.replace("/login.html?next=" + next);
-    throw new Error("Требуется вход");
+    window.location.replace('/login.html?next=' + next);
+    throw new Error('Требуется вход');
   }
   if (!response.ok) {
-    throw new Error("Не удалось получить конфиг комнаты");
+    throw new Error('Не удалось получить конфиг комнаты');
   }
   const raw = (await response.json()) as { iceServers?: unknown; role?: unknown };
   if (!Array.isArray(raw.iceServers)) {
-    throw new Error("Конфиг: iceServers отсутствует или не массив");
+    throw new Error('Конфиг: iceServers отсутствует или не массив');
   }
-  if (raw.role !== "admin" && raw.role !== "user") {
+  if (raw.role !== 'admin' && raw.role !== 'user') {
     throw new Error(`Конфиг: неизвестная роль "${String(raw.role)}"`);
   }
   return { iceServers: raw.iceServers as RTCIceServer[], role: raw.role as Role };
 }
 
 export function buildWsUrl(): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}/ws`;
 }

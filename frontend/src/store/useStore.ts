@@ -1,10 +1,10 @@
 // Zustand store: reactive UI state.
 // Audio nodes are NOT stored here — they live in imperative refs inside useAudioEngine.
 
-import { create } from "zustand";
-import type { EngineKind, ParticipantUI } from "../types";
-import type { InputBinding } from "../utils/binding";
-import { loadBinding } from "../utils/binding";
+import { create } from 'zustand';
+import type { EngineKind, ParticipantUI } from '../types';
+import type { InputBinding } from '../utils/binding';
+import { loadBinding } from '../utils/binding';
 import {
   KEYS,
   loadBoolean,
@@ -18,10 +18,10 @@ import {
   saveOutputVolume,
   saveEngine,
   saveMicDeviceId,
-} from "../utils/storage";
+} from '../utils/storage';
 
-export type JoinState = "idle" | "joining" | "joined";
-export type StatusState = "idle" | "ok" | "err";
+export type JoinState = 'idle' | 'joining' | 'joined';
+export type StatusState = 'idle' | 'ok' | 'err';
 
 export interface AppState {
   joinState: JoinState;
@@ -77,7 +77,7 @@ export interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
-  joinState: "idle",
+  joinState: 'idle',
   setJoinState: (s) => set({ joinState: s }),
   configReady: false,
   setConfigReady: (v) => set({ configReady: v }),
@@ -138,13 +138,13 @@ export const useStore = create<AppState>((set, get) => ({
   capturingShortcut: false,
   setCapturingShortcut: (v) => set({ capturingShortcut: v }),
 
-  statusText: "Загрузка…",
-  statusState: "idle",
+  statusText: 'Загрузка…',
+  statusState: 'idle',
   setStatus: (text, isError = false, joined) => {
-    const currentJoined = joined ?? get().joinState === "joined";
+    const currentJoined = joined ?? get().joinState === 'joined';
     set({
       statusText: text,
-      statusState: isError ? "err" : currentJoined ? "ok" : "idle",
+      statusState: isError ? 'err' : currentJoined ? 'ok' : 'idle',
     });
   },
 

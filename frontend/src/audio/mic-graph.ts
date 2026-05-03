@@ -10,9 +10,9 @@
 // engine can slot in by adding a branch on `engine` plus a field on MicGraph
 // for its handle.
 
-import type { EngineKind } from "../types";
-import { createRnnoiseProcessor } from "./rnnoise";
-import { detectLevel, SPEAKING_THRESHOLD } from "./level-detect";
+import type { EngineKind } from '../types';
+import { createRnnoiseProcessor } from './rnnoise';
+import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 const VOICE_BOOST_RATIO = 1.4;
 
@@ -37,7 +37,7 @@ export function createLocalAudioContext(): AudioContext {
   const AudioContextCtor =
     (window as Window & typeof globalThis).AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) throw new Error("Browser does not support AudioContext");
+  if (!AudioContextCtor) throw new Error('Browser does not support AudioContext');
   try {
     return new AudioContextCtor({ sampleRate: 48000 });
   } catch {
@@ -54,7 +54,7 @@ export async function buildMicGraph(
   prebuiltContext?: AudioContext,
 ): Promise<MicGraph> {
   const localAudioContext = prebuiltContext ?? createLocalAudioContext();
-  if (localAudioContext.state !== "running") {
+  if (localAudioContext.state !== 'running') {
     await localAudioContext.resume();
   }
 
@@ -69,12 +69,12 @@ export async function buildMicGraph(
   const localDestinationNode = localAudioContext.createMediaStreamDestination();
 
   const localHighPassNode = localAudioContext.createBiquadFilter();
-  localHighPassNode.type = "highpass";
+  localHighPassNode.type = 'highpass';
   localHighPassNode.frequency.value = 110;
   localHighPassNode.Q.value = 0.707;
 
   const localLowPassNode = localAudioContext.createBiquadFilter();
-  localLowPassNode.type = "lowpass";
+  localLowPassNode.type = 'lowpass';
   localLowPassNode.frequency.value = 7200;
   localLowPassNode.Q.value = 0.707;
 
@@ -98,13 +98,13 @@ export async function buildMicGraph(
   let chainTail: AudioNode = localCompressorNode;
   let rnnoiseProcessorNode: AudioWorkletNode | null = null;
 
-  if (engine === "rnnoise") {
+  if (engine === 'rnnoise') {
     rnnoiseProcessorNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
     if (rnnoiseProcessorNode) {
       localCompressorNode.connect(rnnoiseProcessorNode);
       chainTail = rnnoiseProcessorNode;
     } else {
-      onStatusMessage("RNNoise unavailable, sending without denoiser.", true);
+      onStatusMessage('RNNoise unavailable, sending without denoiser.', true);
     }
   }
 
@@ -157,7 +157,7 @@ export function teardownMicGraph(graph: MicGraph): void {
 
   if (graph.rnnoiseProcessorNode) {
     try {
-      graph.rnnoiseProcessorNode.port.postMessage({ type: "destroy" });
+      graph.rnnoiseProcessorNode.port.postMessage({ type: 'destroy' });
     } catch {
       /* ignore */
     }

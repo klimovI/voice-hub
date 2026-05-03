@@ -2,7 +2,7 @@
 // <audio> element is muted and used only to keep the stream alive.
 // Volume can exceed 100% (WebAudio gain).
 
-import { detectLevel, SPEAKING_THRESHOLD } from "./level-detect";
+import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 export interface RemoteParticipantAudio {
   audioEl: HTMLAudioElement;
@@ -22,7 +22,7 @@ export function createRemoteAudioContext(): AudioContext {
     (window as Window & typeof globalThis).AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new Ctor({ sampleRate: 48000 });
-  ctx.resume().catch((err: unknown) => console.warn("[remote-audio] ctx resume failed:", err));
+  ctx.resume().catch((err: unknown) => console.warn('[remote-audio] ctx resume failed:', err));
   return ctx;
 }
 
@@ -30,7 +30,7 @@ export function setupParticipantAudio(
   ctx: AudioContext,
   stream: MediaStream,
 ): RemoteParticipantAudio {
-  const audioEl = document.createElement("audio");
+  const audioEl = document.createElement('audio');
   audioEl.autoplay = true;
   (audioEl as HTMLAudioElement & { playsInline: boolean }).playsInline = true;
   audioEl.muted = true;

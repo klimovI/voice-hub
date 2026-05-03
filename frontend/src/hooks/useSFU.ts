@@ -1,5 +1,5 @@
-import { useRef, useCallback } from "react";
-import { createSFUClient, type SFUClient } from "../sfu/client";
+import { useRef, useCallback } from 'react';
+import { createSFUClient, type SFUClient } from '../sfu/client';
 
 export function useSFU() {
   const clientRef = useRef<SFUClient | null>(null);

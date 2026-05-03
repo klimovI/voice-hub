@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback } from 'react';
 
 // POST /api/logout expires the session cookie; the server has no session
 // table so nothing else needs cleaning. The redirect lands on /login.html
@@ -7,11 +7,11 @@ import { useCallback } from "react";
 export function LogoutButton() {
   const handleLogout = useCallback(async () => {
     try {
-      await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {
       // Ignore network errors — cookie may already be invalid; fall through to redirect.
     }
-    window.location.replace("/login.html");
+    window.location.replace('/login.html');
   }, []);
 
   return (

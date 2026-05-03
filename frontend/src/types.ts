@@ -1,8 +1,8 @@
 // Core domain types for Voice Hub.
 
-export type EngineKind = "off" | "rnnoise";
+export type EngineKind = 'off' | 'rnnoise';
 
-export type Role = "admin" | "user";
+export type Role = 'admin' | 'user';
 
 export type AppConfig = {
   iceServers: RTCIceServer[];

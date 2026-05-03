@@ -1,4 +1,4 @@
-import { useStore } from "../store/useStore";
+import { useStore } from '../store/useStore';
 import {
   HeadphonesIcon,
   HeadphonesOffIcon,
@@ -6,7 +6,7 @@ import {
   MicOffIcon,
   PhoneIcon,
   PhoneOffIcon,
-} from "./icons";
+} from './icons';
 
 interface Props {
   onJoin: (displayName: string) => void;
@@ -30,8 +30,8 @@ export function SessionCard({
   const deafened = useStore((s) => s.deafened);
   const configReady = useStore((s) => s.configReady);
 
-  const joining = joinState === "joining";
-  const joined = joinState === "joined";
+  const joining = joinState === 'joining';
+  const joined = joinState === 'joined';
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -67,8 +67,8 @@ export function SessionCard({
             id="join-button"
             type="submit"
             disabled={joining || joined || !configReady}
-            title={configReady ? "Войти в комнату" : "Загрузка…"}
-            aria-label={configReady ? "Войти в комнату" : "Загрузка…"}
+            title={configReady ? 'Войти в комнату' : 'Загрузка…'}
+            aria-label={configReady ? 'Войти в комнату' : 'Загрузка…'}
             className="btn btn-primary justify-center p-0! w-12 h-12 rounded-full"
           >
             <PhoneIcon />
@@ -77,10 +77,10 @@ export function SessionCard({
             id="self-mute-button"
             type="button"
             aria-pressed={selfMuted}
-            aria-label={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
-            title={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
+            aria-label={selfMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+            title={selfMuted ? 'Включить микрофон' : 'Выключить микрофон'}
             onClick={onToggleSelfMute}
-            className={`btn justify-center p-0! w-12 h-12 rounded-full ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center p-0! w-12 h-12 rounded-full ${selfMuted ? 'btn-toggle-on' : 'btn-secondary'}`}
           >
             {selfMuted ? <MicOffIcon /> : <MicIcon />}
           </button>
@@ -88,10 +88,10 @@ export function SessionCard({
             id="deafen-button"
             type="button"
             aria-pressed={deafened}
-            aria-label={deafened ? "Слушать всех" : "Заглушить всех"}
-            title={deafened ? "Слушать всех" : "Заглушить всех"}
+            aria-label={deafened ? 'Слушать всех' : 'Заглушить всех'}
+            title={deafened ? 'Слушать всех' : 'Заглушить всех'}
             onClick={onToggleDeafen}
-            className={`btn justify-center p-0! w-12 h-12 rounded-full ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center p-0! w-12 h-12 rounded-full ${deafened ? 'btn-toggle-on' : 'btn-secondary'}`}
           >
             {deafened ? <HeadphonesOffIcon /> : <HeadphonesIcon />}
           </button>

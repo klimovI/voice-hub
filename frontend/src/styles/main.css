@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
   --color-bg-0: #07090a;
@@ -23,8 +23,8 @@
 
   --shadow-card: 0 30px 80px -22px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
 
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
 }
 
 @layer base {

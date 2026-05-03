@@ -1,18 +1,18 @@
-import { useStore } from "../store/useStore";
+import { useStore } from '../store/useStore';
 
 export function StatusPill() {
   const statusText = useStore((s) => s.statusText);
   const statusState = useStore((s) => s.statusState);
 
-  const isOk = statusState === "ok";
-  const isErr = statusState === "err";
+  const isOk = statusState === 'ok';
+  const isErr = statusState === 'err';
 
-  const wrapColor = isOk ? "text-good" : isErr ? "text-danger" : "text-text";
+  const wrapColor = isOk ? 'text-good' : isErr ? 'text-danger' : 'text-text';
   const dotColor = isOk
-    ? "bg-good shadow-[0_0_0_4px_rgba(34,197,94,0.14)]"
+    ? 'bg-good shadow-[0_0_0_4px_rgba(34,197,94,0.14)]'
     : isErr
-      ? "bg-danger shadow-[0_0_0_4px_rgba(248,113,113,0.12)]"
-      : "bg-muted-2";
+      ? 'bg-danger shadow-[0_0_0_4px_rgba(248,113,113,0.12)]'
+      : 'bg-muted-2';
 
   return (
     <div

@@ -3,13 +3,13 @@ export function clampVolume(value: number): number {
 }
 
 export function formatRnnoiseMix(value: number): string {
-  if (value === 0) return "выкл.";
+  if (value === 0) return 'выкл.';
   return `${value}%`;
 }
 
 export function formatEngine(engine: string): string {
-  if (engine === "off") return "Выкл.";
-  if (engine === "rnnoise") return "Вкл.";
+  if (engine === 'off') return 'Выкл.';
+  if (engine === 'rnnoise') return 'Вкл.';
   return engine;
 }
 

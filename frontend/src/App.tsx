@@ -1,24 +1,24 @@
-import { useCallback, useRef, useState } from "react";
-import "./styles/main.css";
-import { useStore } from "./store/useStore";
-import { useAudioEngine } from "./hooks/useAudioEngine";
-import { preloadEngine } from "./audio/engine";
-import { useSFU } from "./hooks/useSFU";
-import { useSessionManager } from "./hooks/useSessionManager";
-import { useGlobalShortcut } from "./hooks/useShortcut";
-import { loadOrCreateDisplayName } from "./utils/storage";
-import { makeGuestName, formatEngine } from "./utils/clamp";
-import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
-import type { EngineKind } from "./types";
+import { useCallback, useRef, useState } from 'react';
+import './styles/main.css';
+import { useStore } from './store/useStore';
+import { useAudioEngine } from './hooks/useAudioEngine';
+import { preloadEngine } from './audio/engine';
+import { useSFU } from './hooks/useSFU';
+import { useSessionManager } from './hooks/useSessionManager';
+import { useGlobalShortcut } from './hooks/useShortcut';
+import { loadOrCreateDisplayName } from './utils/storage';
+import { makeGuestName, formatEngine } from './utils/clamp';
+import { playMuteSound, playUnmuteSound } from './audio/feedback-sounds';
+import type { EngineKind } from './types';
 
-import { TopBar } from "./components/TopBar";
-import { SessionCard } from "./components/SessionCard";
-import { AudioCard } from "./components/AudioCard";
-import { HotkeyCard } from "./components/HotkeyCard";
-import { ParticipantsCard } from "./components/ParticipantsCard";
-import { UpdateBanner } from "./components/UpdateBanner";
-import { Footer } from "./components/Footer";
-import { useAppVersion } from "./hooks/useAppVersion";
+import { TopBar } from './components/TopBar';
+import { SessionCard } from './components/SessionCard';
+import { AudioCard } from './components/AudioCard';
+import { HotkeyCard } from './components/HotkeyCard';
+import { ParticipantsCard } from './components/ParticipantsCard';
+import { UpdateBanner } from './components/UpdateBanner';
+import { Footer } from './components/Footer';
+import { useAppVersion } from './hooks/useAppVersion';
 
 export function App() {
   // App does not render any store field directly — children subscribe per-card.
@@ -113,7 +113,7 @@ export function App() {
       if (engine === s.engine) return;
       s.setEngine(engine);
       preloadEngine(engine);
-      if (s.joinState !== "joined") {
+      if (s.joinState !== 'joined') {
         s.setStatus(`Шумоподавление: ${formatEngine(engine)}`);
         return;
       }
@@ -141,11 +141,11 @@ export function App() {
       const s = useStore.getState();
       if (deviceId === s.micDeviceId) return;
       s.setMicDeviceId(deviceId);
-      if (s.joinState !== "joined") return;
-      s.setStatus("Переключаю микрофон…");
+      if (s.joinState !== 'joined') return;
+      s.setStatus('Переключаю микрофон…');
       try {
         await session.switchMicDevice();
-        useStore.getState().setStatus("Микрофон переключён.", false, true);
+        useStore.getState().setStatus('Микрофон переключён.', false, true);
       } catch (err) {
         useStore
           .getState()
@@ -194,19 +194,19 @@ export function App() {
     audio.updateRnnoiseMix();
     audio.applyAllRemoteGains();
 
-    if (s.engine !== "rnnoise") {
-      void handleEngineSelect("rnnoise");
+    if (s.engine !== 'rnnoise') {
+      void handleEngineSelect('rnnoise');
     }
     if (s.micDeviceId !== null) {
       void handleMicDeviceSelect(null);
     }
 
-    s.setStatus("Настройки звука сброшены.", false, s.joinState === "joined");
+    s.setStatus('Настройки звука сброшены.', false, s.joinState === 'joined');
   }, [audio, handleEngineSelect, handleMicDeviceSelect]);
 
   const handleStatusMessage = useCallback((msg: string) => {
     const s = useStore.getState();
-    s.setStatus(msg, false, s.joinState === "joined");
+    s.setStatus(msg, false, s.joinState === 'joined');
   }, []);
 
   // ---- Display name sync back to SFU ----
@@ -214,7 +214,7 @@ export function App() {
   const handleDisplayNameChange = useCallback(
     (value: string) => {
       setDisplayName(value);
-      if (useStore.getState().joinState === "joined" && value.trim()) {
+      if (useStore.getState().joinState === 'joined' && value.trim()) {
         session.setRemoteDisplayName(value.trim());
       }
     },

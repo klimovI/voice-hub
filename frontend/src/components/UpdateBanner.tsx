@@ -1,6 +1,6 @@
-import type { AppUpdate, DesktopApplyState, DesktopUpdateProgress } from "../hooks/useAppVersion";
-import { useStore } from "../store/useStore";
-import { setRejoinFlag } from "../utils/storage";
+import type { AppUpdate, DesktopApplyState, DesktopUpdateProgress } from '../hooks/useAppVersion';
+import { useStore } from '../store/useStore';
+import { setRejoinFlag } from '../utils/storage';
 
 interface Props {
   update: AppUpdate | null;
@@ -10,7 +10,7 @@ interface Props {
 }
 
 function formatProgress(progress: DesktopUpdateProgress | null): string {
-  if (!progress) return "Загрузка обновления…";
+  if (!progress) return 'Загрузка обновления…';
   if (progress.total && progress.total > 0) {
     const pct = Math.min(100, Math.floor((progress.downloaded / progress.total) * 100));
     return `Загрузка обновления… ${pct}%`;
@@ -29,7 +29,7 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
 
   if (!update) return null;
 
-  const isDesktop = update.kind === "desktop";
+  const isDesktop = update.kind === 'desktop';
 
   let message: string;
   let actionLabel: string | null;
@@ -37,37 +37,37 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
   let bar: number | null = null;
 
   if (!isDesktop) {
-    message = "Доступна новая версия интерфейса";
-    actionLabel = "Обновить";
+    message = 'Доступна новая версия интерфейса';
+    actionLabel = 'Обновить';
   } else {
     switch (desktopApplyState.phase) {
-      case "downloading":
+      case 'downloading':
         message = formatProgress(desktopApplyState.progress);
         actionLabel = null;
         actionDisabled = true;
         bar = progressFraction(desktopApplyState.progress);
         break;
-      case "installing":
-        message = "Устанавливаем обновление…";
+      case 'installing':
+        message = 'Устанавливаем обновление…';
         actionLabel = null;
         actionDisabled = true;
         bar = 1;
         break;
-      case "error":
+      case 'error':
         message = `Не удалось установить обновление: ${desktopApplyState.message}`;
-        actionLabel = "Попробовать снова";
+        actionLabel = 'Попробовать снова';
         break;
-      case "idle":
+      case 'idle':
       default:
         message = `Доступна новая версия Voice Hub (${update.version})`;
-        actionLabel = "Установить";
+        actionLabel = 'Установить';
         break;
     }
   }
 
   const onAction = () => {
     if (actionDisabled) return;
-    if (joinState === "joined") {
+    if (joinState === 'joined') {
       setRejoinFlag();
     }
     if (isDesktop) applyDesktopUpdate();

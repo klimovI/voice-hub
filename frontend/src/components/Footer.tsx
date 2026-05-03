@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { isTauri } from "../utils/tauri";
+import { useEffect, useState } from 'react';
+import { isTauri } from '../utils/tauri';
 
 interface Props {
   uiVersion: string | null;
@@ -11,7 +11,7 @@ export function Footer({ uiVersion }: Props) {
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
-    void import("@tauri-apps/api/app").then(({ getVersion }) =>
+    void import('@tauri-apps/api/app').then(({ getVersion }) =>
       getVersion().then((v) => {
         if (!cancelled) setAppVersion(v);
       }),
@@ -29,7 +29,7 @@ export function Footer({ uiVersion }: Props) {
 
   return (
     <footer className="text-center text-[11px] text-muted tracking-wide select-text">
-      {parts.join(" · ")}
+      {parts.join(' · ')}
     </footer>
   );
 }

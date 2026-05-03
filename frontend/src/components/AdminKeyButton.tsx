@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useIsAdmin } from "../hooks/useIsAdmin";
+import { useEffect, useState, useCallback } from 'react';
+import { useIsAdmin } from '../hooks/useIsAdmin';
 
 interface ConnPassStatus {
   exists: boolean;
@@ -14,17 +14,17 @@ interface RotateResponse {
   rotated_at: string;
 }
 
-type Mode = "info" | "rotated";
+type Mode = 'info' | 'rotated';
 
-const ENDPOINT = "/api/admin/connection-password";
+const ENDPOINT = '/api/admin/connection-password';
 
 function relativeTime(iso: string): string {
-  if (!iso || iso.startsWith("0001-")) return "никогда";
+  if (!iso || iso.startsWith('0001-')) return 'никогда';
   const t = new Date(iso).getTime();
   const diff = Date.now() - t;
   if (diff < 0) return new Date(iso).toLocaleString();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "только что";
+  if (mins < 1) return 'только что';
   if (mins < 60) return `${mins} мин назад`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours} ч назад`;
@@ -35,7 +35,7 @@ function relativeTime(iso: string): string {
 export function AdminKeyButton() {
   const isAdmin = useIsAdmin();
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<Mode>("info");
+  const [mode, setMode] = useState<Mode>('info');
   const [status, setStatus] = useState<ConnPassStatus | null>(null);
   const [rotated, setRotated] = useState<RotateResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +48,7 @@ export function AdminKeyButton() {
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
-    fetch(ENDPOINT, { credentials: "same-origin" })
+    fetch(ENDPOINT, { credentials: 'same-origin' })
       .then((res) => (res.ok ? res.json() : null))
       .then((s: ConnPassStatus | null) => {
         if (!cancelled && s) setStatus(s);
@@ -60,12 +60,12 @@ export function AdminKeyButton() {
   }, [isAdmin]);
 
   const refreshStatus = useCallback(async () => {
-    const res = await fetch(ENDPOINT, { credentials: "same-origin" });
+    const res = await fetch(ENDPOINT, { credentials: 'same-origin' });
     if (res.ok) setStatus(await res.json());
   }, []);
 
   const handleOpen = useCallback(() => {
-    setMode("info");
+    setMode('info');
     setRotated(null);
     setError(null);
     setOpen(true);
@@ -82,17 +82,17 @@ export function AdminKeyButton() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(ENDPOINT + "/rotate", {
-        method: "POST",
-        credentials: "same-origin",
+      const res = await fetch(ENDPOINT + '/rotate', {
+        method: 'POST',
+        credentials: 'same-origin',
       });
       if (!res.ok) {
-        setError("Не удалось сгенерировать пароль");
+        setError('Не удалось сгенерировать пароль');
         return;
       }
       const data = (await res.json()) as RotateResponse;
       setRotated(data);
-      setMode("rotated");
+      setMode('rotated');
       setStatus({
         exists: true,
         generation: data.generation,
@@ -106,16 +106,16 @@ export function AdminKeyButton() {
   }, []);
 
   const handleRevoke = useCallback(async () => {
-    if (!window.confirm("Отозвать доступ? Все пользователи будут разлогинены.")) return;
+    if (!window.confirm('Отозвать доступ? Все пользователи будут разлогинены.')) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(ENDPOINT + "/revoke", {
-        method: "POST",
-        credentials: "same-origin",
+      const res = await fetch(ENDPOINT + '/revoke', {
+        method: 'POST',
+        credentials: 'same-origin',
       });
       if (!res.ok) {
-        setError("Не удалось отозвать");
+        setError('Не удалось отозвать');
         return;
       }
       await refreshStatus();
@@ -138,7 +138,7 @@ export function AdminKeyButton() {
 
   if (!isAdmin) return null;
 
-  const shareBlock = rotated ? `Сервер: ${rotated.host}\nПароль: ${rotated.password}` : "";
+  const shareBlock = rotated ? `Сервер: ${rotated.host}\nПароль: ${rotated.password}` : '';
 
   return (
     <>
@@ -171,7 +171,7 @@ export function AdminKeyButton() {
           onClick={handleClose}
         >
           <div className="card w-[min(440px,100%)] p-6" onClick={(e) => e.stopPropagation()}>
-            {mode === "info" && (
+            {mode === 'info' && (
               <>
                 <h2 className="text-[16px] font-semibold m-0 mb-1 tracking-[-0.01em]">
                   Пароль подключения
@@ -179,7 +179,7 @@ export function AdminKeyButton() {
                 <div className="text-muted text-[13px] mb-5">
                   {status?.exists
                     ? `Создан: ${relativeTime(status.rotated_at)} · поколение #${status.generation}`
-                    : "Не настроен — пользователи не могут войти, пока вы не сгенерируете пароль."}
+                    : 'Не настроен — пользователи не могут войти, пока вы не сгенерируете пароль.'}
                 </div>
                 <div className="flex flex-col gap-2">
                   <button
@@ -188,7 +188,7 @@ export function AdminKeyButton() {
                     disabled={busy}
                     className="btn btn-primary w-full justify-center disabled:opacity-60"
                   >
-                    {status?.exists ? "Сгенерировать новый" : "Создать пароль"}
+                    {status?.exists ? 'Сгенерировать новый' : 'Создать пароль'}
                   </button>
                   {status?.exists && (
                     <button
@@ -212,7 +212,7 @@ export function AdminKeyButton() {
               </>
             )}
 
-            {mode === "rotated" && rotated && (
+            {mode === 'rotated' && rotated && (
               <>
                 <h2 className="text-[16px] font-semibold m-0 mb-1 tracking-[-0.01em]">
                   Новый пароль
@@ -227,16 +227,16 @@ export function AdminKeyButton() {
                   <button
                     type="button"
                     className="btn flex-1 justify-center"
-                    onClick={() => copy("share", shareBlock)}
+                    onClick={() => copy('share', shareBlock)}
                   >
-                    {copied === "share" ? "✓ Скопировано" : "Копировать всё"}
+                    {copied === 'share' ? '✓ Скопировано' : 'Копировать всё'}
                   </button>
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => copy("pw", rotated.password)}
+                    onClick={() => copy('pw', rotated.password)}
                   >
-                    {copied === "pw" ? "✓" : "Только пароль"}
+                    {copied === 'pw' ? '✓' : 'Только пароль'}
                   </button>
                 </div>
                 <button

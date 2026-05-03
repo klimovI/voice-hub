@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
-import { useStore } from "../store/useStore";
-import { defaultBinding, formatBinding, saveBinding, type InputBinding } from "../utils/binding";
-import { useKeyboardCapture, type HotkeyApi } from "./useKeyboardCapture";
+import { useCallback, useState } from 'react';
+import { useStore } from '../store/useStore';
+import { defaultBinding, formatBinding, saveBinding, type InputBinding } from '../utils/binding';
+import { useKeyboardCapture, type HotkeyApi } from './useKeyboardCapture';
 
 export function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi {
   const binding = useStore((s) => s.shortcut);
@@ -33,7 +33,7 @@ export function useWebHotkey(onStatusMessage: (msg: string) => void): HotkeyApi 
   const clear = useCallback(() => {
     setShortcut(null);
     saveBinding(null);
-    onStatusMessage("Горячая клавиша очищена");
+    onStatusMessage('Горячая клавиша очищена');
   }, [setShortcut, onStatusMessage]);
 
   const reset = useCallback(() => {

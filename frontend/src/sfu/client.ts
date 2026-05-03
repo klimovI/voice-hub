@@ -13,7 +13,7 @@ import {
   type PeerInfo,
   type PeerLeftPayload,
   type PeerStatePayload,
-} from "./protocol";
+} from './protocol';
 
 export type SFUHandlers = {
   onState: (state: string) => void;
@@ -70,7 +70,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   }
 
   function connect(opts: ConnectOptions): Promise<void> {
-    if (ws || pc) throw new Error("sfu-client: already connected");
+    if (ws || pc) throw new Error('sfu-client: already connected');
     stopped = false;
 
     pc = new RTCPeerConnection({ iceServers: opts.iceServers ?? [] });
@@ -85,7 +85,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     pc.onicecandidate = (event) => {
       if (!event.candidate) return;
-      send("candidate", event.candidate.toJSON ? event.candidate.toJSON() : event.candidate);
+      send('candidate', event.candidate.toJSON ? event.candidate.toJSON() : event.candidate);
     };
 
     pc.onconnectionstatechange = () => {
@@ -102,7 +102,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          reject(new Error("sfu-client: welcome timeout"));
+          reject(new Error('sfu-client: welcome timeout'));
           disconnect();
         }
       }, 10000);
@@ -110,11 +110,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       ws = new WebSocket(opts.wsUrl);
 
       ws.onopen = () => {
-        on.onState("connecting");
+        on.onState('connecting');
         ws!.send(
           JSON.stringify({
-            event: "hello",
-            data: { displayName: opts.displayName ?? "", clientId: opts.clientId },
+            event: 'hello',
+            data: { displayName: opts.displayName ?? '', clientId: opts.clientId },
           }),
         );
       };
@@ -124,12 +124,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
-          reject(new Error("sfu-client: websocket error"));
+          reject(new Error('sfu-client: websocket error'));
         }
       };
 
       ws.onclose = () => {
-        if (!stopped) on.onState("closed");
+        if (!stopped) on.onState('closed');
       };
 
       ws.onmessage = async (event) => {
@@ -140,7 +140,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         } catch (err) {
           on.onError(err);
         }
-        if (msg.event === "welcome" && !resolved) {
+        if (msg.event === 'welcome' && !resolved) {
           resolved = true;
           clearTimeout(timer);
           resolve();
@@ -151,31 +151,31 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   async function handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.event) {
-      case "welcome":
+      case 'welcome':
         myId = msg.data.id;
         on.onWelcome(msg.data);
         break;
-      case "peer-joined":
+      case 'peer-joined':
         on.onPeerJoined(msg.data);
         break;
-      case "peer-left":
+      case 'peer-left':
         on.onPeerLeft(msg.data);
         break;
-      case "peer-info":
+      case 'peer-info':
         on.onPeerInfo(msg.data);
         break;
-      case "peer-state":
+      case 'peer-state':
         on.onPeerState(msg.data);
         break;
-      case "offer": {
+      case 'offer': {
         if (!pc) return;
         await pc.setRemoteDescription(msg.data);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        send("answer", answer);
+        send('answer', answer);
         break;
       }
-      case "candidate":
+      case 'candidate':
         if (!pc) return;
         try {
           await pc.addIceCandidate(msg.data);
@@ -187,11 +187,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   }
 
   function setDisplayName(name: string): void {
-    send("set-displayname", { displayName: name });
+    send('set-displayname', { displayName: name });
   }
 
   function sendSetState(selfMuted: boolean, deafened: boolean): void {
-    send("set-state", { selfMuted, deafened });
+    send('set-state', { selfMuted, deafened });
   }
 
   function getPeerConnection(): RTCPeerConnection | null {

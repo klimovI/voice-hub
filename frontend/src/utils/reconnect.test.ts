@@ -5,8 +5,8 @@
 //
 // Uses vi.useFakeTimers() — no DOM, no React, pure node env.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createReconnectScheduler } from "./reconnect";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createReconnectScheduler } from './reconnect';
 
 const DELAYS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
 
@@ -43,14 +43,14 @@ afterEach(() => {
 // Exponential backoff progression
 // ---------------------------------------------------------------------------
 
-describe("backoff progression", () => {
-  it("fires first attempt after 1000 ms", async () => {
+describe('backoff progression', () => {
+  it('fires first attempt after 1000 ms', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
       }),
     );
@@ -65,13 +65,13 @@ describe("backoff progression", () => {
     expect(fired).toEqual([0]);
   });
 
-  it("fires second attempt after cumulative 3000 ms (1000 + 2000)", async () => {
+  it('fires second attempt after cumulative 3000 ms (1000 + 2000)', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
       }),
     );
@@ -84,13 +84,13 @@ describe("backoff progression", () => {
     expect(fired).toEqual([0, 1]);
   });
 
-  it("fires all 7 attempts at the correct cumulative delays", async () => {
+  it('fires all 7 attempts at the correct cumulative delays', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
         onExhausted: vi.fn(),
       }),
@@ -112,13 +112,13 @@ describe("backoff progression", () => {
 // Cap behaviour — after the last delay slot, onExhausted is called
 // ---------------------------------------------------------------------------
 
-describe("cap / exhaustion behaviour", () => {
-  it("calls onExhausted after all delay slots are consumed", async () => {
+describe('cap / exhaustion behaviour', () => {
+  it('calls onExhausted after all delay slots are consumed', async () => {
     const exhausted = vi.fn();
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async () => {
-          throw new Error("fail");
+          throw new Error('fail');
         },
         onExhausted: exhausted,
       }),
@@ -138,13 +138,13 @@ describe("cap / exhaustion behaviour", () => {
     expect(exhausted).toHaveBeenCalledTimes(1);
   });
 
-  it("makes no further attempts after exhaustion", async () => {
+  it('makes no further attempts after exhaustion', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
         onExhausted: vi.fn(),
       }),
@@ -166,8 +166,8 @@ describe("cap / exhaustion behaviour", () => {
 // isLeaving — early exit cancels the pending attempt
 // ---------------------------------------------------------------------------
 
-describe("isLeaving guard", () => {
-  it("does not fire an attempt if isLeaving is true before schedule() is called", async () => {
+describe('isLeaving guard', () => {
+  it('does not fire an attempt if isLeaving is true before schedule() is called', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
@@ -183,14 +183,14 @@ describe("isLeaving guard", () => {
     expect(fired).toHaveLength(0);
   });
 
-  it("skips the attempt when isLeaving becomes true mid-backoff", async () => {
+  it('skips the attempt when isLeaving becomes true mid-backoff', async () => {
     const fired: number[] = [];
     let leaving = false;
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
         isLeaving: () => leaving,
       }),
@@ -208,14 +208,14 @@ describe("isLeaving guard", () => {
     expect(fired).toHaveLength(1); // no new attempt
   });
 
-  it("does not schedule if isLeaving is already true at schedule() call", async () => {
+  it('does not schedule if isLeaving is already true at schedule() call', async () => {
     const fired: number[] = [];
     let leaving = false;
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
         isLeaving: () => leaving,
       }),
@@ -233,14 +233,14 @@ describe("isLeaving guard", () => {
 // Reset on success
 // ---------------------------------------------------------------------------
 
-describe("reset on success", () => {
-  it("resets the attempt counter to 0 after a successful onAttempt", async () => {
+describe('reset on success', () => {
+  it('resets the attempt counter to 0 after a successful onAttempt', async () => {
     let callCount = 0;
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async () => {
           callCount++;
-          if (callCount === 1) throw new Error("first attempt fails");
+          if (callCount === 1) throw new Error('first attempt fails');
           // second attempt succeeds — no throw
         },
       }),
@@ -259,13 +259,13 @@ describe("reset on success", () => {
     expect(sched.attemptIndex).toBe(0); // reset to 0 after success
   });
 
-  it("after a reset(), a fresh schedule() starts from delay[0] again", async () => {
+  it('after a reset(), a fresh schedule() starts from delay[0] again', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({
         onAttempt: async (i) => {
           fired.push(i);
-          throw new Error("fail");
+          throw new Error('fail');
         },
       }),
     );
@@ -293,8 +293,8 @@ describe("reset on success", () => {
 // Idempotency — duplicate schedule() calls do not double-queue
 // ---------------------------------------------------------------------------
 
-describe("idempotency", () => {
-  it("calling schedule() twice before the timer fires does not double-queue", async () => {
+describe('idempotency', () => {
+  it('calling schedule() twice before the timer fires does not double-queue', async () => {
     const fired: number[] = [];
     const sched = createReconnectScheduler(
       makeOpts({

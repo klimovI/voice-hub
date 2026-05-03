@@ -1,6 +1,6 @@
-import { AdminKeyButton } from "./AdminKeyButton";
-import { LogoutButton } from "./LogoutButton";
-import { StatusPill } from "./StatusPill";
+import { AdminKeyButton } from './AdminKeyButton';
+import { LogoutButton } from './LogoutButton';
+import { StatusPill } from './StatusPill';
 
 export function TopBar() {
   return (

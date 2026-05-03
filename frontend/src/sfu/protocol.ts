@@ -80,22 +80,22 @@ export type SetStatePayload = {
 // Discriminated union — all server→client variants
 
 export type ServerMessage =
-  | { event: "welcome"; data: WelcomePayload }
-  | { event: "peer-joined"; data: PeerInfo }
-  | { event: "peer-left"; data: PeerLeftPayload }
-  | { event: "peer-info"; data: PeerInfo }
-  | { event: "peer-state"; data: PeerStatePayload }
-  | { event: "offer"; data: RTCSessionDescriptionInit }
-  | { event: "candidate"; data: RTCIceCandidateInit };
+  | { event: 'welcome'; data: WelcomePayload }
+  | { event: 'peer-joined'; data: PeerInfo }
+  | { event: 'peer-left'; data: PeerLeftPayload }
+  | { event: 'peer-info'; data: PeerInfo }
+  | { event: 'peer-state'; data: PeerStatePayload }
+  | { event: 'offer'; data: RTCSessionDescriptionInit }
+  | { event: 'candidate'; data: RTCIceCandidateInit };
 
 // ClientMessage union (used in send helpers)
 
 export type ClientMessage =
-  | { event: "hello"; data: HelloPayload }
-  | { event: "answer"; data: RTCSessionDescriptionInit }
-  | { event: "candidate"; data: RTCIceCandidateInit }
-  | { event: "set-displayname"; data: SetDisplayNamePayload }
-  | { event: "set-state"; data: SetStatePayload };
+  | { event: 'hello'; data: HelloPayload }
+  | { event: 'answer'; data: RTCSessionDescriptionInit }
+  | { event: 'candidate'; data: RTCIceCandidateInit }
+  | { event: 'set-displayname'; data: SetDisplayNamePayload }
+  | { event: 'set-state'; data: SetStatePayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -115,15 +115,15 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    console.warn("[protocol] failed to JSON.parse message:", raw);
+    console.warn('[protocol] failed to JSON.parse message:', raw);
     return null;
   }
 
   if (
-    typeof parsed !== "object" ||
+    typeof parsed !== 'object' ||
     parsed === null ||
-    !("event" in parsed) ||
-    typeof (parsed as Record<string, unknown>).event !== "string"
+    !('event' in parsed) ||
+    typeof (parsed as Record<string, unknown>).event !== 'string'
   ) {
     console.warn("[protocol] message missing string 'event':", parsed);
     return null;
@@ -133,11 +133,11 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   const { event, data } = envelope;
 
   switch (event) {
-    case "welcome": {
+    case 'welcome': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).id !== "string" ||
+        typeof (data as Record<string, unknown>).id !== 'string' ||
         !Array.isArray((data as Record<string, unknown>).peers)
       ) {
         console.warn("[protocol] malformed 'welcome' payload:", data);
@@ -146,12 +146,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { event, data: data as WelcomePayload };
     }
 
-    case "peer-joined":
-    case "peer-info": {
+    case 'peer-joined':
+    case 'peer-info': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).id !== "string"
+        typeof (data as Record<string, unknown>).id !== 'string'
       ) {
         console.warn(`[protocol] malformed '${event}' payload:`, data);
         return null;
@@ -159,13 +159,13 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { event, data: data as PeerInfo };
     }
 
-    case "peer-state": {
+    case 'peer-state': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).id !== "string" ||
-        typeof (data as Record<string, unknown>).selfMuted !== "boolean" ||
-        typeof (data as Record<string, unknown>).deafened !== "boolean"
+        typeof (data as Record<string, unknown>).id !== 'string' ||
+        typeof (data as Record<string, unknown>).selfMuted !== 'boolean' ||
+        typeof (data as Record<string, unknown>).deafened !== 'boolean'
       ) {
         console.warn("[protocol] malformed 'peer-state' payload:", data);
         return null;
@@ -173,11 +173,11 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { event, data: data as PeerStatePayload };
     }
 
-    case "peer-left": {
+    case 'peer-left': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).id !== "string"
+        typeof (data as Record<string, unknown>).id !== 'string'
       ) {
         console.warn("[protocol] malformed 'peer-left' payload:", data);
         return null;
@@ -185,12 +185,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { event, data: data as PeerLeftPayload };
     }
 
-    case "offer": {
+    case 'offer': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).type !== "string" ||
-        typeof (data as Record<string, unknown>).sdp !== "string"
+        typeof (data as Record<string, unknown>).type !== 'string' ||
+        typeof (data as Record<string, unknown>).sdp !== 'string'
       ) {
         console.warn("[protocol] malformed 'offer' payload:", data);
         return null;
@@ -198,11 +198,11 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { event, data: data as RTCSessionDescriptionInit };
     }
 
-    case "candidate": {
+    case 'candidate': {
       if (
-        typeof data !== "object" ||
+        typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).candidate !== "string"
+        typeof (data as Record<string, unknown>).candidate !== 'string'
       ) {
         console.warn("[protocol] malformed 'candidate' payload:", data);
         return null;
@@ -211,7 +211,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     }
 
     default:
-      console.warn("[protocol] unknown server event:", event);
+      console.warn('[protocol] unknown server event:', event);
       return null;
   }
 }

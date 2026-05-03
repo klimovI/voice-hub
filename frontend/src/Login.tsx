@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
-import { isTauri } from "./utils/tauri";
-import "./styles/main.css";
+import { useState, useRef } from 'react';
+import { isTauri } from './utils/tauri';
+import './styles/main.css';
 
 export function Login() {
   const [submitting, setSubmitting] = useState(false);
@@ -11,8 +11,8 @@ export function Login() {
   // reach the in-app TopBar button, so expose a way out from the login screen.
   // Same Tauri command as the TopBar / tray entry.
   async function handleChangeServer() {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("change_server");
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('change_server');
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -21,28 +21,28 @@ export function Login() {
     setSubmitting(true);
 
     const form = e.currentTarget;
-    const passwordInput = form.elements.namedItem("password") as HTMLInputElement;
+    const passwordInput = form.elements.namedItem('password') as HTMLInputElement;
     const body = new URLSearchParams();
-    body.set("password", passwordInput.value);
+    body.set('password', passwordInput.value);
 
     try {
-      const res = await fetch("/api/login", {
-        method: "POST",
+      const res = await fetch('/api/login', {
+        method: 'POST',
         body,
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
       if (res.status === 204) {
-        window.location.replace("/");
+        window.location.replace('/');
         return;
       }
       if (res.status === 429) {
-        setError("Слишком много попыток. Подождите 15 минут.");
+        setError('Слишком много попыток. Подождите 15 минут.');
         return;
       }
-      setError("Неверный пароль.");
+      setError('Неверный пароль.');
     } catch (err) {
-      setError("Сетевая ошибка: " + (err instanceof Error ? err.message : String(err)));
+      setError('Сетевая ошибка: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSubmitting(false);
     }

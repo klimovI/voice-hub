@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useStore } from "../store/useStore";
+import { useEffect, useState } from 'react';
+import { useStore } from '../store/useStore';
 
 export interface PeerPreview {
   id: string;
@@ -14,9 +14,9 @@ interface PeersResponse {
 
 async function fetchPeers(): Promise<PeerPreview[] | null> {
   try {
-    const res = await fetch("/api/room/peers", {
-      credentials: "same-origin",
-      cache: "no-store",
+    const res = await fetch('/api/room/peers', {
+      credentials: 'same-origin',
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     const data = (await res.json()) as PeersResponse;
@@ -37,7 +37,7 @@ export function usePeersPreview(): PeerPreview[] {
   const [peers, setPeers] = useState<PeerPreview[]>([]);
 
   useEffect(() => {
-    if (joinState === "joined") {
+    if (joinState === 'joined') {
       setPeers([]);
       return;
     }
@@ -47,7 +47,7 @@ export function usePeersPreview(): PeerPreview[] {
 
     const tick = async () => {
       if (cancelled) return;
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }

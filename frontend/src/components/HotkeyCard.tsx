@@ -1,7 +1,7 @@
-import { useTauriHotkey } from "../hooks/useTauriHotkey";
-import { useWebHotkey } from "../hooks/useWebHotkey";
-import { isTauri } from "../utils/tauri";
-import { HotkeyCardView } from "./HotkeyCardView";
+import { useTauriHotkey } from '../hooks/useTauriHotkey';
+import { useWebHotkey } from '../hooks/useWebHotkey';
+import { isTauri } from '../utils/tauri';
+import { HotkeyCardView } from './HotkeyCardView';
 
 type Props = {
   onStatusMessage: (msg: string) => void;

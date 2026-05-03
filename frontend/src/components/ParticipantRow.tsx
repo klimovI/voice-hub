@@ -1,7 +1,7 @@
-import { useStore } from "../store/useStore";
-import { savePeerVolume } from "../utils/storage";
-import type { ParticipantUI } from "../types";
-import { VolumeIcon, VolumeOffIcon, MicOffIcon, HeadphonesOffIcon } from "./icons";
+import { useStore } from '../store/useStore';
+import { savePeerVolume } from '../utils/storage';
+import type { ParticipantUI } from '../types';
+import { VolumeIcon, VolumeOffIcon, MicOffIcon, HeadphonesOffIcon } from './icons';
 
 interface Props {
   participant: ParticipantUI;
@@ -15,41 +15,41 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
   const isReady = participant.isSelf || participant.hasStream;
 
   let metaText: string;
-  let metaTone: "good" | "danger" | "muted" | "connecting";
+  let metaTone: 'good' | 'danger' | 'muted' | 'connecting';
   if (participant.isSelf) {
     if (participant.selfMuted) {
-      metaText = "микрофон выключен";
-      metaTone = "danger";
+      metaText = 'микрофон выключен';
+      metaTone = 'danger';
     } else if (participant.speaking) {
-      metaText = "говорит";
-      metaTone = "good";
+      metaText = 'говорит';
+      metaTone = 'good';
     } else {
-      metaText = "в эфире";
-      metaTone = "muted";
+      metaText = 'в эфире';
+      metaTone = 'muted';
     }
   } else if (participant.hasStream) {
     if (participant.localMuted) {
-      metaText = "заглушён вами";
-      metaTone = "danger";
+      metaText = 'заглушён вами';
+      metaTone = 'danger';
     } else if (participant.remoteDeafened) {
-      metaText = "в наушниках";
-      metaTone = "danger";
+      metaText = 'в наушниках';
+      metaTone = 'danger';
     } else if (participant.remoteMuted) {
-      metaText = "микрофон выключен";
-      metaTone = "danger";
+      metaText = 'микрофон выключен';
+      metaTone = 'danger';
     } else if (participant.speaking) {
-      metaText = "говорит";
-      metaTone = "good";
+      metaText = 'говорит';
+      metaTone = 'good';
     } else {
-      metaText = "слышно";
-      metaTone = "muted";
+      metaText = 'слышно';
+      metaTone = 'muted';
     }
   } else {
-    metaText = "подключается";
-    metaTone = "connecting";
+    metaText = 'подключается';
+    metaTone = 'connecting';
   }
 
-  const initial = (participant.display || "?").trim().charAt(0).toUpperCase() || "?";
+  const initial = (participant.display || '?').trim().charAt(0).toUpperCase() || '?';
 
   function handleToggleMute() {
     updateParticipant(participant.id, { localMuted: !participant.localMuted });
@@ -66,25 +66,25 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
   }
 
   const rowClass = participant.speaking
-    ? "border-accent shadow-[0_0_0_1px_var(--color-accent),0_8px_30px_-10px_rgba(34,197,94,0.45)] " +
-      "bg-[linear-gradient(180deg,rgba(34,197,94,0.14),transparent)] bg-bg-2"
+    ? 'border-accent shadow-[0_0_0_1px_var(--color-accent),0_8px_30px_-10px_rgba(34,197,94,0.45)] ' +
+      'bg-[linear-gradient(180deg,rgba(34,197,94,0.14),transparent)] bg-bg-2'
     : isMuted
-      ? "border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3"
+      ? 'border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3'
       : !isReady
-        ? "border-line bg-bg-2"
-        : "border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3";
+        ? 'border-line bg-bg-2'
+        : 'border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3';
 
   const metaDotClass =
-    metaTone === "good"
-      ? "bg-good shadow-[0_0_0_3px_rgba(34,197,94,0.14)]"
-      : metaTone === "danger"
-        ? "bg-danger"
-        : metaTone === "connecting"
-          ? "bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite]"
-          : "bg-muted-2";
+    metaTone === 'good'
+      ? 'bg-good shadow-[0_0_0_3px_rgba(34,197,94,0.14)]'
+      : metaTone === 'danger'
+        ? 'bg-danger'
+        : metaTone === 'connecting'
+          ? 'bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite]'
+          : 'bg-muted-2';
 
   const metaTextClass =
-    metaTone === "good" ? "text-good" : metaTone === "danger" ? "text-danger" : "text-muted";
+    metaTone === 'good' ? 'text-good' : metaTone === 'danger' ? 'text-danger' : 'text-muted';
 
   return (
     <div
@@ -132,9 +132,9 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
               type="button"
               onClick={handleToggleMute}
               aria-pressed={participant.localMuted}
-              aria-label={participant.localMuted ? "Слушать" : "Заглушить"}
-              title={participant.localMuted ? "Слушать" : "Заглушить"}
-              className={`btn btn-mini justify-center p-0! w-9 h-9 rounded-full ${participant.localMuted ? "btn-toggle-on" : "btn-secondary"}`}
+              aria-label={participant.localMuted ? 'Слушать' : 'Заглушить'}
+              title={participant.localMuted ? 'Слушать' : 'Заглушить'}
+              className={`btn btn-mini justify-center p-0! w-9 h-9 rounded-full ${participant.localMuted ? 'btn-toggle-on' : 'btn-secondary'}`}
             >
               {participant.localMuted ? <VolumeOffIcon /> : <VolumeIcon />}
             </button>

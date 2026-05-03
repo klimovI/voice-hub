@@ -1,10 +1,10 @@
-import { formatBinding } from "../utils/binding";
-import { type HotkeyApi } from "../hooks/useKeyboardCapture";
+import { formatBinding } from '../utils/binding';
+import { type HotkeyApi } from '../hooks/useKeyboardCapture';
 
 export function HotkeyCardView({ api }: { api: HotkeyApi }) {
   let display: string;
   if (api.capturing) {
-    display = api.liveKeys.length > 0 ? api.liveKeys.join(" + ") : "Зажмите комбинацию…";
+    display = api.liveKeys.length > 0 ? api.liveKeys.join(' + ') : 'Зажмите комбинацию…';
   } else {
     display = formatBinding(api.binding);
   }
@@ -27,8 +27,8 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
         />
       </label>
       <p className="text-[11px] text-muted leading-snug -mt-1">
-        Совет: модификатор (Ctrl / Shift / Alt) и клавиша или боковая кнопка мыши. Зажмите комбинацию
-        одновременно и отпустите — запишется при отпускании.
+        Совет: модификатор (Ctrl / Shift / Alt) и клавиша или боковая кнопка мыши. Зажмите
+        комбинацию одновременно и отпустите — запишется при отпускании.
       </p>
       <div className="flex flex-wrap gap-2.5">
         <button

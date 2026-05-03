@@ -8,11 +8,11 @@
 // Does NOT own: mute/deafen boolean state (App), output mute/deafen UX (App),
 // status messages for engine switch (App wraps switchEngine in try/catch).
 
-import { useRef, useEffect, useCallback } from "react";
-import { useStore } from "../store/useStore";
-import { useAudioEngine } from "./useAudioEngine";
-import { preloadEngine, isEngineReady } from "../audio/engine";
-import { useSFU } from "./useSFU";
+import { useRef, useEffect, useCallback } from 'react';
+import { useStore } from '../store/useStore';
+import { useAudioEngine } from './useAudioEngine';
+import { preloadEngine, isEngineReady } from '../audio/engine';
+import { useSFU } from './useSFU';
 import {
   clearLegacyStorage,
   loadOrCreateDisplayName,
@@ -20,13 +20,13 @@ import {
   consumeRejoinFlag,
   loadOrCreateClientId,
   loadPeerVolume,
-} from "../utils/storage";
-import { makeGuestName, formatEngine } from "../utils/clamp";
-import { loadAppConfig, buildWsUrl } from "../config";
-import { isTauri } from "../utils/tauri";
-import { createReconnectScheduler } from "../utils/reconnect";
-import type { EngineKind } from "../types";
-import type { MicGraph } from "../audio/mic-graph";
+} from '../utils/storage';
+import { makeGuestName, formatEngine } from '../utils/clamp';
+import { loadAppConfig, buildWsUrl } from '../config';
+import { isTauri } from '../utils/tauri';
+import { createReconnectScheduler } from '../utils/reconnect';
+import type { EngineKind } from '../types';
+import type { MicGraph } from '../audio/mic-graph';
 
 export type UseSessionManagerDeps = {
   audio: ReturnType<typeof useAudioEngine>;
@@ -94,7 +94,7 @@ export function useSessionManager({
 
   // Reconnect state.
   const userLeavingRef = useRef<boolean>(false);
-  const lastDisplayNameRef = useRef<string>("");
+  const lastDisplayNameRef = useRef<string>('');
 
   // Config loaded at mount — needed by connectSfu.
   const configRef = useRef<{ iceServers: RTCIceServer[] } | null>(null);
@@ -113,7 +113,7 @@ export function useSessionManager({
   // connectSfu is defined below but the scheduler's onAttempt callback needs
   // to call it. A ref breaks the forward-reference cycle.
   const connectSfuRef = useRef<(graph: MicGraph, display: string) => Promise<void>>(async () => {
-    throw new Error("connectSfu not yet initialised");
+    throw new Error('connectSfu not yet initialised');
   });
 
   // ---- Action surface helpers (stable, ref-based) ----
@@ -176,9 +176,7 @@ export function useSessionManager({
 
   const switchMicDevice = useCallback(async (): Promise<void> => {
     const s = useStore.getState();
-    const graph = await audio.switchMicDevice(s.engine, s.selfMuted, () =>
-      sfu.getPeerConnection(),
-    );
+    const graph = await audio.switchMicDevice(s.engine, s.selfMuted, () => sfu.getPeerConnection());
     micGraphRef.current = graph;
     attachSpeakingLoop(graph);
   }, [audio, sfu, attachSpeakingLoop]);
@@ -213,14 +211,14 @@ export function useSessionManager({
       delays: RECONNECT_DELAYS_MS,
       isLeaving: () => userLeavingRef.current,
       onExhausted: () => {
-        store.setStatus("Не удалось переподключиться. Перезайдите вручную.", true, true);
+        store.setStatus('Не удалось переподключиться. Перезайдите вручную.', true, true);
       },
       onAttempt: async () => {
         const graph = micGraphRef.current;
         if (!graph) {
           // Mic gone — treat as terminal; reset so manual re-join starts fresh.
           reconnectSchedulerRef.current.reset();
-          throw new Error("mic graph gone");
+          throw new Error('mic graph gone');
         }
         sfu.disconnect();
         audio.cleanupAllRemote();
@@ -237,15 +235,15 @@ export function useSessionManager({
   const connectSfu = useCallback(
     async (graph: MicGraph, display: string): Promise<void> => {
       const cfg = configRef.current;
-      if (!cfg) throw new Error("Config not loaded");
+      if (!cfg) throw new Error('Config not loaded');
 
       const client = sfu.createClient({
         onState: (s) => {
-          if (s === "connected") {
+          if (s === 'connected') {
             reconnectSchedulerRef.current.reset();
-            store.setStatus("Подключено", false, true);
-          } else if (s === "failed" || s === "closed") {
-            if (useStore.getState().joinState === "joined" && !userLeavingRef.current) {
+            store.setStatus('Подключено', false, true);
+          } else if (s === 'failed' || s === 'closed') {
+            if (useStore.getState().joinState === 'joined' && !userLeavingRef.current) {
               const nextAttempt = reconnectSchedulerRef.current.attemptIndex + 1;
               store.setStatus(
                 `Соединение оборвалось, переподключаюсь (попытка ${nextAttempt})…`,
@@ -307,7 +305,7 @@ export function useSessionManager({
           store.updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
         onTrack: ({ track, stream, peerId }) => {
-          if (!peerId || track.kind !== "audio") return;
+          if (!peerId || track.kind !== 'audio') return;
           store.upsertParticipant({ id: peerId, hasStream: true });
           audio.attachRemoteStream(peerId, stream);
         },
@@ -351,20 +349,20 @@ export function useSessionManager({
     micGraphRef.current = null;
     peerIdRef.current = null;
     store.clearParticipants();
-    store.setJoinState("idle");
+    store.setJoinState('idle');
     store.setSelfMuted(false);
     store.setDeafened(false);
-    store.setStatus("Отключено");
+    store.setStatus('Отключено');
   }, [sfu, audio, store]);
 
   // ---- Join ----
 
   const handleJoin = useCallback(
     async (name: string) => {
-      if (store.joinState === "joined") return;
+      if (store.joinState === 'joined') return;
       const cfg = configRef.current;
       if (!cfg) {
-        store.setStatus("Конфигурация не загружена", true);
+        store.setStatus('Конфигурация не загружена', true);
         return;
       }
 
@@ -378,34 +376,34 @@ export function useSessionManager({
       reconnectSchedulerRef.current.reset();
       lastDisplayNameRef.current = display;
 
-      store.setJoinState("joining");
-      store.setStatus("Запрашиваю микрофон…");
+      store.setJoinState('joining');
+      store.setStatus('Запрашиваю микрофон…');
 
       // Hot-swap path: join with engine=off if WASM not ready yet, rebuild in
       // background so users enter the room without waiting for the vendor fetch.
       const targetEngine = store.engine;
       const denoiserReady = isEngineReady(targetEngine);
-      const initialEngine: EngineKind = denoiserReady ? targetEngine : "off";
+      const initialEngine: EngineKind = denoiserReady ? targetEngine : 'off';
       if (!denoiserReady) {
         void preloadEngine(targetEngine);
       }
 
       try {
         const graph = await audio.prepareLocalAudio(initialEngine, (stage) => {
-          if (stage === "mic-ready" && initialEngine !== "off") {
-            store.setStatus("Загружаю шумоподавление…");
+          if (stage === 'mic-ready' && initialEngine !== 'off') {
+            store.setStatus('Загружаю шумоподавление…');
           }
         });
         micGraphRef.current = graph;
 
-        store.setStatus("Подключаюсь…");
+        store.setStatus('Подключаюсь…');
         await connectSfu(graph, display);
 
-        store.setJoinState("joined");
+        store.setJoinState('joined');
         if (!denoiserReady) {
-          store.setStatus("Подключено. Шумоподавление загружается…", false, true);
+          store.setStatus('Подключено. Шумоподавление загружается…', false, true);
         } else {
-          store.setStatus("Подключено", false, true);
+          store.setStatus('Подключено', false, true);
         }
 
         if (!denoiserReady) {
@@ -415,7 +413,7 @@ export function useSessionManager({
           void preloadEngine(targetEngine).then(async () => {
             if (micGraphRef.current !== pendingGraph) return;
             const s = useStore.getState();
-            if (s.joinState !== "joined") return;
+            if (s.joinState !== 'joined') return;
             if (s.engine !== targetEngine) return;
             try {
               await switchEngine(targetEngine);
@@ -453,7 +451,7 @@ export function useSessionManager({
       .then((cfg) => {
         configRef.current = cfg;
         store.setConfigReady(true);
-        store.setStatus("Готово");
+        store.setStatus('Готово');
         if (shouldRejoin) {
           void handleJoinRef.current?.(loadOrCreateDisplayName(makeGuestName));
         }
@@ -475,9 +473,9 @@ export function useSessionManager({
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen("toggle-mute", () => {
-        if (useStore.getState().joinState !== "joined") return;
+    void import('@tauri-apps/api/event').then(({ listen }) =>
+      listen('toggle-mute', () => {
+        if (useStore.getState().joinState !== 'joined') return;
         onTauriToggleMuteRef.current();
       }).then((off) => {
         if (cancelled) off();

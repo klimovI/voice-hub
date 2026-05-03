@@ -1,6 +1,6 @@
-import { useStore } from "../store/useStore";
-import { ParticipantRow } from "./ParticipantRow";
-import { usePeersPreview, type PeerPreview } from "../hooks/usePeersPreview";
+import { useStore } from '../store/useStore';
+import { ParticipantRow } from './ParticipantRow';
+import { usePeersPreview, type PeerPreview } from '../hooks/usePeersPreview';
 
 interface Props {
   onRemoteGainChange: () => void;
@@ -17,16 +17,14 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
     return a.display.localeCompare(b.display);
   });
 
-  const showPreview = sorted.length === 0 && joinState !== "joined" && preview.length > 0;
+  const showPreview = sorted.length === 0 && joinState !== 'joined' && preview.length > 0;
   const showEmpty = sorted.length === 0 && !showPreview;
 
   return (
     <section className="card">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="card-title">Участники</h2>
-        {showPreview && (
-          <span className="card-hint">В комнате — войдите, чтобы говорить</span>
-        )}
+        {showPreview && <span className="card-hint">В комнате — войдите, чтобы говорить</span>}
       </div>
       <div id="participants" className="grid gap-2.5">
         {showEmpty && (
@@ -44,7 +42,7 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
 }
 
 function PeerPreviewRow({ peer }: { peer: PeerPreview }) {
-  const initial = (peer.displayName || "?").trim().charAt(0).toUpperCase() || "?";
+  const initial = (peer.displayName || '?').trim().charAt(0).toUpperCase() || '?';
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 items-center px-4 py-3.5 border border-line rounded-[14px] bg-bg-2 opacity-80">
       <div className="grid grid-cols-[36px_1fr] gap-3 items-center min-w-0">

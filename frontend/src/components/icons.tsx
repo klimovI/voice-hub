@@ -2,17 +2,17 @@ type IconProps = {
   className?: string;
 };
 
-const STROKE = "currentColor";
+const STROKE = 'currentColor';
 const COMMON = {
   width: 20,
   height: 20,
-  viewBox: "0 0 24 24",
-  fill: "none",
+  viewBox: '0 0 24 24',
+  fill: 'none',
   stroke: STROKE,
   strokeWidth: 2,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-  "aria-hidden": true,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
 };
 
 export function PhoneIcon({ className }: IconProps) {

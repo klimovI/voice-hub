@@ -18,7 +18,7 @@ function playGlide(from: number, to: number): void {
   const t0 = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.type = "sine";
+  osc.type = 'sine';
   osc.frequency.setValueAtTime(from, t0);
   osc.frequency.exponentialRampToValueAtTime(to, t0 + DURATION);
   gain.gain.setValueAtTime(0, t0);

@@ -2,9 +2,9 @@
 // Owns refs to AudioContext, MicGraph, and remote audio nodes.
 // Does NOT put AudioNode instances into zustand.
 
-import { useRef, useCallback } from "react";
-import { useStore } from "../store/useStore";
-import type { EngineKind } from "../types";
+import { useRef, useCallback } from 'react';
+import { useStore } from '../store/useStore';
+import type { EngineKind } from '../types';
 import {
   buildMicGraph,
   teardownMicGraph,
@@ -12,8 +12,8 @@ import {
   startSpeakingLoop,
   createLocalAudioContext,
   type MicGraph,
-} from "../audio/mic-graph";
-import { setRnnoiseMix } from "../audio/rnnoise";
+} from '../audio/mic-graph';
+import { setRnnoiseMix } from '../audio/rnnoise';
 import {
   createRemoteAudioContext,
   setupParticipantAudio,
@@ -22,8 +22,8 @@ import {
   createRemoteSpeakingLoop,
   type RemoteParticipantAudio,
   type RemoteSpeakingLoop,
-} from "../audio/remote";
-import { preloadEngine } from "../audio/engine";
+} from '../audio/remote';
+import { preloadEngine } from '../audio/engine';
 
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
@@ -60,7 +60,7 @@ export function useAudioEngine() {
 
   const acquireMic = useCallback(async () => {
     const r = refs.current;
-    const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === "live");
+    const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === 'live');
     if (haveLiveMic) return;
     const deviceId = useStore.getState().micDeviceId;
     const baseConstraints: MediaTrackConstraints = {
@@ -78,7 +78,7 @@ export function useAudioEngine() {
     } catch (err) {
       // Saved deviceId may refer to an unplugged/revoked device. Drop the
       // pinned id and retry with system default rather than failing the join.
-      if (deviceId && err instanceof Error && err.name === "OverconstrainedError") {
+      if (deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
         useStore.getState().setMicDeviceId(null);
         r.rawLocalStream = await navigator.mediaDevices.getUserMedia({
           audio: baseConstraints,
@@ -93,7 +93,7 @@ export function useAudioEngine() {
   const buildGraph = useCallback(
     async (engine: EngineKind, prebuiltContext?: AudioContext) => {
       const r = refs.current;
-      if (!r.rawLocalStream) throw new Error("No mic stream");
+      if (!r.rawLocalStream) throw new Error('No mic stream');
       const graph = await buildMicGraph(
         r.rawLocalStream,
         engine,
@@ -117,7 +117,7 @@ export function useAudioEngine() {
   }, []);
 
   const prepareLocalAudio = useCallback(
-    async (engine: EngineKind, onProgress?: (stage: "mic-ready") => void) => {
+    async (engine: EngineKind, onProgress?: (stage: 'mic-ready') => void) => {
       // Kick off engine WASM warm-up in parallel with mic+context creation.
       void preloadEngine(engine);
       // AudioContext creation+resume runs in parallel with getUserMedia.
@@ -128,7 +128,7 @@ export function useAudioEngine() {
         return ctx;
       })();
       const [, ctx] = await Promise.all([acquireMic(), ctxPromise]);
-      onProgress?.("mic-ready");
+      onProgress?.('mic-ready');
       return buildGraph(engine, ctx);
     },
     [acquireMic, buildGraph],
@@ -144,11 +144,11 @@ export function useAudioEngine() {
       teardownGraph();
       const graph = await buildGraph(engine);
       const newTrack = graph.processedLocalStream.getAudioTracks()[0];
-      if (!newTrack) throw new Error("No audio track after rebuild");
+      if (!newTrack) throw new Error('No audio track after rebuild');
       newTrack.enabled = !selfMuted;
       const pc = getSFUPeerConnection();
       if (pc) {
-        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
         if (sender) await sender.replaceTrack(newTrack);
       }
       return graph;
@@ -169,11 +169,11 @@ export function useAudioEngine() {
       await acquireMic();
       const graph = await buildGraph(engine);
       const newTrack = graph.processedLocalStream.getAudioTracks()[0];
-      if (!newTrack) throw new Error("No audio track after device switch");
+      if (!newTrack) throw new Error('No audio track after device switch');
       newTrack.enabled = !selfMuted;
       const pc = getSFUPeerConnection();
       if (pc) {
-        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
         if (sender) await sender.replaceTrack(newTrack);
       }
       return graph;
