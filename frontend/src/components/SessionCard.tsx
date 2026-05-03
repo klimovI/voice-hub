@@ -1,4 +1,12 @@
 import { useStore } from "../store/useStore";
+import {
+  HeadphonesIcon,
+  HeadphonesOffIcon,
+  MicIcon,
+  MicOffIcon,
+  PhoneIcon,
+  PhoneOffIcon,
+} from "./icons";
 
 interface Props {
   onJoin: (displayName: string) => void;
@@ -39,7 +47,6 @@ export function SessionCard({
     <section className="card">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="card-title">Комната</h2>
-        <span className="card-hint">Голос и подключение</span>
       </div>
       <form id="join-form" onSubmit={handleSubmit} className="grid gap-[14px]">
         <label className="block text-[12px] font-medium text-muted">
@@ -55,43 +62,51 @@ export function SessionCard({
             className="input-field"
           />
         </label>
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="flex items-center justify-center gap-3">
           <button
             id="join-button"
             type="submit"
             disabled={joining || joined || !configReady}
-            className="btn btn-primary justify-center"
+            title={configReady ? "Войти в комнату" : "Загрузка…"}
+            aria-label={configReady ? "Войти в комнату" : "Загрузка…"}
+            className="btn btn-primary justify-center p-0! w-12 h-12 rounded-full"
           >
-            {configReady ? "Войти" : "Загрузка…"}
+            <PhoneIcon />
           </button>
           <button
             id="self-mute-button"
             type="button"
             disabled={!joined}
             aria-pressed={selfMuted ? "true" : "false"}
+            aria-label={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
+            title={selfMuted ? "Включить микрофон" : "Выключить микрофон"}
             onClick={onToggleSelfMute}
-            className={`btn justify-center ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center p-0! w-12 h-12 rounded-full ${selfMuted ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {selfMuted ? "Включить" : "Выключить"}
+            {selfMuted ? <MicOffIcon /> : <MicIcon />}
           </button>
           <button
             id="deafen-button"
             type="button"
             disabled={!joined}
             aria-pressed={deafened ? "true" : "false"}
+            aria-label={deafened ? "Слушать всех" : "Заглушить всех"}
+            title={deafened ? "Слушать всех" : "Заглушить всех"}
             onClick={onToggleDeafen}
-            className={`btn justify-center ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
+            className={`btn justify-center p-0! w-12 h-12 rounded-full ${deafened ? "btn-toggle-on" : "btn-secondary"}`}
           >
-            {deafened ? "Слушать" : "Заглушить"}
+            {deafened ? <HeadphonesOffIcon /> : <HeadphonesIcon />}
           </button>
           <button
             id="leave-button"
             type="button"
             disabled={!joined}
             onClick={onLeave}
-            className="btn btn-danger justify-center"
+            title="Выйти"
+            aria-label="Выйти"
+            className="btn btn-danger justify-center p-0! w-12 h-12 rounded-full"
           >
-            Выйти
+            <PhoneOffIcon />
           </button>
         </div>
       </form>

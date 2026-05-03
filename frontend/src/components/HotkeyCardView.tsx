@@ -12,8 +12,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
   return (
     <section className="card grid gap-[14px]">
       <div className="flex items-center justify-between gap-3 mb-2">
-        <h2 className="card-title">Горячая клавиша</h2>
-        <span className="card-hint">Переключение микрофона</span>
+        <h2 className="card-title">Кнопка для микрофона</h2>
       </div>
       <label className="block text-[12px] font-medium text-muted">
         Нажмите на поле и зажмите комбинацию

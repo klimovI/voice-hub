@@ -24,9 +24,9 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
     <section className="card">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="card-title">Участники</h2>
-        <span className="card-hint">
-          {showPreview ? "В комнате — войдите, чтобы говорить" : "Громкость по участникам"}
-        </span>
+        {showPreview && (
+          <span className="card-hint">В комнате — войдите, чтобы говорить</span>
+        )}
       </div>
       <div id="participants" className="grid gap-2.5">
         {showEmpty && (
