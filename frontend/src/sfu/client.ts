@@ -6,38 +6,38 @@
 //
 // Track ownership: each remote MediaStream's id == publisher peer id.
 
-import type {
-  SFUEnvelope,
-  WelcomeData,
-  PeerJoinedData,
-  PeerLeftData,
-  PeerInfoData,
-} from "../types";
+import {
+  parseServerMessage,
+  type ServerMessage,
+  type WelcomePayload,
+  type PeerInfo,
+  type PeerLeftPayload,
+} from "./protocol";
 
-export interface SFUHandlers {
+export type SFUHandlers = {
   onState: (state: string) => void;
-  onWelcome: (data: WelcomeData) => void;
-  onPeerJoined: (data: PeerJoinedData) => void;
-  onPeerLeft: (data: PeerLeftData) => void;
-  onPeerInfo: (data: PeerInfoData) => void;
+  onWelcome: (data: WelcomePayload) => void;
+  onPeerJoined: (data: PeerInfo) => void;
+  onPeerLeft: (data: PeerLeftPayload) => void;
+  onPeerInfo: (data: PeerInfo) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
   onError: (err: unknown) => void;
-}
+};
 
-export interface ConnectOptions {
+export type ConnectOptions = {
   wsUrl: string;
   iceServers: RTCIceServer[];
   localStream: MediaStream;
   displayName: string;
-}
+};
 
-export interface SFUClient {
+export type SFUClient = {
   connect(opts: ConnectOptions): Promise<void>;
   disconnect(): void;
   setDisplayName(name: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
-}
+};
 
 function noop(): void {
   /* no-op */
@@ -123,12 +123,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       };
 
       ws.onmessage = async (event) => {
-        let msg: SFUEnvelope;
-        try {
-          msg = JSON.parse(event.data as string) as SFUEnvelope;
-        } catch {
-          return;
-        }
+        const msg = parseServerMessage(event.data as string);
+        if (!msg) return;
         try {
           await handleServerMessage(msg);
         } catch (err) {
@@ -143,24 +139,24 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     });
   }
 
-  async function handleServerMessage(msg: SFUEnvelope): Promise<void> {
+  async function handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.event) {
       case "welcome":
-        myId = (msg.data as WelcomeData).id;
-        on.onWelcome(msg.data as WelcomeData);
+        myId = msg.data.id;
+        on.onWelcome(msg.data);
         break;
       case "peer-joined":
-        on.onPeerJoined(msg.data as PeerJoinedData);
+        on.onPeerJoined(msg.data);
         break;
       case "peer-left":
-        on.onPeerLeft(msg.data as PeerLeftData);
+        on.onPeerLeft(msg.data);
         break;
       case "peer-info":
-        on.onPeerInfo(msg.data as PeerInfoData);
+        on.onPeerInfo(msg.data);
         break;
       case "offer": {
         if (!pc) return;
-        await pc.setRemoteDescription(msg.data as RTCSessionDescriptionInit);
+        await pc.setRemoteDescription(msg.data);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send("answer", answer);
@@ -169,12 +165,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       case "candidate":
         if (!pc) return;
         try {
-          await pc.addIceCandidate(msg.data as RTCIceCandidateInit);
+          await pc.addIceCandidate(msg.data);
         } catch {
           // stale or invalid candidate; ignore
         }
-        break;
-      default:
         break;
     }
   }

@@ -4,14 +4,14 @@ export type EngineKind = "off" | "rnnoise" | "dtln";
 
 export type Role = "admin" | "user";
 
-export interface AppConfig {
+export type AppConfig = {
   iceServers: RTCIceServer[];
   role: Role;
-}
+};
 
 // UI-only participant state stored in zustand.
 // Audio nodes are kept in a separate imperative registry (not reactive).
-export interface ParticipantUI {
+export type ParticipantUI = {
   id: string;
   display: string;
   isSelf: boolean;
@@ -20,29 +20,4 @@ export interface ParticipantUI {
   localMuted: boolean;
   localVolume: number; // 0–500 (WebAudio can exceed 100%)
   hasStream: boolean;
-}
-
-// SFU message envelope coming from the server.
-export interface SFUEnvelope {
-  event: string;
-  data: unknown;
-}
-
-export interface WelcomeData {
-  id: string;
-  peers?: Array<{ id: string; displayName?: string }>;
-}
-
-export interface PeerJoinedData {
-  id: string;
-  displayName?: string;
-}
-
-export interface PeerLeftData {
-  id: string;
-}
-
-export interface PeerInfoData {
-  id: string;
-  displayName?: string;
-}
+};

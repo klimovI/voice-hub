@@ -1,0 +1,262 @@
+// Golden-fixture tests for frontend/src/sfu/protocol.ts.
+//
+// Fixtures live in backend/internal/sfu/protocol/testdata/*.json.
+// Go writes them; TS reads them. A Go field rename changes a fixture,
+// which causes these tests to fail at CI — that is the intended behaviour.
+
+import { readFileSync } from "fs";
+import { resolve } from "path";
+import { describe, it, expect, vi } from "vitest";
+import {
+  parseServerMessage,
+  type WelcomePayload,
+  type PeerInfo,
+  type PeerLeftPayload,
+  type HelloPayload,
+  type SetDisplayNamePayload,
+} from "./protocol";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const FIXTURE_DIR = resolve(__dirname, "../../../backend/internal/sfu/protocol/testdata");
+
+function readFixture(name: string): unknown {
+  const raw = readFileSync(resolve(FIXTURE_DIR, name), "utf-8");
+  return JSON.parse(raw);
+}
+
+/** Wraps a payload in a wire envelope and serialises it back to a string. */
+function envelope(event: string, data: unknown): string {
+  return JSON.stringify({ event, data });
+}
+
+// ---------------------------------------------------------------------------
+// Fixture: welcome.json  →  WelcomePayload
+// ---------------------------------------------------------------------------
+
+describe("welcome fixture", () => {
+  it("has required WelcomePayload shape", () => {
+    const data = readFixture("welcome.json") as WelcomePayload;
+    expect(typeof data.id).toBe("string");
+    expect(Array.isArray(data.peers)).toBe(true);
+    for (const peer of data.peers) {
+      expect(typeof peer.id).toBe("string");
+      // displayName is optional; when present it must be a string
+      if ("displayName" in peer) {
+        expect(typeof peer.displayName).toBe("string");
+      }
+    }
+  });
+
+  it("parseServerMessage accepts welcome envelope", () => {
+    const data = readFixture("welcome.json");
+    const msg = parseServerMessage(envelope("welcome", data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("welcome");
+    const welcome = msg as { event: "welcome"; data: WelcomePayload };
+    expect(typeof welcome.data.id).toBe("string");
+    expect(Array.isArray(welcome.data.peers)).toBe(true);
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("welcome.json") as WelcomePayload;
+    expect(data.id).toBe("abc12345def56789");
+    expect(data.peers).toHaveLength(2);
+    expect(data.peers[0].id).toBe("11223344aabbccdd");
+    expect(data.peers[0].displayName).toBe("Alice");
+    expect(data.peers[1].id).toBe("99887766ffeeddcc");
+    expect(data.peers[1].displayName).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: peer-joined.json  →  PeerInfo
+// ---------------------------------------------------------------------------
+
+describe("peer-joined fixture", () => {
+  it("has required PeerInfo shape", () => {
+    const data = readFixture("peer-joined.json") as PeerInfo;
+    expect(typeof data.id).toBe("string");
+    if ("displayName" in data) {
+      expect(typeof data.displayName).toBe("string");
+    }
+  });
+
+  it("parseServerMessage accepts peer-joined envelope", () => {
+    const data = readFixture("peer-joined.json");
+    const msg = parseServerMessage(envelope("peer-joined", data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("peer-joined");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("peer-joined.json") as PeerInfo;
+    expect(data.id).toBe("11223344aabbccdd");
+    expect(data.displayName).toBe("Alice");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: peer-left.json  →  PeerLeftPayload
+// ---------------------------------------------------------------------------
+
+describe("peer-left fixture", () => {
+  it("has required PeerLeftPayload shape", () => {
+    const data = readFixture("peer-left.json") as PeerLeftPayload;
+    expect(typeof data.id).toBe("string");
+  });
+
+  it("parseServerMessage accepts peer-left envelope", () => {
+    const data = readFixture("peer-left.json");
+    const msg = parseServerMessage(envelope("peer-left", data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("peer-left");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("peer-left.json") as PeerLeftPayload;
+    expect(data.id).toBe("11223344aabbccdd");
+    expect(Object.keys(data)).not.toContain("displayName");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: peer-info.json  →  PeerInfo
+// ---------------------------------------------------------------------------
+
+describe("peer-info fixture", () => {
+  it("has required PeerInfo shape", () => {
+    const data = readFixture("peer-info.json") as PeerInfo;
+    expect(typeof data.id).toBe("string");
+    if ("displayName" in data) {
+      expect(typeof data.displayName).toBe("string");
+    }
+  });
+
+  it("parseServerMessage accepts peer-info envelope", () => {
+    const data = readFixture("peer-info.json");
+    const msg = parseServerMessage(envelope("peer-info", data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("peer-info");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("peer-info.json") as PeerInfo;
+    expect(data.id).toBe("11223344aabbccdd");
+    expect(data.displayName).toBe("Bob");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: hello.json  →  HelloPayload (client→server, shape check only)
+// ---------------------------------------------------------------------------
+
+describe("hello fixture", () => {
+  it("has required HelloPayload shape", () => {
+    const data = readFixture("hello.json") as HelloPayload;
+    expect(typeof data.displayName).toBe("string");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("hello.json") as HelloPayload;
+    expect(data.displayName).toBe("Alice");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: set-displayname.json  →  SetDisplayNamePayload (client→server)
+// ---------------------------------------------------------------------------
+
+describe("set-displayname fixture", () => {
+  it("has required SetDisplayNamePayload shape", () => {
+    const data = readFixture("set-displayname.json") as SetDisplayNamePayload;
+    expect(typeof data.displayName).toBe("string");
+  });
+
+  it("matches exact fixture values", () => {
+    const data = readFixture("set-displayname.json") as SetDisplayNamePayload;
+    expect(data.displayName).toBe("Bob");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseServerMessage — unit tests
+// ---------------------------------------------------------------------------
+
+describe("parseServerMessage", () => {
+  it("returns null and warns on malformed JSON", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(parseServerMessage("not json {{{")).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("failed to JSON.parse"),
+      expect.any(String),
+    );
+    warn.mockRestore();
+  });
+
+  it("returns null and warns when 'event' is missing", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(parseServerMessage(JSON.stringify({ data: {} }))).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("returns null and warns on unknown event", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(parseServerMessage(JSON.stringify({ event: "mute-state", data: {} }))).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("unknown server event"),
+      "mute-state",
+    );
+    warn.mockRestore();
+  });
+
+  it("returns null and warns when welcome is missing 'peers'", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const raw = JSON.stringify({ event: "welcome", data: { id: "abc" } });
+    expect(parseServerMessage(raw)).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("malformed 'welcome'"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
+  it("returns null and warns when peer-joined is missing 'id'", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const raw = JSON.stringify({ event: "peer-joined", data: { displayName: "X" } });
+    expect(parseServerMessage(raw)).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("accepts a well-formed offer", () => {
+    const raw = JSON.stringify({
+      event: "offer",
+      data: { type: "offer", sdp: "v=0\r\n..." },
+    });
+    const msg = parseServerMessage(raw);
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("offer");
+  });
+
+  it("accepts a well-formed candidate", () => {
+    const raw = JSON.stringify({
+      event: "candidate",
+      data: { candidate: "candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host" },
+    });
+    const msg = parseServerMessage(raw);
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe("candidate");
+  });
+
+  it("returns null and warns when offer is missing 'sdp'", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const raw = JSON.stringify({ event: "offer", data: { type: "offer" } });
+    expect(parseServerMessage(raw)).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
