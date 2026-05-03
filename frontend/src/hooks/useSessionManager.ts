@@ -15,7 +15,7 @@ import { preloadEngine, isEngineReady } from "../audio/engine";
 import { useSFU } from "./useSFU";
 import {
   clearLegacyStorage,
-  loadDisplayName,
+  loadOrCreateDisplayName,
   saveDisplayName,
   consumeRejoinFlag,
   loadOrCreateClientId,
@@ -329,10 +329,11 @@ export function useSessionManager({
         return;
       }
 
-      const display = name.trim() || makeGuestName();
-      if (name.trim()) {
-        saveDisplayName(name.trim());
-      }
+      // Empty input falls back to the persisted identity (auto-generated on
+      // first launch, then stable across reconnects/reloads/server switches).
+      // Typed names overwrite it; renaming is just another saveDisplayName.
+      const display = name.trim() || loadOrCreateDisplayName(makeGuestName);
+      saveDisplayName(display);
 
       userLeavingRef.current = false;
       reconnectSchedulerRef.current.reset();
@@ -415,7 +416,7 @@ export function useSessionManager({
         store.setConfigReady(true);
         store.setStatus("Готово");
         if (shouldRejoin) {
-          void handleJoinRef.current?.(loadDisplayName());
+          void handleJoinRef.current?.(loadOrCreateDisplayName(makeGuestName));
         }
       })
       .catch((err: unknown) => {

@@ -67,6 +67,18 @@ export function saveDisplayName(name: string): void {
   localStorage.setItem(KEYS.displayName, name.trim());
 }
 
+// Persistent display name. Generated once on first launch via the supplied
+// generator and stored alongside clientId — both act as stable identity that
+// survives reconnects, server switches, and reloads. The user can rename
+// themselves at any time; rename is just another saveDisplayName.
+export function loadOrCreateDisplayName(generate: () => string): string {
+  const existing = loadDisplayName();
+  if (existing) return existing;
+  const fresh = generate();
+  saveDisplayName(fresh);
+  return fresh;
+}
+
 export function clearDisplayName(): void {
   localStorage.removeItem(KEYS.displayName);
 }

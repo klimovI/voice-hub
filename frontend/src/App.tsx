@@ -6,7 +6,8 @@ import { preloadEngine } from "./audio/engine";
 import { useSFU } from "./hooks/useSFU";
 import { useSessionManager } from "./hooks/useSessionManager";
 import { useGlobalShortcut } from "./hooks/useShortcut";
-import { loadDisplayName } from "./utils/storage";
+import { loadOrCreateDisplayName } from "./utils/storage";
+import { makeGuestName } from "./utils/clamp";
 import { playMuteSound, playUnmuteSound } from "./audio/feedback-sounds";
 import type { EngineKind } from "./types";
 
@@ -28,7 +29,9 @@ export function App() {
   const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
 
   // Display name local state (synced to localStorage).
-  const [displayName, setDisplayName] = useState<string>(() => loadDisplayName());
+  const [displayName, setDisplayName] = useState<string>(() =>
+    loadOrCreateDisplayName(makeGuestName),
+  );
 
   // ---- Toggle handlers ----
 
