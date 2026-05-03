@@ -79,15 +79,22 @@ type peer struct {
 }
 
 func (p *peer) write(msg protocol.Envelope) error {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return p.writeRaw(raw)
+}
+
+// writeRaw sends a pre-marshaled envelope. Used by broadcast loops to
+// marshal the JSON once and fan it out to N peers, instead of marshaling
+// once per recipient inside the writeMu critical section.
+func (p *peer) writeRaw(raw []byte) error {
 	if p.ctx.Err() != nil {
 		return p.ctx.Err()
 	}
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
-	raw, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
 	wctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
 	defer cancel()
 	return p.ws.Write(wctx, websocket.MessageText, raw)
@@ -101,6 +108,13 @@ type Room struct {
 	cfg    Config
 	api    *webrtc.API
 	closed atomic.Bool
+
+	// resyncPending guards the deferred-retry goroutine spawn in
+	// signalPeerConnections so that a storm of join/leave/track events
+	// cannot accumulate concurrent retry goroutines. At most one retry is
+	// pending at a time; further exhaustions while pending are no-ops
+	// (the in-flight retry already covers the latest state).
+	resyncPending atomic.Bool
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -339,8 +353,9 @@ func (r *Room) addPeer(p *peer) {
 			ev.cancel()
 		}
 		left, _ := json.Marshal(protocol.PeerLeftPayload{ID: ev.id})
+		leftEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-left", Data: left})
 		for _, op := range others {
-			_ = op.write(protocol.Envelope{Event: "peer-left", Data: left})
+			_ = op.writeRaw(leftEnv)
 		}
 	}
 
@@ -350,8 +365,9 @@ func (r *Room) addPeer(p *peer) {
 	_ = p.write(protocol.Envelope{Event: "welcome", Data: welcome})
 
 	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID, SelfMuted: p.selfMuted, Deafened: p.deafened})
+	joinedEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-joined", Data: joined})
 	for _, op := range others {
-		_ = op.write(protocol.Envelope{Event: "peer-joined", Data: joined})
+		_ = op.writeRaw(joinedEnv)
 	}
 
 	if len(evicted) > 0 {
@@ -382,8 +398,9 @@ func (r *Room) removePeer(id string) {
 	log.Printf("sfu: peer left id=%s peers=%d", id, count)
 
 	left, _ := json.Marshal(protocol.PeerLeftPayload{ID: id})
+	leftEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-left", Data: left})
 	for _, op := range others {
-		_ = op.write(protocol.Envelope{Event: "peer-left", Data: left})
+		_ = op.writeRaw(leftEnv)
 	}
 
 	r.signalPeerConnections()
@@ -430,8 +447,9 @@ func (r *Room) setDisplayName(id, name string) {
 	r.mu.Unlock()
 
 	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name, ClientID: clientID, SelfMuted: selfMuted, Deafened: deafened})
+	infoEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-info", Data: info})
 	for _, op := range others {
-		_ = op.write(protocol.Envelope{Event: "peer-info", Data: info})
+		_ = op.writeRaw(infoEnv)
 	}
 }
 
@@ -453,8 +471,9 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	r.mu.Unlock()
 
 	state, _ := json.Marshal(protocol.PeerStatePayload{ID: id, SelfMuted: selfMuted, Deafened: deafened})
+	stateEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-state", Data: state})
 	for _, op := range others {
-		_ = op.write(protocol.Envelope{Event: "peer-state", Data: state})
+		_ = op.writeRaw(stateEnv)
 	}
 }
 
@@ -481,7 +500,11 @@ func (r *Room) signalPeerConnections() {
 			return
 		}
 	}
+	if !r.resyncPending.CompareAndSwap(false, true) {
+		return
+	}
 	go func() {
+		defer r.resyncPending.Store(false)
 		time.Sleep(3 * time.Second)
 		if r.closed.Load() {
 			return
