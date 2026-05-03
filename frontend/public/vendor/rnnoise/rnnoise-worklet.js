@@ -2,6 +2,12 @@
 // Runs RNNoise + VAD gate on the audio rendering thread (off main JS), so
 // GC/jank can no longer cause underruns and crackling. Frame math ported
 // verbatim from frontend/src/audio/rnnoise.ts.
+//
+// Static import: dynamic import() is disallowed in AudioWorkletGlobalScope
+// (Chromium). Static module imports work since Chrome 91. The WorkerGlobalScope
+// stub below is still needed — Shiguredo's vendor checks env inside its
+// factory, which only runs when Rnnoise.load() is called below.
+import { Rnnoise } from "/vendor/rnnoise/rnnoise.js";
 
 console.log("[rnnoise-worklet] module evaluating");
 
@@ -65,10 +71,8 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       if (typeof globalThis.WorkerGlobalScope === "undefined") {
         globalThis.WorkerGlobalScope = function () {};
       }
-      console.log("[rnnoise-worklet] importing vendor module");
-      const mod = await import("/vendor/rnnoise/rnnoise.js");
-      console.log("[rnnoise-worklet] vendor imported, calling Rnnoise.load");
-      const Rn = await mod.Rnnoise.load();
+      console.log("[rnnoise-worklet] calling Rnnoise.load");
+      const Rn = await Rnnoise.load();
       console.log("[rnnoise-worklet] Rnnoise loaded, frameSize=", Rn.frameSize);
       this.state = Rn.createDenoiseState();
       this.frameSize = Rn.frameSize;
