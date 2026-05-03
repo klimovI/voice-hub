@@ -6,6 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -14,6 +15,27 @@ use crate::tray;
 const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_EMIT_THROTTLE: Duration = Duration::from_millis(100);
+
+// IPC payloads for events emitted to the webview. Mirrored on the TS side
+// in frontend/src/types/ipc.ts — keep field names and optionality in sync.
+#[derive(Serialize, Clone)]
+pub struct UpdateAvailablePayload {
+    pub version: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct UpdateProgressPayload {
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct UpdateInstallingPayload {}
+
+#[derive(Serialize, Clone)]
+pub struct UpdateErrorPayload {
+    pub message: String,
+}
 
 pub struct UpdaterState {
     last_checked: Option<Instant>,
@@ -115,7 +137,12 @@ async fn check(app: AppHandle, force: bool) {
         }
     }
 
-    let _ = app.emit("update-available", serde_json::json!({ "version": version }));
+    let _ = app.emit(
+        "update-available",
+        UpdateAvailablePayload {
+            version: version.clone(),
+        },
+    );
     if let Err(err) = tray::set_update_available(&app, &version) {
         log::error!("updater: tray rebuild failed: {err}");
     }
@@ -152,7 +179,12 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
                 s.pending = None;
             }
         }
-        let _ = app.emit("update-error", serde_json::json!({ "message": err }));
+        let _ = app.emit(
+            "update-error",
+            UpdateErrorPayload {
+                message: err.clone(),
+            },
+        );
         // Re-discover the update so tray + banner can offer a retry.
         let h = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -204,12 +236,15 @@ async fn run_install(app: AppHandle) -> Result<(), String> {
                 if should_emit {
                     let _ = app_chunk.emit(
                         "update-progress",
-                        serde_json::json!({ "downloaded": total, "total": content_len }),
+                        UpdateProgressPayload {
+                            downloaded: total,
+                            total: content_len,
+                        },
                     );
                 }
             },
             move || {
-                let _ = app_finish.emit("update-installing", serde_json::json!({}));
+                let _ = app_finish.emit("update-installing", UpdateInstallingPayload {});
             },
         )
         .await

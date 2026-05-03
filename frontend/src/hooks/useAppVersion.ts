@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { isTauri } from "../utils/tauri";
+import type {
+  UpdateAvailablePayload,
+  UpdateErrorPayload,
+  UpdateInstallingPayload,
+  UpdateProgressPayload,
+} from "../ipc";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -88,20 +94,20 @@ export function useAppVersion(): {
     let cancelled = false;
     void import("@tauri-apps/api/event").then(async ({ listen }) => {
       const subs = await Promise.all([
-        listen<{ version: string }>("update-available", (event) => {
+        listen<UpdateAvailablePayload>("update-available", (event) => {
           setDesktopUpdate({ kind: "desktop", version: event.payload.version });
           setDesktopApplyState((prev) => (prev.phase === "error" ? prev : { phase: "idle" }));
         }),
-        listen<{ downloaded: number; total: number | null }>("update-progress", (event) => {
+        listen<UpdateProgressPayload>("update-progress", (event) => {
           setDesktopApplyState({
             phase: "downloading",
             progress: { downloaded: event.payload.downloaded, total: event.payload.total },
           });
         }),
-        listen<unknown>("update-installing", () => {
+        listen<UpdateInstallingPayload>("update-installing", () => {
           setDesktopApplyState({ phase: "installing" });
         }),
-        listen<{ message: string }>("update-error", (event) => {
+        listen<UpdateErrorPayload>("update-error", (event) => {
           setDesktopApplyState({ phase: "error", message: event.payload.message });
         }),
       ]);
