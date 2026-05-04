@@ -59,7 +59,7 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
 function PeerPreviewRow({ peer }: { peer: PeerPreview }) {
   const initial = (peer.displayName || '?').trim().charAt(0).toUpperCase() || '?';
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 items-center px-4 h-[72px] border border-line bg-bg-0 opacity-70">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-center px-4 h-[72px] border-2 border-line bg-bg-0 opacity-70">
       <div className="grid grid-cols-[40px_1fr] gap-3 items-center min-w-0">
         <div
           className="grid place-items-center bg-bg-3 text-muted font-extrabold text-[20px] uppercase shrink-0"
@@ -67,11 +67,11 @@ function PeerPreviewRow({ peer }: { peer: PeerPreview }) {
         >
           {initial}
         </div>
-        <div className="min-w-0">
-          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight">
+        <div className="min-w-0 flex flex-col justify-between" style={{ height: 40 }}>
+          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight leading-tight">
             {peer.displayName}
           </div>
-          <div className="mt-0.5 text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 text-muted-2">
+          <div className="text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 leading-none text-muted-2">
             <span className="w-1.5 h-1.5 bg-muted-2" />в комнате
           </div>
         </div>
