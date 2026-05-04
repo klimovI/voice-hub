@@ -6,12 +6,12 @@
 // Example:
 //
 //	# server side
-//	APP_ADMIN_PASSWORD=admin PUBLIC_IP=127.0.0.1 \
+//	APP_ADMIN_PASSWORD=<admin-password> PUBLIC_IP=127.0.0.1 \
 //	    go run ./cmd/server
 //
 //	# loadtest side (separate terminal)
 //	go run ./cmd/loadtest \
-//	    -target=http://localhost:8080 -password=admin \
+//	    -target=http://localhost:8080 -password=<admin-password> \
 //	    -peers=20 -publish -duration=30s
 //
 // The tool prints one stats line per second:
