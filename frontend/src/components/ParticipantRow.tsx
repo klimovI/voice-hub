@@ -1,7 +1,6 @@
 import { useStore } from '../store/useStore';
 import { savePeerVolume } from '../utils/storage';
 import type { ParticipantUI } from '../types';
-import { VolumeIcon, VolumeOffIcon, MicOffIcon, HeadphonesOffIcon } from './icons';
 
 interface Props {
   participant: ParticipantUI;
@@ -32,7 +31,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
       metaText = 'заглушён вами';
       metaTone = 'danger';
     } else if (participant.remoteDeafened) {
-      metaText = 'в наушниках';
+      metaText = 'не слышит';
       metaTone = 'danger';
     } else if (participant.remoteMuted) {
       metaText = 'микрофон выключен';
@@ -65,18 +64,19 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
     onRemoteGainChange();
   }
 
+  // Voice activity ring (DESIGN.md): solid green border on speaker. Border width fixed at 2px
+  // across states so toggling speaking doesn't shift layout.
   const rowClass = participant.speaking
-    ? 'border-accent shadow-[0_0_0_1px_var(--color-accent),0_8px_30px_-10px_rgba(34,197,94,0.45)] ' +
-      'bg-[linear-gradient(180deg,rgba(34,197,94,0.14),transparent)] bg-bg-2'
+    ? 'border-2 border-accent bg-bg-0'
     : isMuted
-      ? 'border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3'
+      ? 'border-2 border-line bg-bg-0'
       : !isReady
-        ? 'border-line bg-bg-2'
-        : 'border-line bg-bg-2 hover:border-line-strong hover:bg-bg-3';
+        ? 'border-2 border-line bg-bg-0 opacity-70'
+        : 'border-2 border-line bg-bg-0 hover:border-line-strong';
 
   const metaDotClass =
     metaTone === 'good'
-      ? 'bg-good shadow-[0_0_0_3px_rgba(34,197,94,0.14)]'
+      ? 'bg-good'
       : metaTone === 'danger'
         ? 'bg-danger'
         : metaTone === 'connecting'
@@ -84,46 +84,59 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
           : 'bg-muted-2';
 
   const metaTextClass =
-    metaTone === 'good' ? 'text-good' : metaTone === 'danger' ? 'text-danger' : 'text-muted';
+    metaTone === 'good' ? 'text-good' : metaTone === 'danger' ? 'text-danger' : 'text-muted-2';
+
+  const avatarRing = participant.speaking ? 'ring-2 ring-accent ring-offset-0' : '';
 
   return (
     <div
-      className={`grid grid-cols-[minmax(0,1fr)_auto] gap-4 items-center px-4 py-3.5 border rounded-[14px] transition-[border-color,background,box-shadow] duration-150 max-[640px]:grid-cols-1 ${rowClass}`}
+      className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-center px-4 h-[72px] transition-[border-color,background] duration-150 max-[640px]:grid-cols-1 max-[640px]:h-auto max-[640px]:py-4 ${rowClass}`}
     >
-      <div className="grid grid-cols-[36px_1fr] gap-3 items-center min-w-0">
-        <div className="grid place-items-center w-9 h-9 rounded-full bg-accent text-accent-ink font-extrabold text-[14px] uppercase shrink-0 shadow-[0_4px_14px_-4px_rgba(34,197,94,0.5)]">
+      <div className="grid grid-cols-[40px_1fr] gap-3 items-center min-w-0">
+        <div
+          className={`grid place-items-center rounded-full bg-accent text-accent-ink font-extrabold text-[20px] uppercase shrink-0 ${avatarRing}`}
+          style={{ width: 40, height: 40 }}
+        >
           {initial}
         </div>
         <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-text whitespace-nowrap overflow-hidden text-ellipsis">
+          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight">
             {participant.isSelf ? `${participant.display} (вы)` : participant.display}
           </div>
-          <div className={`mt-0.5 text-[12px] inline-flex items-center gap-1.5 ${metaTextClass}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${metaDotClass}`} />
+          <div
+            className={`mt-0.5 text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 ${metaTextClass}`}
+          >
+            <span className={`w-1.5 h-1.5 ${metaDotClass}`} />
             {metaText}
           </div>
         </div>
       </div>
 
-      <div className="flex gap-3.5 items-center justify-end max-[640px]:justify-start max-[640px]:flex-wrap">
+      <div className="flex gap-2 items-center justify-end max-[640px]:justify-start max-[640px]:flex-wrap">
         {!participant.isSelf && (
           <>
             {(participant.remoteMuted || participant.remoteDeafened) && (
-              <div className="flex gap-1.5 items-center">
-                <span
-                  aria-label="Микрофон выключен"
-                  title="Микрофон выключен"
-                  className="grid place-items-center w-9 h-9 rounded-full btn-toggle-on"
-                >
-                  <MicOffIcon />
-                </span>
+              <div className="flex gap-1 items-center">
+                {participant.remoteMuted && (
+                  <span
+                    aria-label="Микрофон выключен"
+                    title="Микрофон выключен"
+                    className="grid place-items-center w-9 h-9 text-danger border border-danger/40"
+                  >
+                    <span className="msym" style={{ fontSize: 18 }}>
+                      mic_off
+                    </span>
+                  </span>
+                )}
                 {participant.remoteDeafened && (
                   <span
                     aria-label="В наушниках"
                     title="В наушниках"
-                    className="grid place-items-center w-9 h-9 rounded-full btn-toggle-on"
+                    className="grid place-items-center w-9 h-9 text-danger border border-danger/40"
                   >
-                    <HeadphonesOffIcon />
+                    <span className="msym" style={{ fontSize: 18 }}>
+                      hearing_disabled
+                    </span>
                   </span>
                 )}
               </div>
@@ -134,12 +147,18 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
               aria-pressed={participant.localMuted}
               aria-label={participant.localMuted ? 'Слушать' : 'Заглушить'}
               title={participant.localMuted ? 'Слушать' : 'Заглушить'}
-              className={`btn btn-mini justify-center p-0! w-9 h-9 rounded-full ${participant.localMuted ? 'btn-toggle-on' : 'btn-secondary'}`}
+              className={`grid place-items-center w-9 h-9 border transition-colors ${
+                participant.localMuted
+                  ? 'border-danger text-danger bg-[rgba(248,113,113,0.08)] hover:bg-danger hover:text-accent-ink'
+                  : 'border-line text-muted hover:border-accent hover:text-accent'
+              }`}
             >
-              {participant.localMuted ? <VolumeOffIcon /> : <VolumeIcon />}
+              <span className="msym" style={{ fontSize: 18 }}>
+                {participant.localMuted ? 'volume_off' : 'volume_up'}
+              </span>
             </button>
-            <label className="grid gap-1 w-50 max-[640px]:w-full">
-              <span className="whitespace-nowrap tabular-nums text-[11px] text-muted">
+            <label className="grid gap-1 w-44 max-[640px]:w-full">
+              <span className="whitespace-nowrap tabular-nums text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2">
                 Громкость {participant.localVolume}%
               </span>
               <input
@@ -149,7 +168,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
                 step="5"
                 value={participant.localVolume}
                 onChange={handleVolumeChange}
-                className="vh-range"
+                className="vh-range vh-range-sm"
               />
             </label>
           </>

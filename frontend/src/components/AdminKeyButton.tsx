@@ -147,22 +147,11 @@ export function AdminKeyButton() {
         onClick={handleOpen}
         title="Управление паролем подключения"
         aria-label="Управление паролем подключения"
-        className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-3 border border-line-strong text-muted hover:text-text hover:border-line transition-colors"
+        className="inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-        </svg>
+        <span className="msym" style={{ fontSize: 18 }}>
+          key
+        </span>
       </button>
 
       {open && (
@@ -170,13 +159,16 @@ export function AdminKeyButton() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.6)] p-4"
           onClick={handleClose}
         >
-          <div className="card w-[min(440px,100%)] p-6" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="card card-lg w-[min(440px,100%)] p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
             {mode === 'info' && (
               <>
-                <h2 className="text-[16px] font-semibold m-0 mb-1 tracking-[-0.01em]">
+                <h2 className="text-[14px] font-extrabold uppercase tracking-[0.18em] text-text m-0 mb-2">
                   Пароль подключения
                 </h2>
-                <div className="text-muted text-[13px] mb-5">
+                <div className="text-muted text-[12px] mb-5">
                   {status?.exists
                     ? `Создан: ${relativeTime(status.rotated_at)} · поколение #${status.generation}`
                     : 'Не настроен — пользователи не могут войти, пока вы не сгенерируете пароль.'}
@@ -186,7 +178,7 @@ export function AdminKeyButton() {
                     type="button"
                     onClick={handleRotate}
                     disabled={busy}
-                    className="btn btn-primary w-full justify-center disabled:opacity-60"
+                    className="btn btn-primary w-full justify-center"
                   >
                     {status?.exists ? 'Сгенерировать новый' : 'Создать пароль'}
                   </button>
@@ -195,7 +187,7 @@ export function AdminKeyButton() {
                       type="button"
                       onClick={handleRevoke}
                       disabled={busy}
-                      className="btn w-full justify-center text-danger border-[rgba(248,113,113,0.3)] hover:bg-[rgba(248,113,113,0.08)] disabled:opacity-60"
+                      className="btn w-full justify-center text-danger border-[rgba(248,113,113,0.3)] hover:bg-[rgba(248,113,113,0.08)]"
                     >
                       Отозвать доступ
                     </button>
@@ -205,7 +197,7 @@ export function AdminKeyButton() {
                   </button>
                 </div>
                 {error && (
-                  <div className="mt-3 px-3 py-2 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
+                  <div className="mt-3 px-3 py-2 text-[12px] text-danger bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.3)]">
                     {error}
                   </div>
                 )}
@@ -214,13 +206,13 @@ export function AdminKeyButton() {
 
             {mode === 'rotated' && rotated && (
               <>
-                <h2 className="text-[16px] font-semibold m-0 mb-1 tracking-[-0.01em]">
+                <h2 className="text-[14px] font-extrabold uppercase tracking-[0.18em] text-accent m-0 mb-2">
                   Новый пароль
                 </h2>
-                <div className="text-muted text-[13px] mb-4">
+                <div className="text-muted text-[12px] mb-4">
                   Скопируйте сейчас — больше не будет показан.
                 </div>
-                <pre className="px-3 py-2.5 mb-3 rounded-[14px] bg-bg-3 border border-line-strong text-[12px] font-mono whitespace-pre-wrap break-all">
+                <pre className="px-3 py-2.5 mb-3 bg-bg-0 border border-line text-[12px] font-mono whitespace-pre-wrap break-all text-accent">
                   {shareBlock}
                 </pre>
                 <div className="flex gap-2 mb-2">

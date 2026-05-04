@@ -77,23 +77,23 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
   return (
     <div
       role="status"
-      className="flex flex-col gap-2 px-4 py-3 rounded-[14px] border border-accent/40 bg-accent/10 text-[13px]"
+      className="flex flex-col gap-2 px-4 py-3 border border-accent/50 bg-[rgba(75,226,119,0.06)] text-[12px]"
     >
       <div className="flex items-center justify-between gap-3">
-        <span>{message}</span>
+        <span className="font-bold uppercase tracking-[0.12em] text-accent">{message}</span>
         {actionLabel && (
           <button
             type="button"
             onClick={onAction}
             disabled={actionDisabled}
-            className="px-3 py-1.5 rounded-full bg-accent text-accent-ink font-semibold text-[12px] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn btn-primary btn-mini"
           >
             {actionLabel}
           </button>
         )}
       </div>
       {bar !== null && (
-        <div className="h-1 w-full overflow-hidden rounded-full bg-accent/20">
+        <div className="h-[2px] w-full overflow-hidden bg-accent/20">
           <div
             className="h-full bg-accent transition-[width] duration-150 ease-out"
             style={{ width: `${Math.round(bar * 100)}%` }}

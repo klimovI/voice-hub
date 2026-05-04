@@ -1,29 +1,31 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg-0: #07090a;
-  --color-bg-1: #11181b;
-  --color-bg-2: #182124;
-  --color-bg-3: #1f292d;
-  --color-bg-input: #0c1416;
-  --color-line: #2a3a3f;
-  --color-line-strong: #3a5057;
-  --color-text: #e8efe9;
+  /* Signal Minimal palette — pure black canvas, deep gray cards, vibrant green accent. */
+  --color-bg-0: #050505;
+  --color-bg-1: #0f0f0f;
+  --color-bg-2: #141414;
+  --color-bg-3: #1a1a1a;
+  --color-bg-input: #050505;
+  --color-line: #1f1f1f;
+  --color-line-strong: #2a2a2a;
+  --color-text: #ffffff;
+  --color-body: #dce5d9;
   --color-muted: #9aa8a2;
   --color-muted-2: #6b7872;
-  --color-accent: #22c55e;
-  --color-accent-hover: #34d674;
-  --color-accent-strong: #16a34a;
-  --color-accent-ink: #050807;
-  --color-good: #22c55e;
+  --color-accent: #4be277;
+  --color-accent-hover: #6bff8f;
+  --color-accent-strong: #22c55e;
+  --color-accent-ink: #050505;
+  --color-good: #4be277;
   --color-danger: #f87171;
 
-  --radius-card: 14px;
-  --radius-card-lg: 20px;
+  --radius-card: 0;
+  --radius-card-lg: 0;
 
-  --shadow-card: 0 30px 80px -22px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 0 0 0 transparent;
 
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -40,121 +42,230 @@
   body {
     margin: 0;
     font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--color-text);
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--color-body);
     background-color: var(--color-bg-0);
-    background-image:
-      radial-gradient(900px 600px at 12% -10%, rgba(34, 197, 94, 0.1), transparent 60%),
-      radial-gradient(700px 500px at 110% 10%, rgba(34, 197, 94, 0.05), transparent 55%),
-      radial-gradient(600px 600px at 50% 120%, rgba(34, 197, 94, 0.06), transparent 60%);
-    background-attachment: fixed;
   }
 }
 
 @layer components {
   .card {
-    @apply relative p-[22px] border border-line rounded-[20px] shadow-[var(--shadow-card)];
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
-    background-color: var(--color-bg-1);
+    @apply relative p-5 border border-line bg-bg-1;
+  }
+
+  .card-lg {
+    /* sharp corners — alias kept for semantic grouping. */
   }
 
   .card-title {
-    @apply m-0 text-[13px] font-semibold uppercase tracking-[0.08em] text-muted;
+    @apply m-0 text-[16px] font-bold uppercase tracking-[0.18em] text-muted;
   }
 
   .card-hint {
-    @apply text-[12px] text-muted-2;
+    @apply text-[12px] text-muted-2 uppercase tracking-[0.12em];
+  }
+
+  .section-label {
+    @apply block text-[13px] font-bold uppercase tracking-[0.18em] text-muted;
   }
 
   .btn {
-    @apply relative inline-flex items-center gap-2 whitespace-nowrap
-      rounded-[14px] px-4 py-[11px] text-[13px] font-bold
-      border cursor-pointer transition-[transform,background,border-color,color,box-shadow] duration-150
-      active:translate-y-px focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(34,197,94,0.16)]
-      disabled:opacity-[0.45] disabled:cursor-not-allowed disabled:filter-none;
+    @apply relative inline-flex items-center justify-center gap-2 whitespace-nowrap
+      px-4 py-2.5 text-[13px] font-bold uppercase tracking-[0.1em]
+      border border-transparent cursor-pointer transition-[transform,background,border-color,color] duration-150
+      active:translate-y-px focus-visible:outline-none focus-visible:border-accent
+      disabled:opacity-[0.4] disabled:cursor-not-allowed;
   }
 
   .btn-primary {
-    @apply border-accent bg-accent text-accent-ink hover:bg-accent-hover hover:border-accent-hover;
+    @apply bg-accent text-accent-ink border-accent
+      hover:brightness-110;
   }
 
   .btn-secondary {
-    @apply bg-bg-3 border-line-strong text-text hover:bg-line hover:border-accent hover:text-accent;
+    @apply bg-bg-1 border-line text-body
+      hover:border-accent hover:text-accent;
   }
 
   .btn-danger {
-    @apply bg-bg-3 text-danger border-[rgba(248,113,113,0.4)]
+    @apply bg-bg-1 text-danger border-[rgba(248,113,113,0.3)]
       hover:bg-danger hover:border-danger hover:text-accent-ink;
   }
 
   .btn-mini {
-    @apply px-3 py-2 text-[12px] rounded-[10px];
+    @apply px-2.5 py-1.5 text-[11px];
   }
 
   .btn-toggle-on {
-    @apply bg-[rgba(248,113,113,0.12)] border-danger text-danger
+    @apply bg-[rgba(248,113,113,0.1)] border-danger text-danger
       hover:bg-danger hover:text-accent-ink;
   }
 
+  /* CONNECT-style hero button: full-width, taller, sensors icon on right. */
+  .btn-hero {
+    @apply w-full justify-center gap-3 py-[18px] text-[18px] tracking-[0.2em];
+  }
+
   .input-field {
-    @apply w-full mt-1.5 px-3.5 py-3 text-text bg-bg-input border border-line-strong
-      rounded-[14px] font-[inherit]
-      transition-[border-color,box-shadow,background] duration-150
+    @apply w-full mt-1.5 px-3 py-2.5 text-text bg-bg-input border border-line
+      text-[14px]
+      transition-[border-color,background] duration-150
       placeholder:text-muted-2
-      focus:outline-none focus:border-accent focus:bg-[#060b0c]
-      focus:shadow-[0_0_0_3px_rgba(34,197,94,0.16)];
+      focus:outline-none focus:border-accent;
+  }
+
+  /* Underline-only input (some-ui-elements style). */
+  .input-underline {
+    @apply w-full bg-transparent border-0 border-b border-line px-0 py-3
+      text-text text-[20px] font-semibold
+      transition-colors duration-150
+      placeholder:text-muted-2
+      focus:outline-none focus:border-accent;
   }
 
   .kbd {
-    @apply inline-block px-1.5 py-0.5 font-mono text-[11px] font-semibold
-      text-accent bg-bg-input border border-line-strong rounded-md;
-    border-bottom-width: 2px;
+    @apply inline-block px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.1em]
+      text-accent bg-bg-input border border-line;
   }
 
-  /* Range slider — Tailwind cannot target ::-webkit-slider-thumb */
+  /* Range slider — thin track, square green thumb, sharp aesthetic. */
   .vh-range {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: 6px;
-    background: var(--color-bg-input);
-    border: 1px solid var(--color-line);
-    border-radius: 999px;
+    height: 24px;
+    background: transparent;
     outline: none;
     cursor: pointer;
+  }
+  .vh-range::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    background: var(--color-line);
   }
   .vh-range::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 18px;
     height: 18px;
-    border-radius: 50%;
+    margin-top: -8px;
     background: var(--color-accent);
-    border: 2px solid var(--color-bg-0);
-    box-shadow:
-      0 0 0 1px var(--color-accent),
-      0 2px 8px rgba(0, 0, 0, 0.5);
-    cursor: grab;
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
     transition: transform 0.12s ease;
   }
   .vh-range::-webkit-slider-thumb:hover {
-    transform: scale(1.12);
+    transform: scaleX(1.3);
+  }
+  .vh-range::-moz-range-track {
+    width: 100%;
+    height: 4px;
+    background: var(--color-line);
+    border: 0;
   }
   .vh-range::-moz-range-thumb {
     width: 18px;
     height: 18px;
-    border-radius: 50%;
     background: var(--color-accent);
-    border: 2px solid var(--color-bg-0);
-    box-shadow:
-      0 0 0 1px var(--color-accent),
-      0 2px 8px rgba(0, 0, 0, 0.5);
-    cursor: grab;
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
   }
   .vh-range:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  /* Smaller variant for compact contexts (participant row). */
+  .vh-range-sm {
+    height: 18px;
+  }
+  .vh-range-sm::-webkit-slider-runnable-track {
+    height: 3px;
+  }
+  .vh-range-sm::-webkit-slider-thumb {
+    width: 14px;
+    height: 14px;
+    margin-top: -6px;
+  }
+  .vh-range-sm::-moz-range-track {
+    height: 3px;
+  }
+  .vh-range-sm::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* Square toggle — sharp, 48x24, green when on, dark square dot slides. */
+  .vh-toggle {
+    @apply relative inline-block w-12 h-6 shrink-0 cursor-pointer
+      bg-bg-0 border border-line transition-colors duration-150;
+  }
+  .vh-toggle-dot {
+    @apply absolute left-[3px] w-4 h-4 bg-muted-2
+      transition-[transform,background] duration-150;
+    top: calc(50% - 8px);
+  }
+  .vh-toggle[aria-checked='true'],
+  .vh-toggle[data-checked='true'] {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+  .vh-toggle[aria-checked='true'] .vh-toggle-dot,
+  .vh-toggle[data-checked='true'] .vh-toggle-dot {
+    transform: translateX(24px);
+    background-color: var(--color-bg-0);
+  }
+  .vh-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+
+  /* Round hardware toggle — 80x80 circle, glow when active (some-ui-elements). */
+  .vh-hw {
+    @apply relative inline-flex items-center justify-center w-20 h-20
+      rounded-full border-2 cursor-pointer transition-all duration-150
+      active:scale-95;
+  }
+  .vh-hw-on {
+    @apply border-accent text-accent bg-[rgba(75,226,119,0.1)]
+      shadow-[0_0_24px_rgba(75,226,119,0.25)];
+  }
+  .vh-hw-off {
+    @apply border-line text-muted-2 bg-bg-1
+      hover:border-muted hover:text-muted;
+  }
+  .vh-hw-danger {
+    @apply border-danger text-danger bg-[rgba(248,113,113,0.08)]
+      hover:bg-[rgba(248,113,113,0.16)];
+  }
+
+  /* Material Symbols sizing helper. Box is locked to 1em x 1em with overflow
+     clipped so that the invisible fallback text (rendered by font-display:block
+     before the icon font loads) cannot widen the slot and shift the layout. */
+  .msym {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    overflow: hidden;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    font-variation-settings: 'FILL' 0;
+  }
+  .msym.msym-fill {
+    font-variation-settings: 'FILL' 1;
   }
 }
 

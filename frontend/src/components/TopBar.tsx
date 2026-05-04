@@ -4,14 +4,18 @@ import { StatusPill } from './StatusPill';
 
 export function TopBar() {
   return (
-    <header className="flex items-center justify-between gap-4 p-[14px_18px] border border-line rounded-[20px] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] bg-bg-1 max-[640px]:flex-wrap">
-      <div className="flex items-center gap-3 font-semibold tracking-[-0.01em]">
-        <img
-          src="/favicon.svg"
-          alt="Voice Hub"
-          className="w-11 h-11 rounded-[12px] shadow-[0_8px_26px_-8px_rgba(34,197,94,0.6)]"
-        />
-        <div className="text-[22px] leading-none">Voice Hub</div>
+    <header
+      className="flex items-center justify-between gap-4 h-14 pl-4 pr-2.5 md:pl-6
+        bg-bg-1 border border-line
+        max-[640px]:flex-wrap max-[640px]:h-auto max-[640px]:py-3"
+    >
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="msym msym-fill text-accent md:hidden" style={{ fontSize: 20 }}>
+          graphic_eq
+        </span>
+        <div className="text-[17px] font-extrabold uppercase tracking-[0.2em] text-accent">
+          Voice&nbsp;Hub
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <StatusPill />

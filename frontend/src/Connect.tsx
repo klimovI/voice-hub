@@ -31,22 +31,24 @@ export function Connect() {
   }
 
   return (
-    <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,24px)]">
-      <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
-        <img
-          src="/favicon.svg"
-          alt=""
-          className="w-7 h-7 rounded-[8px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
-        />
-        Voice Hub
+    <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,24px)]">
+      <div className="flex items-center gap-2.5 mb-6">
+        <span className="msym msym-fill text-accent" style={{ fontSize: 22 }}>
+          graphic_eq
+        </span>
+        <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">
+          Voice&nbsp;Hub
+        </span>
       </div>
-      <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Подключение</h1>
-      <div className="text-muted text-[13px] mb-5">
+      <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted m-0 mb-2">
+        Подключение
+      </h1>
+      <div className="text-muted-2 text-[12px] mb-6">
         Введите адрес сервера, который дал администратор. Пароль попросят на следующем шаге.
       </div>
       <form onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="host" className="block text-[12px] font-medium text-muted mb-1.5">
+        <div className="grid gap-2">
+          <label htmlFor="host" className="section-label">
             Сервер
           </label>
           <input
@@ -62,18 +64,21 @@ export function Connect() {
             spellCheck={false}
             required
             autoFocus
-            className="input-field !mt-0"
+            className="input-field mt-0!"
           />
         </div>
         <button
           type="submit"
           disabled={submitting || !host.trim()}
-          className="btn btn-primary w-full justify-center mt-5 disabled:cursor-progress disabled:opacity-60"
+          className="btn btn-primary btn-hero mt-6 disabled:cursor-progress"
         >
           Подключиться
+          <span className="msym" style={{ fontSize: 18 }}>
+            sensors
+          </span>
         </button>
         {error && (
-          <div className="mt-3.5 px-3 py-2.5 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
+          <div className="mt-3 px-3 py-2 text-[12px] text-danger bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.3)]">
             {error}
           </div>
         )}

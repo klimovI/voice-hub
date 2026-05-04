@@ -56,38 +56,26 @@ export function Login() {
           onClick={handleChangeServer}
           title="Сменить сервер"
           aria-label="Сменить сервер"
-          className="fixed top-4 right-4 z-10 inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-3 border border-line-strong text-muted hover:text-text hover:border-line transition-colors"
+          className="fixed top-4 right-4 z-10 inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m16 3 4 4-4 4" />
-            <path d="M20 7H4" />
-            <path d="m8 21-4-4 4-4" />
-            <path d="M4 17h16" />
-          </svg>
+          <span className="msym" style={{ fontSize: 18 }}>
+            swap_horiz
+          </span>
         </button>
       )}
-      <main className="card w-[min(380px,100%)] p-7 mx-auto mt-[max(20vh,60px)]">
-        <div className="flex items-center gap-2.5 mb-5 font-semibold text-[16px] tracking-[-0.01em]">
-          <img
-            src="/favicon.svg"
-            alt=""
-            className="w-7 h-7 rounded-[8px] shadow-[0_6px_22px_-8px_rgba(34,197,94,0.55)]"
-          />
-          Voice Hub
+      <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
+        <div className="flex items-center gap-2.5 mb-6">
+          <span className="msym msym-fill text-accent" style={{ fontSize: 22 }}>
+            graphic_eq
+          </span>
+          <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">
+            Voice&nbsp;Hub
+          </span>
         </div>
-        <h1 className="text-[20px] font-semibold m-0 mb-1 tracking-[-0.01em]">Вход</h1>
-        <div className="text-muted text-[13px] mb-5">Введите пароль для входа.</div>
+        <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted m-0 mb-2">
+          Вход
+        </h1>
+        <div className="text-muted-2 text-[12px] mb-6">Введите пароль для входа.</div>
         <form
           id="login-form"
           ref={formRef}
@@ -95,8 +83,8 @@ export function Login() {
           action="/api/login"
           onSubmit={handleSubmit}
         >
-          <div>
-            <label htmlFor="password" className="block text-[12px] font-medium text-muted mb-1.5">
+          <div className="grid gap-2">
+            <label htmlFor="password" className="section-label">
               Пароль
             </label>
             <input
@@ -106,19 +94,22 @@ export function Login() {
               autoComplete="current-password"
               required
               autoFocus
-              className="input-field !mt-0"
+              className="input-field mt-0!"
             />
           </div>
           <button
             type="submit"
             id="submit"
             disabled={submitting}
-            className="btn btn-primary w-full justify-center mt-5 disabled:cursor-progress disabled:opacity-60"
+            className="btn btn-primary btn-hero mt-6 disabled:cursor-progress"
           >
             Войти
+            <span className="msym" style={{ fontSize: 18 }}>
+              login
+            </span>
           </button>
           {error && (
-            <div className="mt-3.5 px-3 py-2.5 text-[13px] text-danger bg-[rgba(248,113,113,0.12)] border border-[rgba(248,113,113,0.3)] rounded-[14px]">
+            <div className="mt-3 px-3 py-2 text-[12px] text-danger bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.3)]">
               {error}
             </div>
           )}

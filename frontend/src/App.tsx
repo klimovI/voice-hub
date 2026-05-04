@@ -222,39 +222,45 @@ export function App() {
   );
 
   return (
-    <main className="grid w-[min(1180px,100%)] gap-[22px] mx-auto px-5 pt-7 pb-15 max-[640px]:px-3 max-[640px]:pt-4 max-[640px]:pb-10">
-      <TopBar />
-      <UpdateBanner
-        update={update}
-        reload={reload}
-        applyDesktopUpdate={applyDesktopUpdate}
-        desktopApplyState={desktopApplyState}
-      />
-      <div className="grid gap-[22px] grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
-        <div className="grid gap-[22px] content-start">
-          <SessionCard
-            onJoin={session.join}
-            onLeave={session.leave}
-            onToggleSelfMute={handleToggleSelfMute}
-            onToggleDeafen={handleToggleDeafen}
-            displayName={displayName}
-            onDisplayNameChange={handleDisplayNameChange}
-          />
-          <AudioCard
-            onEngineSelect={handleEngineSelect}
-            onMicDeviceSelect={handleMicDeviceSelect}
-            onSendVolumeChange={handleSendVolumeChange}
-            onRnnoiseMixChange={handleRnnoiseMixChange}
-            onOutputVolumeChange={handleOutputVolumeChange}
-            onReset={handleAudioReset}
-          />
-          <HotkeyCard onStatusMessage={handleStatusMessage} />
+    <>
+      <main
+        className="grid gap-4 mx-auto
+          w-[min(1180px,100%)] px-5 pt-5 pb-12
+          max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-8"
+      >
+        <TopBar />
+        <UpdateBanner
+          update={update}
+          reload={reload}
+          applyDesktopUpdate={applyDesktopUpdate}
+          desktopApplyState={desktopApplyState}
+        />
+        <div className="grid gap-4 grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
+          <div className="grid gap-4 content-start">
+            <SessionCard
+              onJoin={session.join}
+              onLeave={session.leave}
+              onToggleSelfMute={handleToggleSelfMute}
+              onToggleDeafen={handleToggleDeafen}
+              displayName={displayName}
+              onDisplayNameChange={handleDisplayNameChange}
+            />
+            <AudioCard
+              onEngineSelect={handleEngineSelect}
+              onMicDeviceSelect={handleMicDeviceSelect}
+              onSendVolumeChange={handleSendVolumeChange}
+              onRnnoiseMixChange={handleRnnoiseMixChange}
+              onOutputVolumeChange={handleOutputVolumeChange}
+              onReset={handleAudioReset}
+            />
+            <HotkeyCard onStatusMessage={handleStatusMessage} />
+          </div>
+          <div className="grid gap-4 content-start">
+            <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
+          </div>
         </div>
-        <div className="grid gap-[22px] content-start">
-          <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
-        </div>
-      </div>
-      <Footer uiVersion={bootVersion} />
-    </main>
+        <Footer uiVersion={bootVersion} />
+      </main>
+    </>
   );
 }

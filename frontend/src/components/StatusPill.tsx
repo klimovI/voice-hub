@@ -7,20 +7,16 @@ export function StatusPill() {
   const isOk = statusState === 'ok';
   const isErr = statusState === 'err';
 
-  const wrapColor = isOk ? 'text-good' : isErr ? 'text-danger' : 'text-text';
-  const dotColor = isOk
-    ? 'bg-good shadow-[0_0_0_4px_rgba(34,197,94,0.14)]'
-    : isErr
-      ? 'bg-danger shadow-[0_0_0_4px_rgba(248,113,113,0.12)]'
-      : 'bg-muted-2';
+  const wrapColor = isOk ? 'text-good' : isErr ? 'text-danger' : 'text-muted';
+  const dotColor = isOk ? 'bg-good' : isErr ? 'bg-danger' : 'bg-muted-2';
 
   return (
     <div
       id="status"
-      className={`inline-flex items-center gap-2 px-3 py-2 rounded-full bg-bg-3 border border-line-strong text-[12px] ${wrapColor}`}
+      className={`inline-flex items-center gap-2 px-3 h-9 bg-bg-0 border border-line text-[11px] font-bold uppercase tracking-[0.14em] ${wrapColor}`}
       data-state={statusState}
     >
-      <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+      <span className={`w-1.5 h-1.5 shrink-0 ${dotColor}`} />
       <span>{statusText}</span>
     </div>
   );
