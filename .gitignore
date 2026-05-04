@@ -9,6 +9,7 @@ tmp/
 .env
 .env.local
 backend/.env
+backend/data/
 src-tauri/target/
 src-tauri/gen/schemas/
 scratch

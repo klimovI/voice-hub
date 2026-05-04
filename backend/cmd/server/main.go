@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -117,6 +119,28 @@ func main() {
 			srvErr <- err
 		}
 	}()
+
+	// pprof on a localhost-only listener, gated by APP_PPROF=1. Off in
+	// prod by default: a heap dump trivially exposes in-memory secrets
+	// (session secret, TURN secret, admin password) to anyone with
+	// shell/exec access on the box via one curl. The handlers register
+	// on http.DefaultServeMux at import time but are only reachable
+	// once this listener starts. Runtime allocation sampling has the
+	// same overhead regardless of this gate (default
+	// runtime.MemProfileRate=512KB applies process-wide).
+	if v, _ := strconv.ParseBool(os.Getenv("APP_PPROF")); v {
+		go func() {
+			log.Printf("pprof: listening on 127.0.0.1:6060")
+			srv := &http.Server{
+				Addr:              "127.0.0.1:6060",
+				Handler:           http.DefaultServeMux,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("pprof: %v", err)
+			}
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
