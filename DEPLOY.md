@@ -130,7 +130,7 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 1. Build: app → `ghcr.io/<owner>/voice-hub-app:<sha>` (long sha tag only)
 2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
 3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
-4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans && docker image prune -af` (последний шаг чистит старый образ — без него каждый деплой кидает ~155MB на диск)
+4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile && docker image prune -af` (reload применяет bind-mounted `Caddyfile`, prune чистит старый образ — без него каждый деплой кидает ~155MB на диск)
 
 Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.
 

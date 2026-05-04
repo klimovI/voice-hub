@@ -104,7 +104,7 @@ jobs:
         # deploys otherwise. `caddy reload` is graceful (no dropped TLS) and
         # idempotent, safe to run every deploy.
         run: |
-          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker exec voice-hub-caddy-1 caddy reload --config /etc/caddy/Caddyfile && docker image prune -af'
+          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile && docker image prune -af'
 
       - name: Smoke test
         env:
