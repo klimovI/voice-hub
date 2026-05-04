@@ -47,6 +47,13 @@
     color: var(--color-body);
     background-color: var(--color-bg-0);
   }
+
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
 }
 
 @layer components {
