@@ -194,6 +194,9 @@ export function useAudioEngine() {
     if (r.micGraph?.rnnoiseProcessorNode) {
       // Read store directly — refs.current.rnnoiseMix is sync'd during render,
       // so within the same handler turn it still holds the pre-update value.
+      // setRnnoiseMix is engine-agnostic: both v1 and v2 expose a `mix` k-rate
+      // AudioParam with identical 0..1 scaling, so the same setter drives
+      // either node. Keep param name+range in sync if either worklet diverges.
       setRnnoiseMix(r.micGraph.rnnoiseProcessorNode, useStore.getState().rnnoiseMix);
     }
   }, []);

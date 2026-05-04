@@ -9,7 +9,8 @@ export function formatRnnoiseMix(value: number): string {
 
 export function formatEngine(engine: string): string {
   if (engine === 'off') return 'Выкл.';
-  if (engine === 'rnnoise') return 'Вкл.';
+  if (engine === 'rnnoise') return 'RNNoise (текущий)';
+  if (engine === 'rnnoise-v2') return 'RNNoise (новый)';
   return engine;
 }
 

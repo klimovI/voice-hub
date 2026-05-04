@@ -12,6 +12,7 @@
 
 import type { EngineKind } from '../types';
 import { createRnnoiseProcessor } from './rnnoise';
+import { createRnnoiseV2Processor } from './rnnoise-v2';
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 const VOICE_BOOST_RATIO = 1.4;
@@ -94,7 +95,8 @@ export async function buildMicGraph(
   localHighPassNode.connect(localLowPassNode);
   localLowPassNode.connect(localCompressorNode);
 
-  // Build chain tail (possibly RNNoise).
+  // Build chain tail (possibly RNNoise). Both engines slot here; the field
+  // names below stay separate so teardown can target the right node.
   let chainTail: AudioNode = localCompressorNode;
   let rnnoiseProcessorNode: AudioWorkletNode | null = null;
 
@@ -105,6 +107,14 @@ export async function buildMicGraph(
       chainTail = rnnoiseProcessorNode;
     } else {
       onStatusMessage('RNNoise unavailable, sending without denoiser.', true);
+    }
+  } else if (engine === 'rnnoise-v2') {
+    rnnoiseProcessorNode = await createRnnoiseV2Processor(localAudioContext, rnnoiseMixRef());
+    if (rnnoiseProcessorNode) {
+      localCompressorNode.connect(rnnoiseProcessorNode);
+      chainTail = rnnoiseProcessorNode;
+    } else {
+      onStatusMessage('RNNoise (новый) недоступен, отправка без шумоподавления.', true);
     }
   }
 

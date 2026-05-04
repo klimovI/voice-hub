@@ -4,6 +4,12 @@ import { clampPercentage } from '../utils/storage';
 import { formatRnnoiseMix } from '../utils/clamp';
 import type { EngineKind } from '../types';
 
+const ENGINE_OPTIONS: { value: EngineKind; label: string }[] = [
+  { value: 'off', label: 'Выключено' },
+  { value: 'rnnoise', label: 'RNNoise (текущий)' },
+  { value: 'rnnoise-v2', label: 'RNNoise (новый)' },
+];
+
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
   onMicDeviceSelect: (deviceId: string | null) => void;
@@ -19,30 +25,6 @@ function SliderHead({ label, value }: { label: string; value: string }) {
       <span className="text-muted">{label}</span>
       <span className="text-accent tabular-nums">{value}</span>
     </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  ariaLabel,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      onClick={onChange}
-      className="vh-toggle"
-      data-checked={checked}
-    >
-      <span className="vh-toggle-dot" />
-    </button>
   );
 }
 
@@ -146,16 +128,36 @@ export function AudioCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3 py-3">
-        <span className="section-label">Шумоподавление</span>
-        <Toggle
-          checked={engine !== 'off'}
-          onChange={() => onEngineSelect(engine === 'off' ? 'rnnoise' : 'off')}
-          ariaLabel="Шумоподавление"
-        />
+      <div className="grid gap-2">
+        <label htmlFor="engine-select" className="section-label">
+          Шумоподавление
+        </label>
+        <div className="relative">
+          <select
+            id="engine-select"
+            value={engine}
+            onChange={(e) => onEngineSelect(e.target.value as EngineKind)}
+            className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
+              bg-bg-input border border-line text-body cursor-pointer
+              hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
+          >
+            {ENGINE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <span
+            aria-hidden
+            className="msym absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
+            style={{ fontSize: 16 }}
+          >
+            expand_more
+          </span>
+        </div>
       </div>
 
-      {engine === 'rnnoise' && (
+      {engine !== 'off' && (
         <div className="grid gap-2">
           <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix)} />
           <input
