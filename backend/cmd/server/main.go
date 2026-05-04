@@ -31,10 +31,10 @@ func main() {
 		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
 	}
 
-	dataDir := os.Getenv("APP_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "/app/data"
-	}
+	// Default is "./data", which under Docker (WORKDIR /app) resolves to
+	// /app/data — the path the Dockerfile creates and compose mounts as
+	// a volume. Locally it just falls in the working directory.
+	dataDir := "./data"
 
 	// Auto-bootstrap server-only secrets. Persisted across restarts via the
 	// data dir volume; if wiped, all sessions invalidate (acceptable).
