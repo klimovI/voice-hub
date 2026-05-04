@@ -8,12 +8,15 @@
 
 ```
 internet ──HTTPS/WSS──▶ Caddy (auto-TLS) ──▶ app  (8080)
-internet ──UDP 3478, 10101-10200, 49160-49200──▶ app
+internet ──UDP  3478, 10101-10200, 49160-49200──▶ app
+internet ──TCP/TLS 5349 (TURNS) ────────────────▶ app
 ```
 
 - Caddy фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
 - WebRTC media и TURN-relay идут напрямую в app по UDP, в обход Caddy
-- app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN (HMAC short-term creds). Janus и coturn убраны
+- TURNS на :5349 (TCP/TLS) для клиентов, у которых UDP заблокирован. Pion берёт сертификат из RO-маунта `caddy_data` — Caddy единственный ACME-клиент в стеке. Tradeoff: app-контейнер получает RO-доступ к приватному ключу HTTPS
+- На первом старте app может перезапуститься пару раз, пока Caddy не выпустит сертификат (`restart: unless-stopped` ловит цикл) — это ожидаемо
+- app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN UDP+TLS (HMAC short-term creds). Janus и coturn убраны
 
 ## Требования
 
@@ -21,6 +24,7 @@ internet ──UDP 3478, 10101-10200, 49160-49200──▶ app
 - Debian/Ubuntu, доступ root по SSH
 - Домен с forward A на IP (DuckDNS работает, но иногда флапает CAA-таймаутами; платный домен на ~200₽/год надёжнее)
 - Открытый исходящий UDP на сервере и у клиентов
+- Открытый TCP `5349` на сервере для TURNS (фолбэк, когда у клиента зарезан UDP)
 
 ## Bootstrap сервера (один раз)
 
@@ -100,7 +104,7 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 1. Build: app → `ghcr.io/<owner>/voice-hub-app:{latest,sha}`
 2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
 3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
-4. Pull & restart: `docker compose pull && up -d --remove-orphans`
+4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans`
 
 Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.
 

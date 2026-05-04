@@ -25,7 +25,7 @@
 - [x] Minimize-to-tray (Discord-style) — окно сворачивается в трей вместо закрытия
 
 ### Infra
-- [x] `docker-compose.yml` для локального dev
+- [x] `docker-compose.dev.yml` для локального dev (loopback bind, требует `APP_ALLOW_INSECURE=1`)
 - [x] Backend с health-check и room-конфигом
 - [x] Production deploy на VPS — Caddy auto-TLS, GitHub Actions build & push в ghcr.io, SSH deploy под non-root user. Подробнее в [DEPLOY.md](DEPLOY.md)
 - [x] Tauri 2 desktop-обёртка для Windows (remote URL, без секретов в бинаре), кросс-сборка из Linux через cargo-xwin, NSIS installer
