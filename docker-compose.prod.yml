@@ -25,9 +25,12 @@ services:
       - caddy_data:/data
     security_opt:
       - no-new-privileges:true
+    # Start-order only — not health-gated. App's docker-DNS reachability
+    # from caddy is what matters and that is independent of the in-container
+    # /healthz which only proves app answers itself. Brief 502s on cold start
+    # are preferred to caddy refusing to start when app health is delayed.
     depends_on:
-      app:
-        condition: service_healthy
+      - app
 
   app:
     image: ghcr.io/klimovi/voice-hub-app:${IMAGE_TAG:?IMAGE_TAG is required}
