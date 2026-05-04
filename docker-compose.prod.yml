@@ -13,6 +13,8 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    mem_limit: 128m
+    mem_reservation: 32m
     ports:
       - "80:80"
       - "443:443"
