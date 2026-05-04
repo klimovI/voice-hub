@@ -7,6 +7,7 @@ package turn
 import (
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -35,12 +36,20 @@ type Config struct {
 	// peers. Must be exposed by the container.
 	MinRelayPort uint16
 	MaxRelayPort uint16
+
+	// TLSAddr enables TURNS on the given TCP bind address (e.g. ":5349"). When
+	// empty, no TLS listener is started. Both globs must also be set.
+	TLSAddr string
+	// TLSCertGlob/TLSKeyGlob locate Caddy's ACME-managed cert pair. The first
+	// match wins; the path's `*` segment covers Caddy's per-issuer directory.
+	TLSCertGlob string
+	TLSKeyGlob  string
 }
 
-// Server wraps a pion/turn server.
+// Server wraps a pion/turn server. Listener ownership is held entirely by
+// pion via ServerConfig.PacketConnConfigs / ListenerConfigs; Close() delegates.
 type Server struct {
-	srv  *pion.Server
-	conn net.PacketConn
+	srv *pion.Server
 }
 
 // Start brings up the TURN listener.
@@ -52,9 +61,57 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("turn: public IP required")
 	}
 
-	listener, err := net.ListenPacket("udp4", cfg.ListenAddr)
+	udpListener, err := net.ListenPacket("udp4", cfg.ListenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("turn: listen %s: %w", cfg.ListenAddr, err)
+	}
+	ownsUDP := true
+	defer func() {
+		if ownsUDP {
+			_ = udpListener.Close()
+		}
+	}()
+
+	relayGen := func() *pion.RelayAddressGeneratorPortRange {
+		return &pion.RelayAddressGeneratorPortRange{
+			RelayAddress: net.ParseIP(cfg.PublicIP),
+			Address:      "0.0.0.0",
+			MinPort:      cfg.MinRelayPort,
+			MaxPort:      cfg.MaxRelayPort,
+		}
+	}
+
+	var tcpListener net.Listener
+	var listenerCfgs []pion.ListenerConfig
+	tlsEnabled := cfg.TLSAddr != "" && cfg.TLSCertGlob != "" && cfg.TLSKeyGlob != ""
+	ownsTCP := false
+	defer func() {
+		if ownsTCP && tcpListener != nil {
+			_ = tcpListener.Close()
+		}
+	}()
+	if tlsEnabled {
+		certPath, keyPath, err := findCertPair(cfg.TLSCertGlob, cfg.TLSKeyGlob)
+		if err != nil {
+			return nil, fmt.Errorf("turn: %w", err)
+		}
+		watcher := newCertWatcher(certPath, keyPath)
+		if err := watcher.load(); err != nil {
+			return nil, err
+		}
+		tlsCfg := &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: watcher.GetCertificate,
+		}
+		tcpListener, err = net.Listen("tcp", cfg.TLSAddr)
+		if err != nil {
+			return nil, fmt.Errorf("turn: tls listen %s: %w", cfg.TLSAddr, err)
+		}
+		ownsTCP = true
+		listenerCfgs = append(listenerCfgs, pion.ListenerConfig{
+			Listener:              tls.NewListener(tcpListener, tlsCfg),
+			RelayAddressGenerator: relayGen(),
+		})
 	}
 
 	logger := pionlogging.NewDefaultLoggerFactory().NewLogger("turn")
@@ -72,25 +129,28 @@ func Start(cfg Config) (*Server, error) {
 		PermissionTimeout:  turnAllocationLifetime,
 		PacketConnConfigs: []pion.PacketConnConfig{
 			{
-				PacketConn: listener,
-				RelayAddressGenerator: &pion.RelayAddressGeneratorPortRange{
-					RelayAddress: net.ParseIP(cfg.PublicIP),
-					Address:      "0.0.0.0",
-					MinPort:      cfg.MinRelayPort,
-					MaxPort:      cfg.MaxRelayPort,
-				},
+				PacketConn:            udpListener,
+				RelayAddressGenerator: relayGen(),
 			},
 		},
+		ListenerConfigs: listenerCfgs,
 	})
 	if err != nil {
-		_ = listener.Close()
 		return nil, fmt.Errorf("turn: server: %w", err)
 	}
+	// pion now owns both listeners and will close them via Server.Close.
+	ownsUDP = false
+	ownsTCP = false
 
-	log.Printf("turn: listening on %s, relay %s:%d-%d, realm=%s",
-		cfg.ListenAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
+	if tlsEnabled {
+		log.Printf("turn: listening on %s (udp) + %s (tls), relay %s:%d-%d, realm=%s",
+			cfg.ListenAddr, cfg.TLSAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
+	} else {
+		log.Printf("turn: listening on %s, relay %s:%d-%d, realm=%s",
+			cfg.ListenAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
+	}
 
-	return &Server{srv: srv, conn: listener}, nil
+	return &Server{srv: srv}, nil
 }
 
 // Close stops the TURN server.
