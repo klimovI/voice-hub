@@ -1,35 +1,63 @@
 // RNNoise denoiser — runs as an AudioWorkletNode on the audio rendering thread.
-// The vendor module is served as a static asset at /vendor/rnnoise/rnnoise.js
-// (4.8MB, WASM embedded as base64). The worklet at rnnoise-worklet.js statically
-// imports it inside AudioWorkletGlobalScope.
 //
-// We pre-fetch the vendor file into the HTTP cache so the worklet's first
-// addModule() resolves instantly. We do NOT ESM-import it on the main thread:
-// Vite's dev server refuses to transform JS files served from /public, and we
-// don't actually need the module's exports here — the worklet has its own copy.
+// Tauri's WebView2 AudioWorkletGlobalScope rejects ANY ESM construct in worklet
+// scope ("import() is disallowed on WorkletGlobalScope") — both static `import`
+// and `import.meta`, despite the spec allowing them in module worklets.
+// Real Chrome accepts them; only the embedded webview is strict.
+//
+// Workaround: at preload time, fetch the vendor module + worklet, splice them
+// into a single self-contained source (no imports, no import.meta), wrap as a
+// Blob, and addModule() that Blob URL. CSP requires `worker-src 'self' blob:`
+// which is already set in deploy/Caddyfile.
 
 let cachedReady = false;
-let cachedPromise: Promise<void> | null = null;
+let cachedPromise: Promise<string> | null = null;
+let cachedBundleUrl: string | null = null;
+
+const RNNOISE_URL = '/vendor/rnnoise/rnnoise.js';
+const WORKLET_URL = '/vendor/rnnoise/rnnoise-worklet.js';
+
+async function buildBundleUrl(): Promise<string> {
+  const [rnRes, wkRes] = await Promise.all([fetch(RNNOISE_URL), fetch(WORKLET_URL)]);
+  if (!rnRes.ok) throw new Error(`rnnoise fetch failed: ${rnRes.status}`);
+  if (!wkRes.ok) throw new Error(`rnnoise-worklet fetch failed: ${wkRes.status}`);
+  const [rnSrc, wkSrc] = await Promise.all([rnRes.text(), wkRes.text()]);
+
+  const exportRe = /export\s*\{[^}]*\bas\s+Rnnoise[^}]*\}\s*;?/;
+  const exportMatch = rnSrc.match(exportRe);
+  if (!exportMatch) throw new Error('rnnoise.js: Rnnoise export not found — vendor format changed');
+  const idMatch = /(\w+)\s+as\s+Rnnoise/.exec(exportMatch[0]);
+  if (!idMatch) throw new Error('rnnoise.js: could not locate Rnnoise local id');
+
+  const rnInline = rnSrc
+    .replace(exportRe, `var Rnnoise = ${idMatch[1]};`)
+    .replace(/import\.meta\.url/g, '""');
+
+  const importRe = /^\s*import\s*\{\s*Rnnoise\s*\}\s*from\s*["'][^"']*["'];?\s*$/m;
+  if (!importRe.test(wkSrc)) {
+    throw new Error('rnnoise-worklet.js: static Rnnoise import not found — format changed');
+  }
+  const wkInline = wkSrc.replace(importRe, '');
+
+  const blob = new Blob([rnInline, '\n', wkInline], { type: 'text/javascript' });
+  return URL.createObjectURL(blob);
+}
 
 export function preloadRnnoise(): Promise<void> {
   if (cachedReady) return Promise.resolve();
   if (!cachedPromise) {
-    cachedPromise = fetch('/vendor/rnnoise/rnnoise.js')
-      .then((res) => {
-        // drain body regardless so the ReadableStream is not left locked
-        const body = res.blob().then(() => undefined);
-        if (!res.ok) throw new Error(`rnnoise prefetch failed: ${res.status}`);
-        return body;
-      })
-      .then(() => {
+    cachedPromise = buildBundleUrl()
+      .then((url) => {
+        cachedBundleUrl = url;
         cachedReady = true;
+        return url;
       })
       .catch((err: unknown) => {
         cachedPromise = null;
         throw err;
       });
   }
-  return cachedPromise;
+  return cachedPromise.then(() => undefined);
 }
 
 export function isRnnoiseReady(): boolean {
@@ -41,11 +69,16 @@ const workletRegistry = new WeakMap<AudioContext, Promise<void>>();
 export function ensureRnnoiseWorkletRegistered(ctx: AudioContext): Promise<void> {
   let p = workletRegistry.get(ctx);
   if (p) return p;
-  p = ctx.audioWorklet.addModule('/vendor/rnnoise/rnnoise-worklet.js').catch((err: unknown) => {
-    console.error('[rnnoise] addModule failed:', err);
-    workletRegistry.delete(ctx);
-    throw err;
-  });
+  p = (cachedPromise ?? preloadRnnoise().then(() => cachedBundleUrl!))
+    .then((url) => {
+      if (!url) throw new Error('rnnoise bundle URL missing');
+      return ctx.audioWorklet.addModule(url);
+    })
+    .catch((err: unknown) => {
+      console.error('[rnnoise] addModule failed:', err);
+      workletRegistry.delete(ctx);
+      throw err;
+    });
   workletRegistry.set(ctx, p);
   return p;
 }
