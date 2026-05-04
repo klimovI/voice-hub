@@ -31,10 +31,13 @@ func main() {
 		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
 	}
 
-	const dataDir = "/app/data"
+	dataDir := os.Getenv("APP_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/app/data"
+	}
 
 	// Auto-bootstrap server-only secrets. Persisted across restarts via the
-	// /app/data volume; if wiped, all sessions invalidate (acceptable).
+	// data dir volume; if wiped, all sessions invalidate (acceptable).
 	sessionSecret, err := auth.LoadOrCreateSecret(dataDir, "session.secret", 32)
 	if err != nil {
 		log.Fatalf("session secret: %v", err)
