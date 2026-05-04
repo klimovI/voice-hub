@@ -99,8 +99,12 @@ jobs:
       - name: Pull and restart
         env:
           APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
+        # Caddyfile reload after `compose up` because compose doesn't track
+        # bind-mount file content changes — caddy keeps stale config across
+        # deploys otherwise. `caddy reload` is graceful (no dropped TLS) and
+        # idempotent, safe to run every deploy.
         run: |
-          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker image prune -af'
+          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker exec voice-hub-caddy-1 caddy reload --config /etc/caddy/Caddyfile && docker image prune -af'
 
       - name: Smoke test
         env:
