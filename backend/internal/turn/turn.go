@@ -50,6 +50,9 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.PublicIP == "" {
 		return nil, fmt.Errorf("turn: public IP required")
 	}
+	if cfg.MinRelayPort == 0 || cfg.MaxRelayPort < cfg.MinRelayPort {
+		return nil, fmt.Errorf("turn: relay port range invalid (%d-%d)", cfg.MinRelayPort, cfg.MaxRelayPort)
+	}
 
 	listener, err := net.ListenPacket("udp4", cfg.ListenAddr)
 	if err != nil {

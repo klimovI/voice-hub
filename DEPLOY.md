@@ -8,7 +8,7 @@
 
 ```
 internet ──HTTPS/WSS─────────────▶ Caddy (auto-TLS) ──▶ app (8080)
-internet ──UDP  3478, 10101-10200, 49160-49200 ────────▶ app
+internet ──UDP  3478, 10000-11000, 49000-49500 ────────▶ app
 ```
 
 - Caddy (стоковый `caddy:2-alpine`) фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
@@ -49,24 +49,6 @@ net.core.netdev_max_backlog = 5000
 vm.swappiness = 10
 EOF
 sysctl --system
-
-# Daily docker prune: чистит SHA-теги старше 72h + dangling. Без этого
-# каждый деплой кидает ~155MB на диск (см. /etc/cron.daily/docker-prune).
-cat > /etc/cron.daily/docker-prune <<'EOF'
-#!/bin/sh
-# Daily Docker cleanup: remove image tags >3d old and unused volumes.
-set -e
-LOG=/var/log/docker-prune.log
-{
-  echo "=== $(date -Is) prune start ==="
-  docker image prune -a --filter "until=72h" -f
-  docker volume prune -f
-  apt-get clean
-  echo "=== $(date -Is) prune done ==="
-  df -h /
-} >> "$LOG" 2>&1
-EOF
-chmod +x /etc/cron.daily/docker-prune
 
 # Non-root deploy user в группе docker
 useradd -m -s /bin/bash -G docker deploy
@@ -119,6 +101,7 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 |---|---|
 | `DEPLOY_HOST` | IP или домен сервера |
 | `DEPLOY_SSH_KEY` | приватный ключ deploy-пользователя (целиком, с BEGIN/END) |
+| `DEPLOY_HOST_KEY` | pin host-key сервера для known_hosts (защита от MITM). Получить: `ssh-keyscan -t ed25519 <host>` |
 | `APP_HOSTNAME` | публичный домен. Используется только backend-deploy (Caddy + `APP_HOSTNAME` env). Desktop-релиз больше его не читает — бинарь generic, host вводит пользователь. |
 | `PROD_ENV` | остальной `.env` целиком (см. формат выше) |
 | `TAURI_SIGNING_PRIVATE_KEY` | приватный ключ для подписи desktop-релизов |
@@ -129,10 +112,10 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 
 `.github/workflows/deploy.yml` запускается на push в master:
 
-1. Build: app → `ghcr.io/<owner>/voice-hub-app:{latest,sha}`
+1. Build: app → `ghcr.io/<owner>/voice-hub-app:<sha>` (long sha tag only)
 2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
 3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
-4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans`
+4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans && docker image prune -af` (последний шаг чистит старый образ — без него каждый деплой кидает ~155MB на диск)
 
 Откатить: на сервере `docker compose pull` с конкретным sha-тегом, либо ревертнуть коммит и пушнуть.
 

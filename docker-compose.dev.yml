@@ -15,6 +15,12 @@ services:
       APP_ADMIN_PASSWORD: "dev"
       APP_COOKIE_SECURE: "false"
       APP_ALLOW_INSECURE: "1"
+      # Narrow ranges for dev — fewer iptables rules = faster `compose up`.
+      # Prod widens these via /opt/voice-hub/.env.
+      UDP_PORT_MIN: "10101"
+      UDP_PORT_MAX: "10200"
+      TURN_RELAY_PORT_MIN: "49160"
+      TURN_RELAY_PORT_MAX: "49200"
     volumes:
       - app_data:/app/data
     ports:

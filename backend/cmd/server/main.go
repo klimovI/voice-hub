@@ -88,8 +88,8 @@ func main() {
 		SharedSecret: cfg.TurnSharedSecret,
 		PublicIP:     cfg.PublicIP,
 		ListenAddr:   "0.0.0.0:3478",
-		MinRelayPort: 49160,
-		MaxRelayPort: 49200,
+		MinRelayPort: cfg.TurnRelayMin,
+		MaxRelayPort: cfg.TurnRelayMax,
 	})
 	if err != nil {
 		log.Fatalf("turn init: %v", err)

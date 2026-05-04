@@ -23,14 +23,14 @@ services:
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-      - caddy_config:/config
     security_opt:
       - no-new-privileges:true
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
   app:
-    image: ghcr.io/klimovi/voice-hub-app:${IMAGE_TAG:-latest}
+    image: ghcr.io/klimovi/voice-hub-app:${IMAGE_TAG:?IMAGE_TAG is required}
     restart: unless-stopped
     mem_limit: 384m
     mem_reservation: 128m
@@ -41,12 +41,18 @@ services:
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
       APP_TRUSTED_PROXIES: "10.200.200.0/24"
+      # Port ranges shared with compose `ports:` below — single source of truth.
+      # Override in /opt/voice-hub/.env if you need to widen further.
+      UDP_PORT_MIN: "${UDP_PORT_MIN:-10000}"
+      UDP_PORT_MAX: "${UDP_PORT_MAX:-11000}"
+      TURN_RELAY_PORT_MIN: "${TURN_RELAY_PORT_MIN:-49000}"
+      TURN_RELAY_PORT_MAX: "${TURN_RELAY_PORT_MAX:-49500}"
     expose:
       - "8080"
     ports:
       - "3478:3478/udp"
-      - "10101-10200:10101-10200/udp"
-      - "49160-49200:49160-49200/udp"
+      - "${UDP_PORT_MIN:-10000}-${UDP_PORT_MAX:-11000}:${UDP_PORT_MIN:-10000}-${UDP_PORT_MAX:-11000}/udp"
+      - "${TURN_RELAY_PORT_MIN:-49000}-${TURN_RELAY_PORT_MAX:-49500}:${TURN_RELAY_PORT_MIN:-49000}-${TURN_RELAY_PORT_MAX:-49500}/udp"
     volumes:
       - app_data:/app/data
     security_opt:
@@ -63,5 +69,4 @@ services:
 
 volumes:
   caddy_data:
-  caddy_config:
   app_data:

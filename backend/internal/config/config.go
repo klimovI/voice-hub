@@ -16,6 +16,8 @@ type Config struct {
 	CookieSecure  bool
 	UDPPortMin    uint16
 	UDPPortMax    uint16
+	TurnRelayMin  uint16
+	TurnRelayMax  uint16
 	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
 	// Default loopback-only; prod compose pins the docker network range.
 	TrustedProxies []netip.Prefix
@@ -38,8 +40,10 @@ func Load() (Config, error) {
 		TurnRealm:      env("TURN_REALM", hostname),
 		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10101)),
-		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 10200)),
+		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10000)),
+		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 11000)),
+		TurnRelayMin:   uint16(envInt("TURN_RELAY_PORT_MIN", 49000)),
+		TurnRelayMax:   uint16(envInt("TURN_RELAY_PORT_MAX", 49500)),
 		TrustedProxies: trusted,
 	}, nil
 }

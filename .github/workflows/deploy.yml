@@ -37,7 +37,6 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/voice-hub-app
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long,prefix=
 
       - uses: docker/build-push-action@v7
@@ -101,4 +100,4 @@ jobs:
         env:
           APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         run: |
-          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans'
+          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker image prune -af'
