@@ -2,7 +2,7 @@
 // Audio nodes are NOT stored here — they live in imperative refs inside useAudioEngine.
 
 import { create } from 'zustand';
-import type { EngineKind, ParticipantUI } from '../types';
+import type { EngineKind, ParticipantUI, Role } from '../types';
 import type { InputBinding } from '../utils/binding';
 import { loadBinding } from '../utils/binding';
 import {
@@ -31,6 +31,11 @@ export interface AppState {
   // before iceServers are known.
   configReady: boolean;
   setConfigReady: (v: boolean) => void;
+
+  // Caller's session role from /api/config. null until config resolves.
+  // Drives admin-only UI (AdminKeyButton) without a separate probe endpoint.
+  role: Role | null;
+  setRole: (r: Role | null) => void;
 
   // Mute/deafen are persistent (Discord-style — survive reload).
   // There is no separate outputMuted field on purpose: the previous
@@ -81,6 +86,8 @@ export const useStore = create<AppState>((set, get) => ({
   setJoinState: (s) => set({ joinState: s }),
   configReady: false,
   setConfigReady: (v) => set({ configReady: v }),
+  role: null,
+  setRole: (r) => set({ role: r }),
 
   selfMuted: loadBoolean(KEYS.selfMuted, false),
   setSelfMuted: (v) => {

@@ -450,7 +450,8 @@ export function useSessionManager({
     loadAppConfig()
       .then((cfg) => {
         configRef.current = cfg;
-        store.setConfigReady(true);
+        // Single set() so subscribers don't render with role-set-but-not-ready.
+        useStore.setState({ role: cfg.role, configReady: true });
         store.setStatus('Готово');
         if (shouldRejoin) {
           void handleJoinRef.current?.(loadOrCreateDisplayName(makeGuestName));
