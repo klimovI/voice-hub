@@ -35,7 +35,7 @@ func AccessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		log.Printf("http %s %s %d %s ip=%s",
+		log.Printf("http %s %q %d %s ip=%q",
 			r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), ClientIP(r))
 	})
 }
