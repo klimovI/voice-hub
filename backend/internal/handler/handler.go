@@ -182,10 +182,8 @@ func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
 }
 
 // Config handles GET /api/config. It generates short-lived TURN credentials and
-// returns ICE server config along with the caller's role. turnURLs is one
-// ICEServer entry's URLs slice — multiple TURN transports (turn:udp, turns:tcp)
-// share a single credential pair.
-func Config(sessionSecret []byte, turnSharedSecret, stunURL string, turnURLs []string) http.HandlerFunc {
+// returns ICE server config along with the caller's role.
+func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -197,7 +195,7 @@ func Config(sessionSecret []byte, turnSharedSecret, stunURL string, turnURLs []s
 			ICEServers: []ICEServer{
 				{URLs: []string{stunURL}},
 				{
-					URLs:       turnURLs,
+					URLs:       []string{turnURL},
 					Username:   username,
 					Credential: credential,
 				},

@@ -70,13 +70,7 @@ func main() {
 	limiter := auth.NewAuthLimiter(10, 15*time.Minute)
 
 	stunURL := "stun:" + cfg.AppHostname + ":3478"
-	turnURLs := []string{"turn:" + cfg.AppHostname + ":3478?transport=udp"}
-	// Public TURNS port is the IANA-assigned 5349, terminated by Caddy's L4
-	// listener; internal plain-TCP port is APP_TURN_TCP_PORT. Advertising the
-	// turns: URL is gated on the internal listener being up.
-	if cfg.TurnTCPPort != "" {
-		turnURLs = append(turnURLs, "turns:"+cfg.AppHostname+":5349?transport=tcp")
-	}
+	turnURL := "turn:" + cfg.AppHostname + ":3478?transport=udp"
 
 	room, err := sfu.NewRoom(sfu.Config{
 		ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},
@@ -89,10 +83,6 @@ func main() {
 		log.Fatalf("sfu init: %v", err)
 	}
 
-	turnTCPAddr := ""
-	if cfg.TurnTCPPort != "" {
-		turnTCPAddr = "0.0.0.0:" + cfg.TurnTCPPort
-	}
 	turnServer, err := turnsrv.Start(turnsrv.Config{
 		Realm:        cfg.TurnRealm,
 		SharedSecret: cfg.TurnSharedSecret,
@@ -100,7 +90,6 @@ func main() {
 		ListenAddr:   "0.0.0.0:3478",
 		MinRelayPort: 49160,
 		MaxRelayPort: 49200,
-		TCPAddr:      turnTCPAddr,
 	})
 	if err != nil {
 		log.Fatalf("turn init: %v", err)
@@ -117,7 +106,7 @@ func main() {
 	mux.HandleFunc("/api/logout", handler.Logout(cfg.CookieSecure))
 	mux.Handle("/ws", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, http.HandlerFunc(room.ServeWS)))
 	mux.Handle("/api/room/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.RoomPeersOf(room)))
-	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURLs)))
+	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
 	mux.Handle("/api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassStatus(connPass)))
 	mux.Handle("/api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassRotate(cfg.AppHostname, connPass)))
 	mux.Handle("/api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassRevoke(connPass)))

@@ -19,10 +19,6 @@ type Config struct {
 	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
 	// Default loopback-only; prod compose pins the docker network range.
 	TrustedProxies []netip.Prefix
-	// TURN-over-TCP listener port. Caddy's L4 listener terminates the public
-	// TURNS (TLS) handshake and proxies decrypted TCP to this internal port.
-	// Empty disables the TCP listener (UDP TURN still runs).
-	TurnTCPPort string
 	// Populated by main from disk after Load(); not env-backed.
 	SessionSecret    []byte
 	TurnSharedSecret string
@@ -45,7 +41,6 @@ func Load() (Config, error) {
 		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10101)),
 		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 10200)),
 		TrustedProxies: trusted,
-		TurnTCPPort:    os.Getenv("APP_TURN_TCP_PORT"),
 	}, nil
 }
 

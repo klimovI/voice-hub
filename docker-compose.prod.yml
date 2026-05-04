@@ -11,15 +11,11 @@ networks:
 
 services:
   caddy:
-    # Custom build with caddy-l4 (see deploy/caddy.Dockerfile). Stock Caddy
-    # cannot SNI-route + TLS-terminate non-HTTP traffic, which is what TURNS
-    # on :5349 needs.
-    image: ghcr.io/klimovi/voice-hub-caddy:${IMAGE_TAG:-latest}
+    image: caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-      - "5349:5349"
     environment:
       APP_HOSTNAME: ${APP_HOSTNAME}
     volumes:
@@ -43,13 +39,8 @@ services:
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
       APP_TRUSTED_PROXIES: "10.200.200.0/24"
-      # Plain-TCP TURN listener on the internal Docker network. Caddy's L4
-      # listener on :5349 SNI-matches and TLS-terminates, then proxies here.
-      # The cert never leaves Caddy.
-      APP_TURN_TCP_PORT: "5350"
     expose:
       - "8080"
-      - "5350"
     ports:
       - "3478:3478/udp"
       - "10101-10200:10101-10200/udp"

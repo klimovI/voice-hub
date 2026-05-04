@@ -35,16 +35,9 @@ type Config struct {
 	// peers. Must be exposed by the container.
 	MinRelayPort uint16
 	MaxRelayPort uint16
-
-	// TCPAddr enables plain TURN-over-TCP on the given bind address (e.g.
-	// ":5350"). Public TURNS (TLS) is terminated upstream by Caddy's L4
-	// listener; this listener receives the already-decrypted TCP stream over
-	// the internal Docker network. Empty disables the TCP listener.
-	TCPAddr string
 }
 
-// Server wraps a pion/turn server. Listener ownership is held entirely by
-// pion via ServerConfig.PacketConnConfigs / ListenerConfigs; Close() delegates.
+// Server wraps a pion/turn server.
 type Server struct {
 	srv *pion.Server
 }
@@ -58,44 +51,9 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("turn: public IP required")
 	}
 
-	udpListener, err := net.ListenPacket("udp4", cfg.ListenAddr)
+	listener, err := net.ListenPacket("udp4", cfg.ListenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("turn: listen %s: %w", cfg.ListenAddr, err)
-	}
-	ownsUDP := true
-	defer func() {
-		if ownsUDP {
-			_ = udpListener.Close()
-		}
-	}()
-
-	relayGen := func() *pion.RelayAddressGeneratorPortRange {
-		return &pion.RelayAddressGeneratorPortRange{
-			RelayAddress: net.ParseIP(cfg.PublicIP),
-			Address:      "0.0.0.0",
-			MinPort:      cfg.MinRelayPort,
-			MaxPort:      cfg.MaxRelayPort,
-		}
-	}
-
-	var tcpListener net.Listener
-	var listenerCfgs []pion.ListenerConfig
-	ownsTCP := false
-	defer func() {
-		if ownsTCP && tcpListener != nil {
-			_ = tcpListener.Close()
-		}
-	}()
-	if cfg.TCPAddr != "" {
-		tcpListener, err = net.Listen("tcp", cfg.TCPAddr)
-		if err != nil {
-			return nil, fmt.Errorf("turn: tcp listen %s: %w", cfg.TCPAddr, err)
-		}
-		ownsTCP = true
-		listenerCfgs = append(listenerCfgs, pion.ListenerConfig{
-			Listener:              tcpListener,
-			RelayAddressGenerator: relayGen(),
-		})
 	}
 
 	logger := pionlogging.NewDefaultLoggerFactory().NewLogger("turn")
@@ -113,26 +71,23 @@ func Start(cfg Config) (*Server, error) {
 		PermissionTimeout:  turnAllocationLifetime,
 		PacketConnConfigs: []pion.PacketConnConfig{
 			{
-				PacketConn:            udpListener,
-				RelayAddressGenerator: relayGen(),
+				PacketConn: listener,
+				RelayAddressGenerator: &pion.RelayAddressGeneratorPortRange{
+					RelayAddress: net.ParseIP(cfg.PublicIP),
+					Address:      "0.0.0.0",
+					MinPort:      cfg.MinRelayPort,
+					MaxPort:      cfg.MaxRelayPort,
+				},
 			},
 		},
-		ListenerConfigs: listenerCfgs,
 	})
 	if err != nil {
+		_ = listener.Close()
 		return nil, fmt.Errorf("turn: server: %w", err)
 	}
-	// pion now owns both listeners and will close them via Server.Close.
-	ownsUDP = false
-	ownsTCP = false
 
-	if cfg.TCPAddr != "" {
-		log.Printf("turn: listening on %s (udp) + %s (tcp, behind caddy-l4 tls), relay %s:%d-%d, realm=%s",
-			cfg.ListenAddr, cfg.TCPAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
-	} else {
-		log.Printf("turn: listening on %s, relay %s:%d-%d, realm=%s",
-			cfg.ListenAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
-	}
+	log.Printf("turn: listening on %s, relay %s:%d-%d, realm=%s",
+		cfg.ListenAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
 
 	return &Server{srv: srv}, nil
 }

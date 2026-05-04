@@ -1,20 +1,3 @@
-# L4 listener for TURNS on :5349. Caddy terminates TLS using the same
-# auto-issued cert as the HTTPS site below, then proxies the decrypted
-# TURN-over-TCP stream to the app container's internal port. This keeps the
-# private key inside Caddy — pion never reads the cert/key files. Requires the
-# caddy-l4 module (built into our custom image, see deploy/caddy.Dockerfile).
-{
-	layer4 {
-		:5349 {
-			@turns tls sni {$APP_HOSTNAME}
-			route @turns {
-				tls
-				proxy app:5350
-			}
-		}
-	}
-}
-
 {$APP_HOSTNAME} {
 	encode zstd gzip
 

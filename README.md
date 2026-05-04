@@ -50,7 +50,7 @@ cd frontend && npm install && npm run dev            # vite на :5173
 
 VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер. Детали в [DEPLOY.md](DEPLOY.md).
 
-TURN поднимается в двух транспортах: `turn://:3478?transport=udp` (быстрый путь) и `turns://:5349?transport=tcp` (TLS, для клиентов где UDP заблокирован). TLS терминируется в Caddy через L4-модуль (`caddy-l4`) — приватный ключ HTTPS не выходит из Caddy. Pion получает уже расшифрованный TURN-over-TCP по внутренней Docker-сети. Caddy собирается кастомным образом (`deploy/caddy.Dockerfile`, xcaddy + `mholt/caddy-l4`) и пушится в ghcr рядом с app. Корпоративные firewall'ы, режущие всё кроме :443, отдельной задачей не покрыты — но L4-машинерия уже на месте, добавление SNI-роутинга на :443 теперь дельта в Caddyfile.
+TURN поднимается одним транспортом: `turn://:3478?transport=udp`. Voice — UDP-only, как у Discord. Сети, где UDP полностью зарезан, не поддерживаются: TCP/TLS-фолбэка нет, и стоковый `caddy:2-alpine` его не предполагает.
 
 ## Desktop (Tauri)
 

@@ -8,15 +8,13 @@
 
 ```
 internet ──HTTPS/WSS─────────────▶ Caddy (auto-TLS) ──▶ app (8080)
-internet ──TCP/TLS 5349 (TURNS) ─▶ Caddy (caddy-l4)  ──▶ app (5350)
 internet ──UDP  3478, 10101-10200, 49160-49200 ────────▶ app
 ```
 
-- Caddy фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
+- Caddy (стоковый `caddy:2-alpine`) фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
 - WebRTC media и TURN-relay идут напрямую в app по UDP, в обход Caddy
-- TURNS на :5349 (TCP/TLS) для клиентов, у которых UDP заблокирован. TLS терминируется в Caddy через `caddy-l4`; pion получает уже расшифрованный TURN-over-TCP во внутренней Docker-сети на :5350. Приватный ключ HTTPS не выходит из Caddy
-- Caddy — кастомный образ (`deploy/caddy.Dockerfile`), собирается в CI рядом с app и пушится в ghcr
-- app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN UDP+TCP (HMAC short-term creds). Janus и coturn убраны
+- Voice — UDP-only. Сети, где UDP заблокирован, не поддерживаются (как у Discord). TCP/TLS-фолбэка для TURN нет
+- app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN UDP (HMAC short-term creds). Janus и coturn убраны
 
 ## Требования
 
@@ -24,7 +22,6 @@ internet ──UDP  3478, 10101-10200, 49160-49200 ────────▶ a
 - Debian/Ubuntu, доступ root по SSH
 - Домен с forward A на IP (DuckDNS работает, но иногда флапает CAA-таймаутами; платный домен на ~200₽/год надёжнее)
 - Открытый исходящий UDP на сервере и у клиентов
-- Открытый TCP `5349` на сервере для TURNS (фолбэк, когда у клиента зарезан UDP)
 
 ## Bootstrap сервера (один раз)
 
@@ -95,13 +92,13 @@ APP_ADMIN_PASSWORD=<openssl rand -base64 24>
 | `PROD_ENV` | остальной `.env` целиком (см. формат выше) |
 | `TAURI_SIGNING_PRIVATE_KEY` | приватный ключ для подписи desktop-релизов |
 
-После первого успешного `build` — на github.com/<owner>?tab=packages для **обоих** образов (`voice-hub-app` и `voice-hub-caddy`) поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
+После первого успешного `build` — на github.com/<owner>?tab=packages для образа `voice-hub-app` поменять visibility на **Public**, чтобы сервер мог `docker pull` без авторизации. Иначе нужен `docker login` на сервере под PAT.
 
 ## Workflow
 
 `.github/workflows/deploy.yml` запускается на push в master:
 
-1. Build (parallel): app → `ghcr.io/<owner>/voice-hub-app:{latest,sha}`; caddy → `ghcr.io/<owner>/voice-hub-caddy:{latest,sha}` (xcaddy + caddy-l4)
+1. Build: app → `ghcr.io/<owner>/voice-hub-app:{latest,sha}`
 2. Sync deploy files: scp `docker-compose.prod.yml` и `Caddyfile` в `/opt/voice-hub/`
 3. Write .env on host: пишет `/opt/voice-hub/.env` из `PROD_ENV` secret (`chmod 600`), полностью перезаписывая прежний
 4. Pull & restart: `docker compose pull && docker compose up -d --remove-orphans`
