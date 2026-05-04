@@ -141,19 +141,48 @@ export function useAudioEngine() {
       _peerId: string | null,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
-      teardownGraph();
-      const graph = await buildGraph(engine);
+      // Build new graph BEFORE tearing down old. The SFU sender keeps a live
+      // track during the rebuild; both contexts share rawLocalStream (multiple
+      // MediaStreamAudioSourceNodes on the same stream is allowed). Tearing
+      // down first creates a dead-track window during async addModule + WASM
+      // compile (esp. on first switch to v2: ~5 MB worklet bundle), and some
+      // peers don't recover when the new track arrives.
+      const r = refs.current;
+      const oldGraph = r.micGraph;
+      r.micGraph = null;
+      let graph: MicGraph;
+      try {
+        graph = await buildGraph(engine);
+      } catch (err) {
+        r.micGraph = oldGraph;
+        throw err;
+      }
       const newTrack = graph.processedLocalStream.getAudioTracks()[0];
-      if (!newTrack) throw new Error('No audio track after rebuild');
+      if (!newTrack) {
+        teardownMicGraph(graph);
+        r.micGraph = oldGraph;
+        throw new Error('No audio track after rebuild');
+      }
       newTrack.enabled = !selfMuted;
       const pc = getSFUPeerConnection();
       if (pc) {
         const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
-        if (sender) await sender.replaceTrack(newTrack);
+        if (sender) {
+          try {
+            await sender.replaceTrack(newTrack);
+          } catch (err) {
+            // Sender rejected the new track — discard the freshly-built graph
+            // and restore the old one so the user keeps a working mic.
+            teardownMicGraph(graph);
+            r.micGraph = oldGraph;
+            throw err;
+          }
+        }
       }
+      if (oldGraph) teardownMicGraph(oldGraph);
       return graph;
     },
-    [teardownGraph, buildGraph],
+    [buildGraph],
   );
 
   const switchMicDevice = useCallback(

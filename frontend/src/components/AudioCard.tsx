@@ -4,8 +4,9 @@ import { clampPercentage } from '../utils/storage';
 import { formatRnnoiseMix } from '../utils/clamp';
 import type { EngineKind } from '../types';
 
-const ENGINE_OPTIONS: { value: EngineKind; label: string }[] = [
-  { value: 'off', label: 'Выключено' },
+type DenoiserVariant = Exclude<EngineKind, 'off'>;
+
+const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = [
   { value: 'rnnoise', label: 'RNNoise (текущий)' },
   { value: 'rnnoise-v2', label: 'RNNoise (новый)' },
 ];
@@ -28,6 +29,30 @@ function SliderHead({ label, value }: { label: string; value: string }) {
   );
 }
 
+function Toggle({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={onChange}
+      className="vh-toggle"
+      data-checked={checked}
+    >
+      <span className="vh-toggle-dot" />
+    </button>
+  );
+}
+
 export function AudioCard({
   onEngineSelect,
   onMicDeviceSelect,
@@ -43,6 +68,14 @@ export function AudioCard({
   const micDeviceId = useStore((s) => s.micDeviceId);
 
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  // Remembers the last non-off engine so toggling the switch back on restores
+  // the chosen variant rather than resetting to the default.
+  const [lastVariant, setLastVariant] = useState<DenoiserVariant>(
+    engine === 'off' ? 'rnnoise' : engine,
+  );
+  useEffect(() => {
+    if (engine !== 'off') setLastVariant(engine);
+  }, [engine]);
 
   useEffect(() => {
     const md = navigator.mediaDevices;
@@ -128,49 +161,60 @@ export function AudioCard({
         </div>
       )}
 
-      <div className="grid gap-2">
-        <label htmlFor="engine-select" className="section-label">
-          Шумоподавление
-        </label>
-        <div className="relative">
-          <select
-            id="engine-select"
-            value={engine}
-            onChange={(e) => onEngineSelect(e.target.value as EngineKind)}
-            className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
-              bg-bg-input border border-line text-body cursor-pointer
-              hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
-          >
-            {ENGINE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <span
-            aria-hidden
-            className="msym absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
-            style={{ fontSize: 16 }}
-          >
-            expand_more
-          </span>
-        </div>
+      <div className="flex items-center justify-between gap-3 py-3">
+        <span className="section-label">Шумоподавление</span>
+        <Toggle
+          checked={engine !== 'off'}
+          onChange={() => onEngineSelect(engine === 'off' ? lastVariant : 'off')}
+          ariaLabel="Шумоподавление"
+        />
       </div>
 
       {engine !== 'off' && (
-        <div className="grid gap-2">
-          <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix)} />
-          <input
-            id="rnnoise-mix"
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            value={rnnoiseMix}
-            onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
-            className="vh-range"
-          />
-        </div>
+        <>
+          <div className="grid gap-2">
+            <label htmlFor="engine-variant" className="section-label">
+              Алгоритм
+            </label>
+            <div className="relative">
+              <select
+                id="engine-variant"
+                value={engine}
+                onChange={(e) => onEngineSelect(e.target.value as DenoiserVariant)}
+                className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
+                  bg-bg-input border border-line text-body cursor-pointer
+                  hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
+              >
+                {VARIANT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <span
+                aria-hidden
+                className="msym absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
+                style={{ fontSize: 16 }}
+              >
+                expand_more
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix)} />
+            <input
+              id="rnnoise-mix"
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={rnnoiseMix}
+              onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
+              className="vh-range"
+            />
+          </div>
+        </>
       )}
 
       <div className="grid gap-2">
