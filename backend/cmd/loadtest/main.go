@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -49,16 +50,31 @@ import (
 func main() {
 	var (
 		target   = flag.String("target", "http://localhost:8080", "voice-hub base URL (http:// or https://)")
-		password = flag.String("password", "", "admin password for /api/login (required)")
+		password      = flag.String("password", "", "admin password for /api/login (mutually exclusive with -password-stdin)")
+		passwordStdin = flag.Bool("password-stdin", false, "read password from stdin (use this to avoid leaving the secret in argv / shell history)")
 		peers    = flag.Int("peers", 10, "number of synthetic peers")
-		duration = flag.Duration("duration", 30*time.Second, "how long to run after all peers connect")
-		publish  = flag.Bool("publish", false, "have each peer publish a fake Opus track at 50 pps")
-		ramp     = flag.Duration("ramp", 0, "spread peer connect over this duration (0 = all at once)")
+		duration   = flag.Duration("duration", 30*time.Second, "how long to run after all peers connect")
+		publish    = flag.Bool("publish", false, "have ALL peers publish a fake Opus track at 50 pps (overridden by -publishers)")
+		publishers = flag.Int("publishers", -1, "if >= 0, only the first K peers publish; the rest are listeners. Models a real room (few speakers, many listeners)")
+		ramp       = flag.Duration("ramp", 0, "spread peer connect over this duration (0 = all at once)")
 	)
 	flag.Parse()
 
+	if *passwordStdin {
+		if *password != "" {
+			fmt.Fprintln(os.Stderr, "error: -password and -password-stdin are mutually exclusive")
+			os.Exit(2)
+		}
+		buf, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: read password from stdin: %v\n", err)
+			os.Exit(2)
+		}
+		*password = strings.TrimRight(string(buf), "\r\n")
+	}
+
 	if *password == "" {
-		fmt.Fprintln(os.Stderr, "error: -password is required")
+		fmt.Fprintln(os.Stderr, "error: -password or -password-stdin is required")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -96,10 +112,14 @@ func main() {
 				return
 			}
 		}
+		shouldPublish := *publish
+		if *publishers >= 0 {
+			shouldPublish = i < *publishers
+		}
 		wg.Add(1)
-		go func(i int) {
+		go func(i int, pub bool) {
 			defer wg.Done()
-			c, err := dialClient(ctx, wsURL, fmt.Sprintf("p%d", i), fmt.Sprintf("cid-%d", i), cookie, api, *publish, stats)
+			c, err := dialClient(ctx, wsURL, fmt.Sprintf("p%d", i), fmt.Sprintf("cid-%d", i), cookie, api, pub, stats)
 			if err != nil {
 				stats.connectErrors.Add(1)
 				log.Printf("peer %d: %v", i, err)
@@ -107,38 +127,38 @@ func main() {
 			}
 			stats.connected.Add(1)
 			clients[i] = c
-		}(i)
+		}(i, shouldPublish)
 	}
 	wg.Wait()
 	connectDur := time.Since(connectStart)
 	log.Printf("connect phase: %d/%d peers in %v (errors=%d)",
 		stats.connected.Load(), *peers, connectDur, stats.connectErrors.Load())
 
-	if *publish {
-		stop := make(chan struct{})
-		var pubWg sync.WaitGroup
-		for _, c := range clients {
-			if c == nil {
-				continue
-			}
-			pubWg.Add(1)
-			go func(c *loadClient) {
-				defer pubWg.Done()
-				c.publishLoop(stop)
-			}(c)
+	// Start a publishLoop for every connected peer that has an
+	// audioTrack (set during dialClient when shouldPublish was true).
+	stop := make(chan struct{})
+	var pubWg sync.WaitGroup
+	pubCount := 0
+	for _, c := range clients {
+		if c == nil || c.audioTrack == nil {
+			continue
 		}
-		select {
-		case <-time.After(*duration):
-		case <-ctx.Done():
-		}
-		close(stop)
-		pubWg.Wait()
-	} else {
-		select {
-		case <-time.After(*duration):
-		case <-ctx.Done():
-		}
+		pubCount++
+		pubWg.Add(1)
+		go func(c *loadClient) {
+			defer pubWg.Done()
+			c.publishLoop(stop)
+		}(c)
 	}
+	if pubCount > 0 {
+		log.Printf("publishing: %d/%d connected peers", pubCount, stats.connected.Load())
+	}
+	select {
+	case <-time.After(*duration):
+	case <-ctx.Done():
+	}
+	close(stop)
+	pubWg.Wait()
 
 	stopStats()
 	for _, c := range clients {
