@@ -7,9 +7,9 @@
 ## Архитектура
 
 ```
-internet ──HTTPS/WSS──▶ Caddy (auto-TLS) ──▶ app  (8080)
-internet ──UDP  3478, 10101-10200, 49160-49200──▶ app
-internet ──TCP/TLS 5349 (TURNS) ────────────────▶ app
+internet ──HTTPS/WSS─────────────▶ Caddy (auto-TLS) ──▶ app (8080)
+internet ──TCP/TLS 5349 (TURNS) ─▶ Caddy (caddy-l4)  ──▶ app (5350)
+internet ──UDP  3478, 10101-10200, 49160-49200 ────────▶ app
 ```
 
 - Caddy фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01

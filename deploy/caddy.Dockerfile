@@ -6,11 +6,11 @@
 # tracks master at build time (cached by GHA scope=voice-hub-caddy until
 # this Dockerfile changes). Bump CADDY_VERSION deliberately.
 
-ARG CADDY_VERSION=2.8.4
+ARG CADDY_VERSION=2.11.1
 
 FROM caddy:${CADDY_VERSION}-builder AS builder
 RUN xcaddy build \
-    --with github.com/mholt/caddy-l4
+    --with github.com/mholt/caddy-l4@v0.1.0
 
 FROM caddy:${CADDY_VERSION}-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
