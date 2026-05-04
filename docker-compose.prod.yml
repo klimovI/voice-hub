@@ -11,20 +11,21 @@ networks:
 
 services:
   caddy:
-    image: caddy:2-alpine
+    # Custom build with caddy-l4 (see deploy/caddy.Dockerfile). Stock Caddy
+    # cannot SNI-route + TLS-terminate non-HTTP traffic, which is what TURNS
+    # on :5349 needs.
+    image: ghcr.io/klimovi/voice-hub-caddy:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "5349:5349"
     environment:
       APP_HOSTNAME: ${APP_HOSTNAME}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    # caddy_data is mounted RO into app so pion can serve TURNS off the same
-    # ACME-managed pair. App-compromise blast radius now extends to the HTTPS
-    # private key — accepted vs running a second ACME client.
     security_opt:
       - no-new-privileges:true
     depends_on:
@@ -42,22 +43,19 @@ services:
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
       APP_TRUSTED_PROXIES: "10.200.200.0/24"
-      # Caddy stores cert pairs under /data/caddy/certificates/<acme-dir>/<host>/.
-      # Glob the issuer segment so prod LE / staging / zerossl all resolve.
-      APP_TURN_TLS_PORT: "5349"
-      APP_TURN_TLS_CERT_GLOB: "/caddy-data/caddy/certificates/*/${APP_HOSTNAME}/${APP_HOSTNAME}.crt"
-      APP_TURN_TLS_KEY_GLOB: "/caddy-data/caddy/certificates/*/${APP_HOSTNAME}/${APP_HOSTNAME}.key"
+      # Plain-TCP TURN listener on the internal Docker network. Caddy's L4
+      # listener on :5349 SNI-matches and TLS-terminates, then proxies here.
+      # The cert never leaves Caddy.
+      APP_TURN_TCP_PORT: "5350"
     expose:
       - "8080"
+      - "5350"
     ports:
       - "3478:3478/udp"
-      - "5349:5349"
       - "10101-10200:10101-10200/udp"
       - "49160-49200:49160-49200/udp"
     volumes:
       - app_data:/app/data
-      # RO mount preserves read_only:true on the app container.
-      - caddy_data:/caddy-data:ro
     security_opt:
       - no-new-privileges:true
     read_only: true

@@ -19,11 +19,10 @@ type Config struct {
 	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
 	// Default loopback-only; prod compose pins the docker network range.
 	TrustedProxies []netip.Prefix
-	// TURN-over-TLS (TURNS) parameters. All three required to enable;
-	// missing any leaves TURNS off without affecting the UDP listener.
-	TurnTLSPort     string
-	TurnTLSCertGlob string
-	TurnTLSKeyGlob  string
+	// TURN-over-TCP listener port. Caddy's L4 listener terminates the public
+	// TURNS (TLS) handshake and proxies decrypted TCP to this internal port.
+	// Empty disables the TCP listener (UDP TURN still runs).
+	TurnTCPPort string
 	// Populated by main from disk after Load(); not env-backed.
 	SessionSecret    []byte
 	TurnSharedSecret string
@@ -43,12 +42,10 @@ func Load() (Config, error) {
 		TurnRealm:      env("TURN_REALM", hostname),
 		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:      uint16(envInt("UDP_PORT_MIN", 10101)),
-		UDPPortMax:      uint16(envInt("UDP_PORT_MAX", 10200)),
-		TrustedProxies:  trusted,
-		TurnTLSPort:     os.Getenv("APP_TURN_TLS_PORT"),
-		TurnTLSCertGlob: os.Getenv("APP_TURN_TLS_CERT_GLOB"),
-		TurnTLSKeyGlob:  os.Getenv("APP_TURN_TLS_KEY_GLOB"),
+		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10101)),
+		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 10200)),
+		TrustedProxies: trusted,
+		TurnTCPPort:    os.Getenv("APP_TURN_TCP_PORT"),
 	}, nil
 }
 

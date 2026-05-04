@@ -7,7 +7,6 @@ package turn
 import (
 	"crypto/hmac"
 	"crypto/sha1"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -30,20 +29,18 @@ type Config struct {
 	// PublicIP is the externally-reachable address advertised in relay
 	// candidates. For docker hosts this is the host's public IP.
 	PublicIP string
-	// ListenAddr is the bind address for the STUN/TURN listener.
+	// ListenAddr is the bind address for the STUN/TURN UDP listener.
 	ListenAddr string
 	// MinRelayPort/MaxRelayPort define the UDP port range allocated to relay
 	// peers. Must be exposed by the container.
 	MinRelayPort uint16
 	MaxRelayPort uint16
 
-	// TLSAddr enables TURNS on the given TCP bind address (e.g. ":5349"). When
-	// empty, no TLS listener is started. Both globs must also be set.
-	TLSAddr string
-	// TLSCertGlob/TLSKeyGlob locate Caddy's ACME-managed cert pair. The first
-	// match wins; the path's `*` segment covers Caddy's per-issuer directory.
-	TLSCertGlob string
-	TLSKeyGlob  string
+	// TCPAddr enables plain TURN-over-TCP on the given bind address (e.g.
+	// ":5350"). Public TURNS (TLS) is terminated upstream by Caddy's L4
+	// listener; this listener receives the already-decrypted TCP stream over
+	// the internal Docker network. Empty disables the TCP listener.
+	TCPAddr string
 }
 
 // Server wraps a pion/turn server. Listener ownership is held entirely by
@@ -83,33 +80,20 @@ func Start(cfg Config) (*Server, error) {
 
 	var tcpListener net.Listener
 	var listenerCfgs []pion.ListenerConfig
-	tlsEnabled := cfg.TLSAddr != "" && cfg.TLSCertGlob != "" && cfg.TLSKeyGlob != ""
 	ownsTCP := false
 	defer func() {
 		if ownsTCP && tcpListener != nil {
 			_ = tcpListener.Close()
 		}
 	}()
-	if tlsEnabled {
-		certPath, keyPath, err := findCertPair(cfg.TLSCertGlob, cfg.TLSKeyGlob)
+	if cfg.TCPAddr != "" {
+		tcpListener, err = net.Listen("tcp", cfg.TCPAddr)
 		if err != nil {
-			return nil, fmt.Errorf("turn: %w", err)
-		}
-		watcher := newCertWatcher(certPath, keyPath)
-		if err := watcher.load(); err != nil {
-			return nil, err
-		}
-		tlsCfg := &tls.Config{
-			MinVersion:     tls.VersionTLS12,
-			GetCertificate: watcher.GetCertificate,
-		}
-		tcpListener, err = net.Listen("tcp", cfg.TLSAddr)
-		if err != nil {
-			return nil, fmt.Errorf("turn: tls listen %s: %w", cfg.TLSAddr, err)
+			return nil, fmt.Errorf("turn: tcp listen %s: %w", cfg.TCPAddr, err)
 		}
 		ownsTCP = true
 		listenerCfgs = append(listenerCfgs, pion.ListenerConfig{
-			Listener:              tls.NewListener(tcpListener, tlsCfg),
+			Listener:              tcpListener,
 			RelayAddressGenerator: relayGen(),
 		})
 	}
@@ -142,9 +126,9 @@ func Start(cfg Config) (*Server, error) {
 	ownsUDP = false
 	ownsTCP = false
 
-	if tlsEnabled {
-		log.Printf("turn: listening on %s (udp) + %s (tls), relay %s:%d-%d, realm=%s",
-			cfg.ListenAddr, cfg.TLSAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
+	if cfg.TCPAddr != "" {
+		log.Printf("turn: listening on %s (udp) + %s (tcp, behind caddy-l4 tls), relay %s:%d-%d, realm=%s",
+			cfg.ListenAddr, cfg.TCPAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)
 	} else {
 		log.Printf("turn: listening on %s, relay %s:%d-%d, realm=%s",
 			cfg.ListenAddr, cfg.PublicIP, cfg.MinRelayPort, cfg.MaxRelayPort, cfg.Realm)

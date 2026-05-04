@@ -50,9 +50,7 @@ cd frontend && npm install && npm run dev            # vite на :5173
 
 VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер. Детали в [DEPLOY.md](DEPLOY.md).
 
-TURN поднимается в двух транспортах: `turn://:3478?transport=udp` (быстрый путь) и `turns://:5349?transport=tcp` (TLS, для клиентов где UDP заблокирован). Pion берёт сертификат из RO-маунта `caddy_data` — Caddy единственный ACME-клиент в стеке. При первом запуске бэк может рестартануть пару раз, пока Caddy не получит сертификат — это ожидаемо. Корпоративные firewall'ы, режущие всё кроме :443, отдельной задачей не покрыты (нужен SNI/L4-роутер перед Caddy).
-
-> **Tradeoff:** app-контейнер получает RO-доступ к приватному ключу HTTPS. App-compromise разворачивает blast radius на HTTPS-сертификат — приняли вместо отдельного ACME-клиента.
+TURN поднимается в двух транспортах: `turn://:3478?transport=udp` (быстрый путь) и `turns://:5349?transport=tcp` (TLS, для клиентов где UDP заблокирован). TLS терминируется в Caddy через L4-модуль (`caddy-l4`) — приватный ключ HTTPS не выходит из Caddy. Pion получает уже расшифрованный TURN-over-TCP по внутренней Docker-сети. Caddy собирается кастомным образом (`deploy/caddy.Dockerfile`, xcaddy + `mholt/caddy-l4`) и пушится в ghcr рядом с app. Корпоративные firewall'ы, режущие всё кроме :443, отдельной задачей не покрыты — но L4-машинерия уже на месте, добавление SNI-роутинга на :443 теперь дельта в Caddyfile.
 
 ## Desktop (Tauri)
 

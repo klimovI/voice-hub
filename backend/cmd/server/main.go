@@ -71,8 +71,11 @@ func main() {
 
 	stunURL := "stun:" + cfg.AppHostname + ":3478"
 	turnURLs := []string{"turn:" + cfg.AppHostname + ":3478?transport=udp"}
-	if cfg.TurnTLSPort != "" && cfg.TurnTLSCertGlob != "" && cfg.TurnTLSKeyGlob != "" {
-		turnURLs = append(turnURLs, "turns:"+cfg.AppHostname+":"+cfg.TurnTLSPort+"?transport=tcp")
+	// Public TURNS port is the IANA-assigned 5349, terminated by Caddy's L4
+	// listener; internal plain-TCP port is APP_TURN_TCP_PORT. Advertising the
+	// turns: URL is gated on the internal listener being up.
+	if cfg.TurnTCPPort != "" {
+		turnURLs = append(turnURLs, "turns:"+cfg.AppHostname+":5349?transport=tcp")
 	}
 
 	room, err := sfu.NewRoom(sfu.Config{
@@ -86,9 +89,9 @@ func main() {
 		log.Fatalf("sfu init: %v", err)
 	}
 
-	turnTLSAddr := ""
-	if cfg.TurnTLSPort != "" {
-		turnTLSAddr = "0.0.0.0:" + cfg.TurnTLSPort
+	turnTCPAddr := ""
+	if cfg.TurnTCPPort != "" {
+		turnTCPAddr = "0.0.0.0:" + cfg.TurnTCPPort
 	}
 	turnServer, err := turnsrv.Start(turnsrv.Config{
 		Realm:        cfg.TurnRealm,
@@ -97,9 +100,7 @@ func main() {
 		ListenAddr:   "0.0.0.0:3478",
 		MinRelayPort: 49160,
 		MaxRelayPort: 49200,
-		TLSAddr:      turnTLSAddr,
-		TLSCertGlob:  cfg.TurnTLSCertGlob,
-		TLSKeyGlob:   cfg.TurnTLSKeyGlob,
+		TCPAddr:      turnTCPAddr,
 	})
 	if err != nil {
 		log.Fatalf("turn init: %v", err)
