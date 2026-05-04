@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { ConnectionState } from './ipc';
+import { isTauri } from './utils/tauri';
 import './styles/main.css';
 
 export function Connect() {
@@ -11,6 +12,7 @@ export function Connect() {
 
   // Pre-fill the saved host so "Change server" doesn't make the user retype.
   useEffect(() => {
+    if (!isTauri()) return;
     void invoke<ConnectionState>('get_state').then((state) => {
       if (state.host) setHost(state.host);
     });
@@ -21,6 +23,7 @@ export function Connect() {
     setError(null);
     setSubmitting(true);
     try {
+      if (!isTauri()) throw new Error('Эта страница работает только в десктопном приложении.');
       await invoke('set_host', { host });
       // Rust navigated the webview; nothing else to do here.
     } catch (err) {

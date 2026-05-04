@@ -14,8 +14,13 @@ let cachedReady = false;
 let cachedPromise: Promise<string> | null = null;
 let cachedBundleUrl: string | null = null;
 
-const RNNOISE_URL = '/vendor/rnnoise/rnnoise.js';
-const WORKLET_URL = '/vendor/rnnoise/rnnoise-worklet.js';
+// Cache-bust marker. /vendor/* is served immutable by Caddy, so once a vendor
+// file is in the HTTP cache it never refreshes. The blob-bundling rewrite is
+// sensitive to the exact vendor source format; bump this when the splice logic
+// changes shape, to force WebView2/browser to refetch the originals.
+const VENDOR_CACHE_BUST = 'blob1';
+const RNNOISE_URL = `/vendor/rnnoise/rnnoise.js?v=${VENDOR_CACHE_BUST}`;
+const WORKLET_URL = `/vendor/rnnoise/rnnoise-worklet.js?v=${VENDOR_CACHE_BUST}`;
 
 async function buildBundleUrl(): Promise<string> {
   const [rnRes, wkRes] = await Promise.all([fetch(RNNOISE_URL), fetch(WORKLET_URL)]);
@@ -33,11 +38,21 @@ async function buildBundleUrl(): Promise<string> {
     .replace(exportRe, `var Rnnoise = ${idMatch[1]};`)
     .replace(/import\.meta\.url/g, '""');
 
-  const importRe = /^\s*import\s*\{\s*Rnnoise\s*\}\s*from\s*["'][^"']*["'];?\s*$/m;
-  if (!importRe.test(wkSrc)) {
-    throw new Error('rnnoise-worklet.js: static Rnnoise import not found — format changed');
+  // Worklet may use either form depending on what the immutable HTTP cache
+  // serves: pre-77ad101 had `await import("/vendor/rnnoise/rnnoise.js")`,
+  // post had `import { Rnnoise } from "..."` at top level. Handle both.
+  const staticImportRe = /^\s*import\s*\{\s*Rnnoise\s*\}\s*from\s*["'][^"']*["'];?\s*$/m;
+  const dynamicImportRe = /await\s+import\s*\(\s*["'][^"']*rnnoise\.js[^"']*["']\s*\)/;
+  let wkInline: string;
+  if (staticImportRe.test(wkSrc)) {
+    wkInline = wkSrc.replace(staticImportRe, '');
+  } else if (dynamicImportRe.test(wkSrc)) {
+    // `const mod = await import("...")` → `const mod = ({ Rnnoise })`.
+    // `await` on a non-promise value is fine — resolves synchronously.
+    wkInline = wkSrc.replace(dynamicImportRe, '({ Rnnoise })');
+  } else {
+    throw new Error('rnnoise-worklet.js: no recognized Rnnoise import — format changed');
   }
-  const wkInline = wkSrc.replace(importRe, '');
 
   const blob = new Blob([rnInline, '\n', wkInline], { type: 'text/javascript' });
   return URL.createObjectURL(blob);
