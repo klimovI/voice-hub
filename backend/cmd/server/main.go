@@ -29,6 +29,14 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	allowInsecure, _ := strconv.ParseBool(os.Getenv("APP_ALLOW_INSECURE"))
+	if err := config.ValidateInsecureConfig(&cfg, allowInsecure); err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if allowInsecure {
+		log.Printf("WARNING: APP_ALLOW_INSECURE=1 — insecure dev mode active, do not expose publicly")
+	}
+
 	if cfg.AdminPassword == "" {
 		log.Fatal("APP_ADMIN_PASSWORD must be set")
 	}

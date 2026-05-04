@@ -13,3 +13,4 @@ backend/data/
 src-tauri/target/
 src-tauri/gen/schemas/
 scratch
+docker-compose.override.yml

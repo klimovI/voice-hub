@@ -28,16 +28,20 @@ NSIS-установщик: ярлыки в "Пуске", запись в "Progra
 Полный стек в Docker:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-Открыть `http://localhost:8080`, зайти паролем `dev` (admin; переопредели через `APP_ADMIN_PASSWORD` в `docker-compose.yml`). После входа: шестерёнка-ключ в правом верхнем углу → **Создать пароль** — это и есть «connection password» для остальных пользователей. Стоп: `docker compose down`. Логи: `docker compose logs -f app`.
+Бэк биндится на `127.0.0.1:8080` — наружу хоста не торчит. Открыть `http://localhost:8080`, зайти паролем `dev` (admin; переопредели через `APP_ADMIN_PASSWORD` в `docker-compose.dev.yml`). После входа: шестерёнка-ключ в правом верхнем углу → **Создать пароль** — это и есть «connection password» для остальных пользователей. Стоп: `docker compose -f docker-compose.dev.yml down`. Логи: `docker compose -f docker-compose.dev.yml logs -f app`.
+
+Дев-конфиг требует `APP_ALLOW_INSECURE=1` (cookie без Secure + дефолтный admin-пароль). Без флага бинарь не стартует — ловим случайный запуск дев-енва на публичном хосте.
+
+> **WSL2 + Docker Engine:** биндинг `127.0.0.1:8080` вешается на loopback виртуалки, не Windows. Если из Windows-браузера `localhost:8080` не открывается, создай локальный `docker-compose.override.yml` (gitignored) с `0.0.0.0:8080:8080`.
 
 ### Разработка фронта (бэк в докере, фронт локально с HMR)
 
 ```bash
-docker compose up -d app                  # бэк на :8080
-cd frontend && npm install && npm run dev # vite на :5173
+docker compose -f docker-compose.dev.yml up -d app   # бэк на :8080
+cd frontend && npm install && npm run dev            # vite на :5173
 ```
 
 Открыть `http://localhost:5173`. Vite проксирует `/api` и `/ws` на бэк (см. `frontend/vite.config.ts`), так что login и WebRTC работают как из обычного :8080.

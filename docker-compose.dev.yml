@@ -1,3 +1,5 @@
+# LOCAL DEV ONLY — bound to 127.0.0.1, requires APP_ALLOW_INSECURE=1.
+# Do not run on public hosts. Production layout: docker-compose.prod.yml.
 name: voice-hub
 
 services:
@@ -12,10 +14,11 @@ services:
       PUBLIC_IP: "127.0.0.1"
       APP_ADMIN_PASSWORD: "dev"
       APP_COOKIE_SECURE: "false"
+      APP_ALLOW_INSECURE: "1"
     volumes:
       - app_data:/app/data
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
       - "3478:3478/udp"
       - "10101-10200:10101-10200/udp"
       - "49160-49200:49160-49200/udp"
