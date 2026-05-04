@@ -50,8 +50,9 @@ services:
       APP_HOSTNAME: "${APP_HOSTNAME:?APP_HOSTNAME is required}"
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
-      # Caddy on bridge connects to app via host.docker.internal — packets
-      # arrive at app from the bridge gateway IP after MASQUERADE.
+      # Caddy on bridge dials 10.200.200.1:8080 (its default route).
+      # Source IP visible to app is either caddy's bridge IP or the bridge
+      # gateway after MASQUERADE — both are inside the /24.
       APP_TRUSTED_PROXIES: "10.200.200.0/24"
       UDP_PORT_MIN: "${UDP_PORT_MIN:-10000}"
       UDP_PORT_MAX: "${UDP_PORT_MAX:-11000}"
