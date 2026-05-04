@@ -65,9 +65,7 @@ export function Login() {
       )}
       <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
         <div className="flex items-center gap-2.5 mb-6">
-          <span className="msym msym-fill text-accent" style={{ fontSize: 22 }}>
-            graphic_eq
-          </span>
+          <img src="/favicon.svg" alt="" width={22} height={22} className="block" />
           <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">
             Voice&nbsp;Hub
           </span>
