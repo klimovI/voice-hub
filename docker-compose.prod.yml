@@ -35,29 +35,25 @@ services:
     restart: unless-stopped
     mem_limit: 384m
     mem_reservation: 128m
-    # Host networking instead of port-mapped bridge: 1500+ published UDP
-    # ports through docker NAT was too fragile (network attach race during
-    # `compose up`, plus heavy iptables churn). UFW must allow inbound UDP
-    # on 3478, UDP_PORT_MIN-MAX, TURN_RELAY_PORT_MIN-MAX. App's :8080 stays
-    # reachable only via the docker bridge gateway because UFW denies it
-    # publicly.
-    network_mode: host
     environment:
-      # Bind 8080 to the docker bridge gateway IP so it is unreachable from
-      # public interfaces (UFW would block anyway, defense in depth).
-      APP_ADDR: "10.200.200.1:8080"
+      APP_ADDR: ":8080"
       WEB_DIR: "/app/web"
       APP_HOSTNAME: "${APP_HOSTNAME:?APP_HOSTNAME is required}"
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
-      # Caddy on bridge dials 10.200.200.1:8080 (its default route).
-      # Source IP visible to app is either caddy's bridge IP or the bridge
-      # gateway after MASQUERADE — both are inside the /24.
       APP_TRUSTED_PROXIES: "10.200.200.0/24"
-      UDP_PORT_MIN: "${UDP_PORT_MIN:-10000}"
-      UDP_PORT_MAX: "${UDP_PORT_MAX:-11000}"
-      TURN_RELAY_PORT_MIN: "${TURN_RELAY_PORT_MIN:-49000}"
-      TURN_RELAY_PORT_MAX: "${TURN_RELAY_PORT_MAX:-49500}"
+      # Port ranges shared with compose `ports:` below — single source of truth.
+      # Override in /opt/voice-hub/.env if you need to widen further.
+      UDP_PORT_MIN: "${UDP_PORT_MIN:-10101}"
+      UDP_PORT_MAX: "${UDP_PORT_MAX:-10200}"
+      TURN_RELAY_PORT_MIN: "${TURN_RELAY_PORT_MIN:-49160}"
+      TURN_RELAY_PORT_MAX: "${TURN_RELAY_PORT_MAX:-49199}"
+    expose:
+      - "8080"
+    ports:
+      - "3478:3478/udp"
+      - "${UDP_PORT_MIN:-10101}-${UDP_PORT_MAX:-10200}:${UDP_PORT_MIN:-10101}-${UDP_PORT_MAX:-10200}/udp"
+      - "${TURN_RELAY_PORT_MIN:-49160}-${TURN_RELAY_PORT_MAX:-49199}:${TURN_RELAY_PORT_MIN:-49160}-${TURN_RELAY_PORT_MAX:-49199}/udp"
     volumes:
       - app_data:/app/data
     security_opt:
@@ -66,7 +62,7 @@ services:
     tmpfs:
       - /tmp
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://10.200.200.1:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

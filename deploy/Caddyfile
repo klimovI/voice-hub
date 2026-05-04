@@ -24,9 +24,5 @@
 	@html path / /index.html /login.html
 	header @html Cache-Control "no-cache"
 
-	# App runs in host network namespace and binds the docker bridge gateway
-	# IP 10.200.200.1 (pinned in docker-compose.prod.yml). Caddy is on that
-	# bridge so the gateway is its default route — direct hop, no DNS.
-	# UFW must allow 8080/tcp from 10.200.200.0/24.
-	reverse_proxy 10.200.200.1:8080
+	reverse_proxy app:8080
 }

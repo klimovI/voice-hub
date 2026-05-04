@@ -7,14 +7,13 @@
 ## Архитектура
 
 ```
-internet ──HTTPS/WSS────────────▶ Caddy (auto-TLS) ──▶ app (10.200.200.1:8080)
-internet ──UDP  3478, 10000-11000, 49000-49500 ───────▶ app (host network)
+internet ──HTTPS/WSS────────────▶ Caddy (auto-TLS) ──▶ app (8080)
+internet ──UDP  3478, 10101-10200, 49160-49199 ───────▶ app
 ```
 
 - Caddy (стоковый `caddy:2-alpine`) фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
-- App запущен в `network_mode: host` — публикация ~1500 UDP портов через docker NAT слишком хрупка (race в network attach при `compose up`, тяжёлый iptables). Caddy остаётся на bridge и достукивается через `host.docker.internal:8080` (= bridge gateway `10.200.200.1`)
-- App слушает HTTP на `10.200.200.1:8080` — это IP bridge gateway изнутри хоста; снаружи недостижим (нет listener на публичном интерфейсе)
-- WebRTC media и TURN-relay идут напрямую в app по UDP, в обход Caddy
+- App на bridge сети `voice-hub_default` (10.200.200.0/24), Caddy достукивается по docker DNS (`reverse_proxy app:8080`). Порт 8080 наружу не публикуется
+- WebRTC media и TURN-relay проброшены через docker NAT (~140 UDP портов всего, нагрузка на iptables минимальна)
 - Voice — UDP-only. Сети, где UDP заблокирован, не поддерживаются (как у Discord). TCP/TLS-фолбэка для TURN нет
 - app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN UDP (HMAC short-term creds). Janus и coturn убраны
 
@@ -32,11 +31,9 @@ internet ──UDP  3478, 10000-11000, 49000-49500 ───────▶ app 
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo "/swapfile none swap sw 0 0" >> /etc/fstab
 
-# Docker + log rotation. `userland-proxy: false` обязателен — мы пробрасываем
-# 1500+ UDP портов (ICE + TURN), а на каждый пробрасываемый порт docker
-# поднимает отдельный docker-proxy процесс (~5MB). На 1 GB боксе это OOM
-# на старте. С отключённым userland-proxy docker делает чистый iptables DNAT,
-# процессов на порт ноль.
+# Docker + log rotation. `userland-proxy: false` экономит docker-proxy
+# процесс на каждый пробрасываемый порт (~5MB) и переводит проброс в чистый
+# iptables DNAT. На любом количестве портов чистый win.
 curl -fsSL https://get.docker.com | sh
 mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
 {
@@ -63,16 +60,13 @@ sysctl --system
 # Non-root deploy user в группе docker
 useradd -m -s /bin/bash -G docker deploy
 
-# UFW: app в host network, поэтому media UDP должны быть явно разрешены.
-# 80/443/22 предполагаются уже открытыми. App :8080 НЕ открываем — он
-# биндится только к 10.200.200.1 (docker bridge gateway), снаружи невидим.
+# UFW: media UDP. App на bridge — порты пробрасываются через docker, докер
+# вставляет правила в свою цепочку DNAT (минует UFW INPUT). Эти строки нужны
+# для случая когда UFW активен и блокирует traffic до того как docker его
+# перехватит — на некоторых ядрах/конфигах docker-iptables-bypass не срабатывает.
 ufw allow 3478/udp comment "voice-hub stun/turn"
-ufw allow 10000:11000/udp comment "voice-hub ICE"
-ufw allow 49000:49500/udp comment "voice-hub TURN relay"
-# App слушает на bridge gateway 10.200.200.1:8080. Caddy в bridge
-# обращается через свой дефолтный gw — пакет попадает в INPUT хоста
-# (нelocally destined). Без этой строки UFW дропает 8080 (он не в allow).
-ufw allow from 10.200.200.0/24 to any port 8080 proto tcp comment "voice-hub caddy->app"
+ufw allow 10101:10200/udp comment "voice-hub ICE"
+ufw allow 49160:49199/udp comment "voice-hub TURN relay"
 
 # SSH: только по ключу, root login по ключу (паролем — нет)
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config

@@ -15,19 +15,15 @@ services:
       APP_ADMIN_PASSWORD: "dev"
       APP_COOKIE_SECURE: "false"
       APP_ALLOW_INSECURE: "1"
-      # Narrow ranges for dev — fewer iptables rules = faster `compose up`.
-      # Prod widens these via /opt/voice-hub/.env.
-      UDP_PORT_MIN: "10101"
-      UDP_PORT_MAX: "10200"
-      TURN_RELAY_PORT_MIN: "49160"
-      TURN_RELAY_PORT_MAX: "49200"
     volumes:
       - app_data:/app/data
+    # Port ranges follow backend defaults in internal/config/config.go
+    # (UDP_PORT_MIN/MAX, TURN_RELAY_PORT_MIN/MAX). Keep these in sync.
     ports:
       - "127.0.0.1:8080:8080"
       - "3478:3478/udp"
       - "10101-10200:10101-10200/udp"
-      - "49160-49200:49160-49200/udp"
+      - "49160-49199:49160-49199/udp"
 
 volumes:
   app_data:
