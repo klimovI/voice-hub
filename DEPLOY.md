@@ -37,6 +37,37 @@ mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
 EOF
 systemctl restart docker
 
+# Kernel tuning для WebRTC/HTTP/3/TURN. Без него quic-go и pion получают
+# дефолтные 208 KiB UDP rcvbuf — Caddy ругается на старте, RTP дропает под
+# burst. Kernel-buffer вне cgroup, container mem_limit'ы не трогаются.
+cat > /etc/sysctl.d/99-voice-hub.conf <<'EOF'
+net.core.rmem_max = 7340032
+net.core.wmem_max = 7340032
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.core.netdev_max_backlog = 5000
+vm.swappiness = 10
+EOF
+sysctl --system
+
+# Daily docker prune: чистит SHA-теги старше 72h + dangling. Без этого
+# каждый деплой кидает ~155MB на диск (см. /etc/cron.daily/docker-prune).
+cat > /etc/cron.daily/docker-prune <<'EOF'
+#!/bin/sh
+# Daily Docker cleanup: remove image tags >3d old and unused volumes.
+set -e
+LOG=/var/log/docker-prune.log
+{
+  echo "=== $(date -Is) prune start ==="
+  docker image prune -a --filter "until=72h" -f
+  docker volume prune -f
+  apt-get clean
+  echo "=== $(date -Is) prune done ==="
+  df -h /
+} >> "$LOG" 2>&1
+EOF
+chmod +x /etc/cron.daily/docker-prune
+
 # Non-root deploy user в группе docker
 useradd -m -s /bin/bash -G docker deploy
 
