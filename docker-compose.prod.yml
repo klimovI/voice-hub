@@ -23,10 +23,6 @@ services:
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-    # `host-gateway` resolves `host.docker.internal` to the docker bridge
-    # gateway IP, letting caddy reach the host-networked app at :8080.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     security_opt:
       - no-new-privileges:true
     # Start-order only — not health-gated. Brief 502s on cold start are

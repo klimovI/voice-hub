@@ -69,6 +69,10 @@ useradd -m -s /bin/bash -G docker deploy
 ufw allow 3478/udp comment "voice-hub stun/turn"
 ufw allow 10000:11000/udp comment "voice-hub ICE"
 ufw allow 49000:49500/udp comment "voice-hub TURN relay"
+# App слушает на bridge gateway 10.200.200.1:8080. Caddy в bridge
+# обращается через свой дефолтный gw — пакет попадает в INPUT хоста
+# (нelocally destined). Без этой строки UFW дропает 8080 (он не в allow).
+ufw allow from 10.200.200.0/24 to any port 8080 proto tcp comment "voice-hub caddy->app"
 
 # SSH: только по ключу, root login по ключу (паролем — нет)
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
