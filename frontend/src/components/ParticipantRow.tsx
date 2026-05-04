@@ -101,7 +101,8 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
         </div>
         <div className="min-w-0 flex flex-col justify-between" style={{ height: 40 }}>
           <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight leading-tight">
-            {participant.isSelf ? `${participant.display} (вы)` : participant.display}
+            {participant.display}
+            {participant.isSelf && <span className="text-muted-2 font-normal ml-1.5">[вы]</span>}
           </div>
           <div
             className={`text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 leading-none ${metaTextClass}`}
