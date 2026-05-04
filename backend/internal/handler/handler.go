@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -102,14 +103,16 @@ func Version(version string) http.HandlerFunc {
 
 // Login handles POST /api/login. It checks the admin password first (constant-time),
 // then the connection password, and issues a signed session cookie on success.
-func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter) http.HandlerFunc {
+// trusted is the proxy CIDR list — it controls which RemoteAddr values are
+// allowed to set X-Forwarded-For for rate-limit keying.
+func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter, trusted []netip.Prefix) http.HandlerFunc {
 	wantAdmin := []byte(adminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		ip := middleware.ClientIP(r)
+		ip := middleware.ClientIP(r, trusted)
 		if limiter.Blocked(ip) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)

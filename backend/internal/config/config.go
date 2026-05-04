@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/netip"
 	"os"
 	"strconv"
 )
@@ -15,24 +16,32 @@ type Config struct {
 	CookieSecure  bool
 	UDPPortMin    uint16
 	UDPPortMax    uint16
+	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
+	// Default loopback-only; prod compose pins the docker network range.
+	TrustedProxies []netip.Prefix
 	// Populated by main from disk after Load(); not env-backed.
 	SessionSecret    []byte
 	TurnSharedSecret string
 }
 
-func Load() Config {
+func Load() (Config, error) {
 	hostname := env("APP_HOSTNAME", "localhost")
-	return Config{
-		Addr:          env("APP_ADDR", ":8080"),
-		WebDir:        env("WEB_DIR", "../frontend/dist"),
-		AppHostname:   hostname,
-		PublicIP:      os.Getenv("PUBLIC_IP"),
-		TurnRealm:     env("TURN_REALM", hostname),
-		AdminPassword: os.Getenv("APP_ADMIN_PASSWORD"),
-		CookieSecure:  envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:    uint16(envInt("UDP_PORT_MIN", 10101)),
-		UDPPortMax:    uint16(envInt("UDP_PORT_MAX", 10200)),
+	trusted, err := ParseTrustedProxies(os.Getenv("APP_TRUSTED_PROXIES"))
+	if err != nil {
+		return Config{}, err
 	}
+	return Config{
+		Addr:           env("APP_ADDR", ":8080"),
+		WebDir:         env("WEB_DIR", "../frontend/dist"),
+		AppHostname:    hostname,
+		PublicIP:       os.Getenv("PUBLIC_IP"),
+		TurnRealm:      env("TURN_REALM", hostname),
+		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
+		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
+		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10101)),
+		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 10200)),
+		TrustedProxies: trusted,
+	}, nil
 }
 
 func env(key, fallback string) string {

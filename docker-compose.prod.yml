@@ -1,5 +1,14 @@
 name: voice-hub
 
+# Pin the docker network subnet so APP_TRUSTED_PROXIES can hard-reference it.
+# 10.200.200.0/24 chosen to dodge 172.16.0.0/12 (Docker auto-allocation +
+# common VPN ranges). On collision, change BOTH the subnet and the env value.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.200.200.0/24
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -29,6 +38,7 @@ services:
       APP_HOSTNAME: "${APP_HOSTNAME:?APP_HOSTNAME is required}"
       PUBLIC_IP: "${PUBLIC_IP:?PUBLIC_IP is required}"
       APP_ADMIN_PASSWORD: "${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD is required}"
+      APP_TRUSTED_PROXIES: "10.200.200.0/24"
     expose:
       - "8080"
     ports:

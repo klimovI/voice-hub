@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"voice-hub/backend/internal/auth"
+	"voice-hub/backend/internal/config"
 	"voice-hub/backend/internal/handler"
 	"voice-hub/backend/internal/middleware"
 )
@@ -110,7 +111,7 @@ func TestLogin_AdminPasswordYieldsAdminRole(t *testing.T) {
 	connPass := mustEmptyStore(t)
 	limiter := auth.NewAuthLimiter(100, time.Minute)
 
-	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter, config.DefaultTrustedProxies()))
 	defer srv.Close()
 
 	resp := postLogin(t, srv.URL, "correct-admin-pass")
@@ -134,7 +135,7 @@ func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
 	}
 
 	limiter := auth.NewAuthLimiter(100, time.Minute)
-	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter, config.DefaultTrustedProxies()))
 	defer srv.Close()
 
 	resp := postLogin(t, srv.URL, plain)
@@ -156,7 +157,7 @@ func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
 	}
 
 	limiter := auth.NewAuthLimiter(100, time.Minute)
-	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter))
+	srv := httptest.NewServer(handler.Login("correct-admin-pass", false, secret, connPass, limiter, config.DefaultTrustedProxies()))
 	defer srv.Close()
 
 	// Wrong password — neither admin nor SP — must not yield any session.

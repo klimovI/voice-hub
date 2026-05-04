@@ -24,7 +24,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	if cfg.AdminPassword == "" {
 		log.Fatal("APP_ADMIN_PASSWORD must be set")
@@ -91,7 +94,7 @@ func main() {
 	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", handler.Health())
 	mux.HandleFunc("/api/version", handler.Version(version))
-	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter))
+	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
 	mux.HandleFunc("/api/logout", handler.Logout(cfg.CookieSecure))
 	mux.Handle("/ws", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, http.HandlerFunc(room.ServeWS)))
 	mux.Handle("/api/room/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.RoomPeersOf(room)))
@@ -102,7 +105,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           middleware.AccessLog(mux),
+		Handler:           middleware.AccessLog(cfg.TrustedProxies, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
 		// WebSocket and per-request timeouts would terminate it. Auth gates

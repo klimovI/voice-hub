@@ -7,10 +7,98 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
 )
+
+// loopbackTrusted matches what config.DefaultTrustedProxies returns; mirrored
+// here so this package's tests stay free of the config import cycle.
+var loopbackTrusted = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("::1/128"),
+}
+
+func TestClientIP(t *testing.T) {
+	trusted := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	}
+	tests := []struct {
+		name       string
+		remoteAddr string
+		xff        string
+		want       string
+	}{
+		{
+			name:       "untrusted RemoteAddr ignores spoofed XFF",
+			remoteAddr: "203.0.113.7:51000",
+			xff:        "1.2.3.4, 5.6.7.8",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "trusted RemoteAddr + single XFF returns XFF",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "trusted RemoteAddr + chain (client, trusted1, trusted2)",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "203.0.113.7, 10.0.0.10, 10.0.0.20",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "trusted RemoteAddr + (attacker_spoofed_left, real_proxy)",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "9.9.9.9, 203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "malformed XFF token fails safe to RemoteAddr",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "203.0.113.7, not-an-ip, 10.0.0.10",
+			want:       "10.0.0.5",
+		},
+		{
+			name:       "trusted RemoteAddr but no XFF returns RemoteAddr",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "",
+			want:       "10.0.0.5",
+		},
+		{
+			name:       "entire chain trusted returns RemoteAddr",
+			remoteAddr: "10.0.0.5:51000",
+			xff:        "10.0.0.10, 10.0.0.20",
+			want:       "10.0.0.5",
+		},
+		{
+			name:       "ipv6 loopback trusted",
+			remoteAddr: "[::1]:51000",
+			xff:        "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+		{
+			name:       "ipv4-mapped ipv6 RemoteAddr unmaps to ipv4 trusted",
+			remoteAddr: "[::ffff:10.0.0.5]:51000",
+			xff:        "203.0.113.7",
+			want:       "203.0.113.7",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = tc.remoteAddr
+			if tc.xff != "" {
+				r.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if got := ClientIP(r, trusted); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 // Percent-encoded LF in path decodes to a literal \n on r.URL.Path. With %s
 // formatting that newline forges a fake log line; %q escapes it.
@@ -19,7 +107,7 @@ func TestAccessLogQuotesPath(t *testing.T) {
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(nil) })
 
-	srv := httptest.NewServer(AccessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(AccessLog(loopbackTrusted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 	t.Cleanup(srv.Close)
@@ -64,7 +152,7 @@ func TestAccessLogQuotesClientIP(t *testing.T) {
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(nil) })
 
-	srv := httptest.NewServer(AccessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(AccessLog(loopbackTrusted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 	t.Cleanup(srv.Close)
