@@ -13,6 +13,7 @@
 import type { EngineKind } from '../types';
 import { createRnnoiseProcessor } from './rnnoise';
 import { createRnnoiseV2Processor } from './rnnoise-v2';
+import { createDfn3Processor } from './dfn3';
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 const VOICE_BOOST_RATIO = 1.4;
@@ -115,6 +116,14 @@ export async function buildMicGraph(
       chainTail = rnnoiseProcessorNode;
     } else {
       onStatusMessage('RNNoise (новый) недоступен, отправка без шумоподавления.', true);
+    }
+  } else if (engine === 'dfn3') {
+    rnnoiseProcessorNode = await createDfn3Processor(localAudioContext, rnnoiseMixRef());
+    if (rnnoiseProcessorNode) {
+      localCompressorNode.connect(rnnoiseProcessorNode);
+      chainTail = rnnoiseProcessorNode;
+    } else {
+      onStatusMessage('DeepFilterNet3 недоступен, отправка без шумоподавления.', true);
     }
   }
 

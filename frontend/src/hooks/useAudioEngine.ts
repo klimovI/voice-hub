@@ -14,6 +14,7 @@ import {
   type MicGraph,
 } from '../audio/mic-graph';
 import { setRnnoiseMix } from '../audio/rnnoise';
+import { setDfn3Level } from '../audio/dfn3';
 import {
   createRemoteAudioContext,
   setupParticipantAudio,
@@ -220,13 +221,15 @@ export function useAudioEngine() {
 
   const updateRnnoiseMix = useCallback(() => {
     const r = refs.current;
-    if (r.micGraph?.rnnoiseProcessorNode) {
-      // Read store directly — refs.current.rnnoiseMix is sync'd during render,
-      // so within the same handler turn it still holds the pre-update value.
-      // setRnnoiseMix is engine-agnostic: both v1 and v2 expose a `mix` k-rate
-      // AudioParam with identical 0..1 scaling, so the same setter drives
-      // either node. Keep param name+range in sync if either worklet diverges.
-      setRnnoiseMix(r.micGraph.rnnoiseProcessorNode, useStore.getState().rnnoiseMix);
+    if (!r.micGraph?.rnnoiseProcessorNode) return;
+    const { engine, rnnoiseMix } = useStore.getState();
+    // v1/v2 share a `mix` AudioParam (0..1 wet/dry); dfn3 takes an attenuation
+    // limit in dB via port message. Branch on engine so the same slider drives
+    // both shapes.
+    if (engine === 'dfn3') {
+      setDfn3Level(r.micGraph.rnnoiseProcessorNode, rnnoiseMix);
+    } else {
+      setRnnoiseMix(r.micGraph.rnnoiseProcessorNode, rnnoiseMix);
     }
   }, []);
 

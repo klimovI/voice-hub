@@ -9,6 +9,7 @@ type DenoiserVariant = Exclude<EngineKind, 'off'>;
 const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = [
   { value: 'rnnoise', label: 'RNNoise (текущий)' },
   { value: 'rnnoise-v2', label: 'RNNoise (новый)' },
+  { value: 'dfn3', label: 'DeepFilterNet3' },
 ];
 
 interface Props {
@@ -202,7 +203,7 @@ export function AudioCard({
           </div>
 
           <div className="grid gap-2">
-            <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix)} />
+            <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix, engine)} />
             <input
               id="rnnoise-mix"
               type="range"
