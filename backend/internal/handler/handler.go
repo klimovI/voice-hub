@@ -160,7 +160,7 @@ func Logout(cookieSecure bool) http.HandlerFunc {
 			MaxAge:   -1,
 			HttpOnly: true,
 			Secure:   cookieSecure,
-			SameSite: http.SameSiteLaxMode,
+			SameSite: http.SameSiteStrictMode,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}

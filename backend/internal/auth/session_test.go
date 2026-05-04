@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,16 @@ func TestDecodeRejectsExpired(t *testing.T) {
 	token := Encode(secret, RoleAdmin, 0, -time.Second)
 	if _, err := Decode(secret, token); err == nil {
 		t.Fatalf("decode accepted expired cookie")
+	}
+}
+
+func TestSetSessionCookieSameSiteStrict(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	rec := httptest.NewRecorder()
+	SetSessionCookie(rec, true, secret, RoleUser, 0)
+	header := rec.Result().Header.Get("Set-Cookie")
+	if !strings.Contains(header, "SameSite=Strict") {
+		t.Fatalf("Set-Cookie missing SameSite=Strict: %q", header)
 	}
 }
 
