@@ -77,7 +77,7 @@ export function SessionCard({
             value={displayName}
             onChange={handleNameChange}
             className="w-full bg-bg-0 border border-line px-4 py-3
-            text-accent text-[18px] font-bold tracking-[0.2em]
+            text-accent text-[22px] leading-[28px] font-bold tracking-[0.2em]
             transition-colors duration-150
             placeholder:text-muted-2
             focus:outline-none focus:border-accent"

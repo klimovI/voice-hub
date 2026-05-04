@@ -94,17 +94,17 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
     >
       <div className="grid grid-cols-[40px_1fr] gap-3 items-center min-w-0">
         <div
-          className={`grid place-items-center rounded-full bg-accent text-accent-ink font-extrabold text-[20px] uppercase shrink-0 ${avatarRing}`}
+          className={`grid place-items-center bg-accent text-accent-ink font-extrabold text-[20px] uppercase shrink-0 ${avatarRing}`}
           style={{ width: 40, height: 40 }}
         >
           {initial}
         </div>
-        <div className="min-w-0">
-          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight">
+        <div className="min-w-0 flex flex-col justify-between" style={{ height: 40 }}>
+          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight leading-tight">
             {participant.isSelf ? `${participant.display} (вы)` : participant.display}
           </div>
           <div
-            className={`mt-0.5 text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 ${metaTextClass}`}
+            className={`text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 leading-none ${metaTextClass}`}
           >
             <span className={`w-1.5 h-1.5 ${metaDotClass}`} />
             {metaText}

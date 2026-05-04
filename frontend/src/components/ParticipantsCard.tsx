@@ -62,7 +62,7 @@ function PeerPreviewRow({ peer }: { peer: PeerPreview }) {
     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 items-center px-4 h-[72px] border border-line bg-bg-0 opacity-70">
       <div className="grid grid-cols-[40px_1fr] gap-3 items-center min-w-0">
         <div
-          className="grid place-items-center rounded-full bg-bg-3 text-muted font-extrabold text-[20px] uppercase shrink-0"
+          className="grid place-items-center bg-bg-3 text-muted font-extrabold text-[20px] uppercase shrink-0"
           style={{ width: 40, height: 40 }}
         >
           {initial}

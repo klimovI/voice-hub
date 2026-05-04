@@ -28,11 +28,8 @@ export function Footer({ uiVersion }: Props) {
   if (uiVersion) parts.push(`ui ${uiVersion}`);
 
   return (
-    <footer className="flex items-center justify-center gap-3 text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 select-text">
-      <span className="msym" style={{ fontSize: 12 }}>
-        lock
-      </span>
-      <span>{parts.join(' · ')}</span>
+    <footer className="text-center text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 select-text">
+      {parts.join(' · ')}
     </footer>
   );
 }

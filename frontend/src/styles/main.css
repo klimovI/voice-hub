@@ -89,8 +89,8 @@
   }
 
   .btn-danger {
-    @apply bg-bg-1 text-danger border-[rgba(248,113,113,0.3)]
-      hover:bg-danger hover:border-danger hover:text-accent-ink;
+    @apply bg-bg-1 text-danger border-danger
+      hover:bg-danger hover:text-accent-ink;
   }
 
   .btn-mini {
