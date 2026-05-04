@@ -30,10 +30,18 @@ internet ──UDP  3478, 10000-11000, 49000-49500 ────────▶ a
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo "/swapfile none swap sw 0 0" >> /etc/fstab
 
-# Docker + log rotation
+# Docker + log rotation. `userland-proxy: false` обязателен — мы пробрасываем
+# 1500+ UDP портов (ICE + TURN), а на каждый пробрасываемый порт docker
+# поднимает отдельный docker-proxy процесс (~5MB). На 1 GB боксе это OOM
+# на старте. С отключённым userland-proxy docker делает чистый iptables DNAT,
+# процессов на порт ноль.
 curl -fsSL https://get.docker.com | sh
 mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
-{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "userland-proxy": false
+}
 EOF
 systemctl restart docker
 
