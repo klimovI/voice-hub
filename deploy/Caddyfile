@@ -24,5 +24,8 @@
 	@html path / /index.html /login.html
 	header @html Cache-Control "no-cache"
 
-	reverse_proxy app:8080
+	# App runs in host network namespace (1500+ UDP forwards via docker NAT
+	# is too fragile). `host.docker.internal` resolves to the bridge gateway
+	# via `extra_hosts: host-gateway` on the caddy service.
+	reverse_proxy host.docker.internal:8080
 }

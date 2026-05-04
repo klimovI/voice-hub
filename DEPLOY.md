@@ -7,11 +7,13 @@
 ## Архитектура
 
 ```
-internet ──HTTPS/WSS─────────────▶ Caddy (auto-TLS) ──▶ app (8080)
-internet ──UDP  3478, 10000-11000, 49000-49500 ────────▶ app
+internet ──HTTPS/WSS────────────▶ Caddy (auto-TLS) ──▶ app (10.200.200.1:8080)
+internet ──UDP  3478, 10000-11000, 49000-49500 ───────▶ app (host network)
 ```
 
 - Caddy (стоковый `caddy:2-alpine`) фронтит HTTPS по 443, выпускает Let's Encrypt cert через TLS-ALPN-01
+- App запущен в `network_mode: host` — публикация ~1500 UDP портов через docker NAT слишком хрупка (race в network attach при `compose up`, тяжёлый iptables). Caddy остаётся на bridge и достукивается через `host.docker.internal:8080` (= bridge gateway `10.200.200.1`)
+- App слушает HTTP на `10.200.200.1:8080` — это IP bridge gateway изнутри хоста; снаружи недостижим (нет listener на публичном интерфейсе)
 - WebRTC media и TURN-relay идут напрямую в app по UDP, в обход Caddy
 - Voice — UDP-only. Сети, где UDP заблокирован, не поддерживаются (как у Discord). TCP/TLS-фолбэка для TURN нет
 - app = один Go-бинарь: auth + static + /ws signaling + pion SFU (RTP forwarding) + pion TURN UDP (HMAC short-term creds). Janus и coturn убраны
@@ -60,6 +62,13 @@ sysctl --system
 
 # Non-root deploy user в группе docker
 useradd -m -s /bin/bash -G docker deploy
+
+# UFW: app в host network, поэтому media UDP должны быть явно разрешены.
+# 80/443/22 предполагаются уже открытыми. App :8080 НЕ открываем — он
+# биндится только к 10.200.200.1 (docker bridge gateway), снаружи невидим.
+ufw allow 3478/udp comment "voice-hub stun/turn"
+ufw allow 10000:11000/udp comment "voice-hub ICE"
+ufw allow 49000:49500/udp comment "voice-hub TURN relay"
 
 # SSH: только по ключу, root login по ключу (паролем — нет)
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config

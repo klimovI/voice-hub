@@ -101,3 +101,22 @@ jobs:
           APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         run: |
           ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker image prune -af'
+
+      - name: Smoke test
+        env:
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
+        # Hit public HTTPS /healthz: proves DNS, TLS, caddy routing, AND
+        # caddy<->app reachability all the way through. In-container
+        # healthcheck does not.
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 5 "https://$APP_HOSTNAME/healthz" >/dev/null; then
+              echo "smoke test passed on attempt $i"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "smoke test failed: https://$APP_HOSTNAME/healthz unreachable" >&2
+          ssh "deploy@$APP_HOSTNAME" 'cd /opt/voice-hub && docker compose ps && docker compose logs --tail 50' >&2 || true
+          exit 1
