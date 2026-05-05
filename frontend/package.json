@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bundle:rnnoise-v2": "node scripts/bundle-rnnoise-v2.mjs",
-    "extract:dfn3-worklet": "node scripts/extract-dfn3-worklet.mjs"
+    "extract:dfn3-worklet": "node scripts/extract-dfn3-worklet.mjs",
+    "build:dtln-worklet": "node scripts/build-dtln-worklet.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

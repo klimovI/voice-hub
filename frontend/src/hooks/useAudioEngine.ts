@@ -221,11 +221,22 @@ export function useAudioEngine() {
 
   const updateRnnoiseMix = useCallback(() => {
     const r = refs.current;
-    if (!r.micGraph?.denoisingNode) return;
+    if (!r.micGraph) return;
     const { engine, rnnoiseMix } = useStore.getState();
     // v1/v2 share a `mix` AudioParam (0..1 wet/dry); dfn3 takes an attenuation
-    // limit in dB via port message. Branch on engine so the same slider drives
-    // both shapes.
+    // limit in dB via port message; DTLN has no built-in knob and is driven
+    // by external dry/wet GainNodes. Branch on engine so the same slider
+    // drives all three shapes.
+    if (engine === 'dtln') {
+      const { dtlnDryGainNode, dtlnWetGainNode, localAudioContext } = r.micGraph;
+      if (!dtlnDryGainNode || !dtlnWetGainNode) return;
+      const wet = Math.max(0, Math.min(1, rnnoiseMix / 100));
+      const t = localAudioContext.currentTime;
+      dtlnDryGainNode.gain.setValueAtTime(1 - wet, t);
+      dtlnWetGainNode.gain.setValueAtTime(wet, t);
+      return;
+    }
+    if (!r.micGraph.denoisingNode) return;
     if (engine === 'dfn3') {
       setDfn3Level(r.micGraph.denoisingNode, rnnoiseMix);
     } else {

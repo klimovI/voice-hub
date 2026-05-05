@@ -10,6 +10,7 @@ const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = [
   { value: 'rnnoise', label: 'RNNoise (текущий)' },
   { value: 'rnnoise-v2', label: 'RNNoise (новый)' },
   { value: 'dfn3', label: 'DeepFilterNet3' },
+  { value: 'dtln', label: 'DTLN' },
 ];
 
 interface Props {

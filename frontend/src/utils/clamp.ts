@@ -18,6 +18,7 @@ export function formatEngine(engine: string): string {
   if (engine === 'rnnoise') return 'RNNoise (текущий)';
   if (engine === 'rnnoise-v2') return 'RNNoise (новый)';
   if (engine === 'dfn3') return 'DeepFilterNet3';
+  if (engine === 'dtln') return 'DTLN';
   return engine;
 }
 

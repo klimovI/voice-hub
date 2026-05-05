@@ -14,6 +14,7 @@ import type { EngineKind } from '../types';
 import { createRnnoiseProcessor } from './rnnoise';
 import { createRnnoiseV2Processor } from './rnnoise-v2';
 import { createDfn3Processor } from './dfn3';
+import { createDtlnProcessor } from './dtln';
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 const VOICE_BOOST_RATIO = 1.4;
@@ -33,6 +34,12 @@ export interface MicGraph {
   // initialization failed. The createXxxProcessor functions all return
   // AudioWorkletNode | null with the same lifecycle contract.
   denoisingNode: AudioWorkletNode | null;
+  // DTLN-only crossfade gains. DTLN exposes no built-in mix knob, so the
+  // 0..100 strength slider drives a dry/wet crossfade around the worklet:
+  // dry = compressor → dryGain → outputGain, wet = compressor → DTLN →
+  // wetGain → outputGain. Other engines leave both null.
+  dtlnDryGainNode: GainNode | null;
+  dtlnWetGainNode: GainNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
 }
@@ -98,11 +105,17 @@ export async function buildMicGraph(
   localHighPassNode.connect(localLowPassNode);
   localLowPassNode.connect(localCompressorNode);
 
-  // Build chain tail (possibly a denoiser). All current engines slot here as
-  // a single AudioWorkletNode; teardown only needs to know about that one
-  // handle, so we share `denoisingNode` across engines.
-  let chainTail: AudioNode = localCompressorNode;
+  // Build chain tail (possibly a denoiser). RNNoise v1/v2 and DFN3 slot in as
+  // a single AudioWorkletNode reading the engine's own `mix` parameter. DTLN
+  // has no built-in mix knob so we wrap it in a dry/wet GainNode crossfade
+  // and drive that from the same slider — see dtlnDryGainNode/dtlnWetGainNode.
+  // Null = the engine branch already wired its own path into localGainNode
+  // (DTLN's dry/wet crossfade does this). Otherwise the standard tail
+  // connection runs after this block.
+  let chainTail: AudioNode | null = localCompressorNode;
   let denoisingNode: AudioWorkletNode | null = null;
+  let dtlnDryGainNode: GainNode | null = null;
+  let dtlnWetGainNode: GainNode | null = null;
 
   if (engine === 'rnnoise') {
     denoisingNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
@@ -128,9 +141,28 @@ export async function buildMicGraph(
     } else {
       onStatusMessage('DeepFilterNet3 недоступен, отправка без шумоподавления.', true);
     }
+  } else if (engine === 'dtln') {
+    denoisingNode = await createDtlnProcessor(localAudioContext);
+    if (denoisingNode) {
+      const mix = rnnoiseMixRef() / 100;
+      dtlnDryGainNode = localAudioContext.createGain();
+      dtlnWetGainNode = localAudioContext.createGain();
+      dtlnDryGainNode.gain.value = 1 - mix;
+      dtlnWetGainNode.gain.value = mix;
+      localCompressorNode.connect(dtlnDryGainNode);
+      localCompressorNode.connect(denoisingNode);
+      denoisingNode.connect(dtlnWetGainNode);
+      dtlnDryGainNode.connect(localGainNode);
+      dtlnWetGainNode.connect(localGainNode);
+      // Both crossfade legs already feed localGainNode; signal the standard
+      // tail connection below to skip.
+      chainTail = null;
+    } else {
+      onStatusMessage('DTLN недоступен, отправка без шумоподавления.', true);
+    }
   }
 
-  chainTail.connect(localGainNode);
+  if (chainTail) chainTail.connect(localGainNode);
   localGainNode.connect(localDestinationNode);
 
   const graph: MicGraph = {
@@ -145,6 +177,8 @@ export async function buildMicGraph(
     localMonitorData,
     processedLocalStream: localDestinationNode.stream,
     denoisingNode,
+    dtlnDryGainNode,
+    dtlnWetGainNode,
     speakingFrameId: null,
   };
 
@@ -186,6 +220,11 @@ export function teardownMicGraph(graph: MicGraph): void {
   }
   safeDisconnect(graph.denoisingNode);
   graph.denoisingNode = null;
+
+  safeDisconnect(graph.dtlnDryGainNode);
+  graph.dtlnDryGainNode = null;
+  safeDisconnect(graph.dtlnWetGainNode);
+  graph.dtlnWetGainNode = null;
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);
