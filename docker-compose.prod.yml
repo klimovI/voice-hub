@@ -23,6 +23,7 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/origin.crt:/etc/caddy/origin.crt:ro
       - ./deploy/origin.key:/etc/caddy/origin.key:ro
+      - ./deploy/cf-origin-ca.pem:/etc/caddy/cf-origin-ca.pem:ro
       - caddy_data:/data
     security_opt:
       - no-new-privileges:true

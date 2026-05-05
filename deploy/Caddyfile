@@ -4,8 +4,13 @@
 }
 
 {$APP_HOSTNAME} {
-	# CF Origin Certificate, provisioned out-of-band. CF mode = Full (strict).
-	tls /etc/caddy/origin.crt /etc/caddy/origin.key
+	# Authenticated Origin Pulls — mTLS belt over CF-IP-only firewall.
+	tls /etc/caddy/origin.crt /etc/caddy/origin.key {
+		client_auth {
+			mode require_and_verify
+			trusted_ca_cert_file /etc/caddy/cf-origin-ca.pem
+		}
+	}
 
 	encode zstd gzip
 
@@ -17,6 +22,7 @@
 		Permissions-Policy "microphone=(self), camera=(), geolocation=()"
 		Content-Security-Policy "default-src 'self'; connect-src 'self' wss: https:; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 		-Server
+		-Via
 	}
 
 	# Vendor WASM/JS denoiser blobs are content-pinned; cache aggressively.

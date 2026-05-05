@@ -39,12 +39,20 @@ SSL/TLS:
 - Mode = **Full (strict)**.
 - Edge Certificates → **Always Use HTTPS** = on.
 - Origin Server → **Create Certificate** (15 лет, RSA 2048, hostname = `<your-host>` или `*.<zone>`). Скопировать cert и key.
+- Origin Server → **Authenticated Origin Pulls** = on (zone-wide). CF будет подписывать соединения к origin своим клиентским cert; Caddy верифицирует.
 
-На сервер:
+На сервер — origin cert/key + CF origin-pull CA (для AOP):
 ```bash
-scp origin.crt origin.key root@<origin-ip>:/opt/voice-hub/deploy/
-ssh root@<origin-ip> 'chmod 600 /opt/voice-hub/deploy/origin.* && chown deploy:deploy /opt/voice-hub/deploy/origin.*'
+curl -sSL https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem -o cf-origin-ca.pem
+scp origin.crt origin.key cf-origin-ca.pem root@<origin-ip>:/opt/voice-hub/deploy/
+ssh root@<origin-ip> '
+  chmod 600 /opt/voice-hub/deploy/origin.crt /opt/voice-hub/deploy/origin.key
+  chmod 644 /opt/voice-hub/deploy/cf-origin-ca.pem
+  chown deploy:deploy /opt/voice-hub/deploy/origin.* /opt/voice-hub/deploy/cf-origin-ca.pem
+'
 ```
+
+Порядок включения AOP: сначала CF dashboard toggle ON, потом push с Caddyfile-блоком `client_auth`. Обратный порядок ломает сайт (Caddy требует cert, CF ещё не шлёт).
 
 ## GitHub Actions secrets
 
