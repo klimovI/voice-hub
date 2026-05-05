@@ -25,7 +25,6 @@ on:
     paths-ignore:
       - 'src-tauri/**'
       - 'UPDATER.md'
-      - 'TAURI_WINDOWS_BUILD_PLAN.md'
       - '.github/workflows/auto-tag-desktop.yml'
       - '.github/workflows/release-desktop.yml'
 ```

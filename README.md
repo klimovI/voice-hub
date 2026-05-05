@@ -48,7 +48,7 @@ cd frontend && npm install && npm run dev            # vite на :5173
 
 ## Production
 
-VPS + GitHub Actions + Caddy + Cloudflare proxy. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер.
+VPS + GitHub Actions + Caddy + Cloudflare proxy. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер. Детали в [DEPLOY.md](DEPLOY.md).
 
 TURN поднимается одним транспортом: `turn://:3478?transport=udp`. Voice — UDP-only, как у Discord. Сети, где UDP полностью зарезан, не поддерживаются: TCP/TLS-фолбэка нет, и стоковый `caddy:2-alpine` его не предполагает.
 
@@ -88,10 +88,6 @@ CARGO_HTTP_TIMEOUT=600 CARGO_NET_RETRY=10 \
 
 Артефакт — NSIS-установщик в `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
 
-### Конфигурация
-
-Никаких build-time env. Бинарь generic, host вводится пользователем при первом запуске и хранится в OS keychain (`keyring` crate). ICE/TURN-конфиг и signaling клиент тянет из бэкенда после login.
-
 ## Структура
 
 ```
@@ -102,7 +98,7 @@ deploy/    Caddyfile
 .github/   CI: build & push в ghcr.io, deploy по SSH, release desktop
 ```
 
-Дальше: [ROADMAP.md](ROADMAP.md) — что сделано и что дальше · [AGENTS.md](AGENTS.md) — правила для AI-агентов.
+Дальше: [DEPLOY.md](DEPLOY.md) — прод на VPS · [AGENTS.md](AGENTS.md) — правила для AI-агентов.
 
 ---
 
