@@ -10,11 +10,6 @@
 import { Rnnoise } from "/vendor/rnnoise/rnnoise.js";
 
 const RING_CAPACITY = 4096;
-const GATE_OPEN_VAD = 0.4;
-const GATE_ATTACK_MS = 5;
-const GATE_RELEASE_MS = 180;
-const GATE_HOLD_MS = 300;
-const GATE_MAX_ATTEN_DB = 18;
 
 class RnnoiseProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -33,9 +28,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
     this.outLen = 0;
     this.frame = null;
     this.original = null;
-    this.gateEnv = 1;
-    this.gateHold = 0;
-    this.gateOpen = true;
     this.port.onmessage = (e) => {
       if (e.data?.type === "destroy") {
         try {
@@ -86,16 +78,10 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    const sr = sampleRate;
-    const attackA = 1 - Math.exp(-1 / (GATE_ATTACK_MS * 0.001 * sr));
-    const releaseA = 1 - Math.exp(-1 / (GATE_RELEASE_MS * 0.001 * sr));
-    const holdSamples = Math.round(GATE_HOLD_MS * 0.001 * sr);
-
     const mixParam = parameters.mix;
     const strength = mixParam.length > 0 ? mixParam[0] : 1;
     const wet = strength;
     const dry = 1 - strength;
-    const floor = strength <= 0 ? 1 : Math.pow(10, -(strength * GATE_MAX_ATTEN_DB) / 20);
 
     const frameSize = this.frameSize;
     const inRing = this.inRing;
@@ -115,29 +101,13 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
         originalFrame[i] = v;
         frame[i] = v * 32768;
       }
-      const vadProb = this.state.processFrame(frame);
-
-      if (vadProb >= GATE_OPEN_VAD) {
-        this.gateOpen = true;
-        this.gateHold = holdSamples;
-      }
+      this.state.processFrame(frame);
 
       const outputCapacityLeft = outRing.length - this.outLen;
       const writeCount = Math.min(frameSize, outputCapacityLeft);
       for (let i = 0; i < writeCount; i += 1) {
-        if (this.gateHold > 0) {
-          this.gateHold -= 1;
-          if (this.gateHold === 0) {
-            this.gateOpen = false;
-          }
-        }
-        const target = this.gateOpen ? 1 : floor;
-        const a = target > this.gateEnv ? attackA : releaseA;
-        this.gateEnv += a * (target - this.gateEnv);
-
         const denoised = frame[i] / 32768;
-        const mixed = denoised * wet + originalFrame[i] * dry;
-        outRing[this.outLen + i] = mixed * this.gateEnv;
+        outRing[this.outLen + i] = denoised * wet + originalFrame[i] * dry;
       }
       this.outLen += writeCount;
       consumed += frameSize;

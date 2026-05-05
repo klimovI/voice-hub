@@ -1,5 +1,5 @@
-// Local mic AudioContext graph: mic → HPF(110Hz) → LPF(7200Hz) →
-// DynamicsCompressor → [Denoiser] → GainNode → MediaStreamDestination.
+// Local mic AudioContext graph: mic → HPF(110Hz) → [Denoiser] →
+// DynamicsCompressor → GainNode → MediaStreamDestination.
 //
 // The denoiser slot is engine-agnostic: a `DenoiserNode` exposes
 // { input, output, dispose }. Engines that need extra topology hide it
@@ -11,13 +11,10 @@ import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
-const VOICE_BOOST_RATIO = 1.4;
-
 export interface MicGraph {
   localAudioContext: AudioContext;
   localSourceNode: MediaStreamAudioSourceNode;
   localHighPassNode: BiquadFilterNode;
-  localLowPassNode: BiquadFilterNode;
   localCompressorNode: DynamicsCompressorNode;
   localGainNode: GainNode;
   localDestinationNode: MediaStreamAudioDestinationNode;
@@ -61,7 +58,6 @@ export async function buildMicGraph(
   const localMonitorAnalyser = localAudioContext.createAnalyser();
   localMonitorAnalyser.fftSize = 512;
   const localMonitorData = new Uint8Array(localMonitorAnalyser.fftSize) as Uint8Array<ArrayBuffer>;
-  localSourceNode.connect(localMonitorAnalyser);
 
   const localGainNode = localAudioContext.createGain();
   const localDestinationNode = localAudioContext.createMediaStreamDestination();
@@ -71,11 +67,6 @@ export async function buildMicGraph(
   localHighPassNode.frequency.value = 110;
   localHighPassNode.Q.value = 0.707;
 
-  const localLowPassNode = localAudioContext.createBiquadFilter();
-  localLowPassNode.type = 'lowpass';
-  localLowPassNode.frequency.value = 7200;
-  localLowPassNode.Q.value = 0.707;
-
   const localCompressorNode = localAudioContext.createDynamicsCompressor();
   localCompressorNode.threshold.value = -22;
   localCompressorNode.knee.value = 8;
@@ -84,31 +75,33 @@ export async function buildMicGraph(
   localCompressorNode.release.value = 0.1;
 
   localSourceNode.connect(localHighPassNode);
-  localHighPassNode.connect(localLowPassNode);
-  localLowPassNode.connect(localCompressorNode);
 
-  let chainTail: AudioNode = localCompressorNode;
+  let chainTail: AudioNode = localHighPassNode;
   let denoiser: DenoiserNode | null = null;
 
   const denoiserDef = engine === 'off' ? null : getDenoiser(engine);
   if (denoiserDef) {
     denoiser = await denoiserDef.create(localAudioContext);
     if (denoiser) {
-      localCompressorNode.connect(denoiser.input);
+      localHighPassNode.connect(denoiser.input);
       chainTail = denoiser.output;
     } else {
       onStatusMessage(`${denoiserDef.label} недоступен, отправка без шумоподавления.`, true);
     }
   }
 
-  chainTail.connect(localGainNode);
+  chainTail.connect(localCompressorNode);
+  localCompressorNode.connect(localGainNode);
   localGainNode.connect(localDestinationNode);
+
+  // Tap speaking indicator post-denoiser/post-compressor so it fires only on
+  // signal that survives the chain, not on background noise the denoiser cuts.
+  localCompressorNode.connect(localMonitorAnalyser);
 
   const graph: MicGraph = {
     localAudioContext,
     localSourceNode,
     localHighPassNode,
-    localLowPassNode,
     localCompressorNode,
     localGainNode,
     localDestinationNode,
@@ -126,7 +119,7 @@ export async function buildMicGraph(
 
 export function applySendGain(graph: MicGraph, sendVolumeRef: () => number): void {
   const sendVolume = sendVolumeRef();
-  graph.localGainNode.gain.value = (sendVolume / 100) * VOICE_BOOST_RATIO;
+  graph.localGainNode.gain.value = sendVolume / 100;
 }
 
 // Disconnects a Web Audio node, swallowing the InvalidAccessError that
@@ -155,7 +148,6 @@ export function teardownMicGraph(graph: MicGraph): void {
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);
-  safeDisconnect(graph.localLowPassNode);
   safeDisconnect(graph.localCompressorNode);
   safeDisconnect(graph.localGainNode);
   safeDisconnect(graph.localMonitorAnalyser);
