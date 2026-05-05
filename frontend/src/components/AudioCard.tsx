@@ -3,15 +3,15 @@ import { useStore } from '../store/useStore';
 import { clampPercentage } from '../utils/storage';
 import { formatRnnoiseMix } from '../utils/clamp';
 import type { EngineKind } from '../types';
+import { DENOISERS, DENOISER_IDS } from '../audio/denoisers/registry';
+import type { DenoiserId } from '../audio/denoisers/types';
 
-type DenoiserVariant = Exclude<EngineKind, 'off'>;
+type DenoiserVariant = DenoiserId;
 
-const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = [
-  { value: 'rnnoise', label: 'RNNoise (текущий)' },
-  { value: 'rnnoise-v2', label: 'RNNoise (новый)' },
-  { value: 'dfn3', label: 'DeepFilterNet3' },
-  { value: 'dtln', label: 'DTLN' },
-];
+const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = DENOISER_IDS.map((id) => ({
+  value: id,
+  label: DENOISERS[id].label,
+}));
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;

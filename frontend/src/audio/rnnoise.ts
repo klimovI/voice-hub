@@ -104,9 +104,7 @@ export async function createRnnoiseProcessor(
 ): Promise<AudioWorkletNode | null> {
   // RNNoise frame contract is 48 kHz.
   if (ctx.sampleRate !== 48000) {
-    console.warn(
-      `[rnnoise] disabled: AudioContext sampleRate=${ctx.sampleRate} (need 48000)`,
-    );
+    console.warn(`[rnnoise] disabled: AudioContext sampleRate=${ctx.sampleRate} (need 48000)`);
     return null;
   }
 

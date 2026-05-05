@@ -1,20 +1,14 @@
-// Local mic AudioContext graph: mic → [denoiser head] → HPF(110Hz) → LPF(7200Hz)
-// → DynamicsCompressor → [denoiser tail] → GainNode → MediaStreamDestination.
+// Local mic AudioContext graph: mic → HPF(110Hz) → LPF(7200Hz) →
+// DynamicsCompressor → [Denoiser] → GainNode → MediaStreamDestination.
 //
-// Denoiser engines plug in at one of two positions:
-// - Head: before the EQ/compressor — for engines that need their own ctx
-//   (e.g. a model running at a non-48 kHz sample rate).
-// - Tail: after the compressor — current pattern for RNNoise (48 kHz native,
-//   AudioWorkletNode in the main ctx).
-// The chainHead/chainTail variables keep this shape explicit so a future
-// engine can slot in by adding a branch on `engine` plus a field on MicGraph
-// for its handle.
+// The denoiser slot is engine-agnostic: a `DenoiserNode` exposes
+// { input, output, setLevel, dispose }. Engines that need extra topology
+// (e.g. DTLN's dry/wet crossfade) hide it behind input/output passthroughs,
+// so this module never branches on engine id.
 
 import type { EngineKind } from '../types';
-import { createRnnoiseProcessor } from './rnnoise';
-import { createRnnoiseV2Processor } from './rnnoise-v2';
-import { createDfn3Processor } from './dfn3';
-import { createDtlnProcessor } from './dtln';
+import { getDenoiser } from './denoisers/registry';
+import type { DenoiserNode } from './denoisers/types';
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 const VOICE_BOOST_RATIO = 1.4;
@@ -30,16 +24,10 @@ export interface MicGraph {
   localMonitorAnalyser: AnalyserNode;
   localMonitorData: Uint8Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
-  // Active denoiser handle (any engine), or null when engine === 'off' or
-  // initialization failed. The createXxxProcessor functions all return
-  // AudioWorkletNode | null with the same lifecycle contract.
-  denoisingNode: AudioWorkletNode | null;
-  // DTLN-only crossfade gains. DTLN exposes no built-in mix knob, so the
-  // 0..100 strength slider drives a dry/wet crossfade around the worklet:
-  // dry = compressor → dryGain → outputGain, wet = compressor → DTLN →
-  // wetGain → outputGain. Other engines leave both null.
-  dtlnDryGainNode: GainNode | null;
-  dtlnWetGainNode: GainNode | null;
+  // Active denoiser, or null when engine === 'off' or initialization
+  // failed. setLevel/dispose are called via this handle — mic-graph
+  // never inspects which concrete engine is running.
+  denoiser: DenoiserNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
 }
@@ -96,73 +84,25 @@ export async function buildMicGraph(
   localCompressorNode.attack.value = 0.005;
   localCompressorNode.release.value = 0.1;
 
-  // Build chain head — reserved for future engines that need to run at the
-  // mic source (e.g. a non-48 kHz model with its own ctx). No engine uses
-  // this position right now.
-  const chainHead: AudioNode = localSourceNode;
-
-  chainHead.connect(localHighPassNode);
+  localSourceNode.connect(localHighPassNode);
   localHighPassNode.connect(localLowPassNode);
   localLowPassNode.connect(localCompressorNode);
 
-  // Build chain tail (possibly a denoiser). RNNoise v1/v2 and DFN3 slot in as
-  // a single AudioWorkletNode reading the engine's own `mix` parameter. DTLN
-  // has no built-in mix knob so we wrap it in a dry/wet GainNode crossfade
-  // and drive that from the same slider — see dtlnDryGainNode/dtlnWetGainNode.
-  // Null = the engine branch already wired its own path into localGainNode
-  // (DTLN's dry/wet crossfade does this). Otherwise the standard tail
-  // connection runs after this block.
-  let chainTail: AudioNode | null = localCompressorNode;
-  let denoisingNode: AudioWorkletNode | null = null;
-  let dtlnDryGainNode: GainNode | null = null;
-  let dtlnWetGainNode: GainNode | null = null;
+  let chainTail: AudioNode = localCompressorNode;
+  let denoiser: DenoiserNode | null = null;
 
-  if (engine === 'rnnoise') {
-    denoisingNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
-    if (denoisingNode) {
-      localCompressorNode.connect(denoisingNode);
-      chainTail = denoisingNode;
+  const denoiserDef = engine === 'off' ? null : getDenoiser(engine);
+  if (denoiserDef) {
+    denoiser = await denoiserDef.create(localAudioContext, rnnoiseMixRef());
+    if (denoiser) {
+      localCompressorNode.connect(denoiser.input);
+      chainTail = denoiser.output;
     } else {
-      onStatusMessage('RNNoise unavailable, sending without denoiser.', true);
-    }
-  } else if (engine === 'rnnoise-v2') {
-    denoisingNode = await createRnnoiseV2Processor(localAudioContext, rnnoiseMixRef());
-    if (denoisingNode) {
-      localCompressorNode.connect(denoisingNode);
-      chainTail = denoisingNode;
-    } else {
-      onStatusMessage('RNNoise (новый) недоступен, отправка без шумоподавления.', true);
-    }
-  } else if (engine === 'dfn3') {
-    denoisingNode = await createDfn3Processor(localAudioContext, rnnoiseMixRef());
-    if (denoisingNode) {
-      localCompressorNode.connect(denoisingNode);
-      chainTail = denoisingNode;
-    } else {
-      onStatusMessage('DeepFilterNet3 недоступен, отправка без шумоподавления.', true);
-    }
-  } else if (engine === 'dtln') {
-    denoisingNode = await createDtlnProcessor(localAudioContext);
-    if (denoisingNode) {
-      const mix = rnnoiseMixRef() / 100;
-      dtlnDryGainNode = localAudioContext.createGain();
-      dtlnWetGainNode = localAudioContext.createGain();
-      dtlnDryGainNode.gain.value = 1 - mix;
-      dtlnWetGainNode.gain.value = mix;
-      localCompressorNode.connect(dtlnDryGainNode);
-      localCompressorNode.connect(denoisingNode);
-      denoisingNode.connect(dtlnWetGainNode);
-      dtlnDryGainNode.connect(localGainNode);
-      dtlnWetGainNode.connect(localGainNode);
-      // Both crossfade legs already feed localGainNode; signal the standard
-      // tail connection below to skip.
-      chainTail = null;
-    } else {
-      onStatusMessage('DTLN недоступен, отправка без шумоподавления.', true);
+      onStatusMessage(`${denoiserDef.label} недоступен, отправка без шумоподавления.`, true);
     }
   }
 
-  if (chainTail) chainTail.connect(localGainNode);
+  chainTail.connect(localGainNode);
   localGainNode.connect(localDestinationNode);
 
   const graph: MicGraph = {
@@ -176,9 +116,7 @@ export async function buildMicGraph(
     localMonitorAnalyser,
     localMonitorData,
     processedLocalStream: localDestinationNode.stream,
-    denoisingNode,
-    dtlnDryGainNode,
-    dtlnWetGainNode,
+    denoiser,
     speakingFrameId: null,
   };
 
@@ -211,20 +149,10 @@ export function teardownMicGraph(graph: MicGraph): void {
     graph.speakingFrameId = null;
   }
 
-  if (graph.denoisingNode) {
-    try {
-      graph.denoisingNode.port.postMessage({ type: 'destroy' });
-    } catch {
-      /* ignore */
-    }
+  if (graph.denoiser) {
+    graph.denoiser.dispose();
+    graph.denoiser = null;
   }
-  safeDisconnect(graph.denoisingNode);
-  graph.denoisingNode = null;
-
-  safeDisconnect(graph.dtlnDryGainNode);
-  graph.dtlnDryGainNode = null;
-  safeDisconnect(graph.dtlnWetGainNode);
-  graph.dtlnWetGainNode = null;
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);

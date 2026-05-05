@@ -3,6 +3,7 @@
 // localStorage calls in components, hooks, or the store.
 
 import type { EngineKind } from '../types';
+import { DENOISER_IDS } from '../audio/denoisers/registry';
 
 // Legacy key, no longer written. We migrate it away on startup so users who
 // reloaded while deafened don't get stuck with output muted forever (the
@@ -146,7 +147,7 @@ export function saveOutputVolume(v: number): void {
   localStorage.setItem(KEYS.outputVolume, String(v));
 }
 
-const ENGINE_VALUES: EngineKind[] = ['off', 'rnnoise', 'rnnoise-v2', 'dfn3', 'dtln'];
+const ENGINE_VALUES: EngineKind[] = ['off', ...DENOISER_IDS];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);

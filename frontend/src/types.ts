@@ -1,6 +1,8 @@
 // Core domain types for Voice Hub.
 
-export type EngineKind = 'off' | 'rnnoise' | 'rnnoise-v2' | 'dfn3' | 'dtln';
+import type { DenoiserId } from './audio/denoisers/types';
+
+export type EngineKind = 'off' | DenoiserId;
 
 export type Role = 'admin' | 'user';
 
