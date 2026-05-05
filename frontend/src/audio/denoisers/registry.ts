@@ -6,14 +6,10 @@
 import type { Denoiser, DenoiserId } from './types';
 import { rnnoise } from './rnnoise';
 import { rnnoiseV2 } from './rnnoise-v2';
-import { dfn3 } from './dfn3';
-import { dtln } from './dtln';
 
 export const DENOISERS: Record<DenoiserId, Denoiser> = {
   rnnoise,
   'rnnoise-v2': rnnoiseV2,
-  dfn3,
-  dtln,
 };
 
 export const DENOISER_IDS = Object.keys(DENOISERS) as DenoiserId[];
