@@ -126,15 +126,19 @@ jobs:
         # Hit public HTTPS /healthz: proves DNS, TLS, caddy routing, AND
         # caddy<->app reachability all the way through. In-container
         # healthcheck does not.
+        # 12×8s = ~100s window. Tolerates CF AOP cert propagation across
+        # edges and caddy reload settle. Echoes HTTP code on failure to
+        # distinguish 525 (CF↔origin TLS) from 5xx (origin app error).
         run: |
-          for i in 1 2 3 4 5 6; do
-            if curl -fsS --max-time 5 "https://$APP_HOSTNAME/healthz" >/dev/null; then
+          for i in $(seq 1 12); do
+            code=$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 8 "https://$APP_HOSTNAME/healthz" || true)
+            if [ "$code" = "200" ]; then
               echo "smoke test passed on attempt $i"
               exit 0
             fi
-            echo "attempt $i failed, retrying in 5s..."
-            sleep 5
+            echo "attempt $i: HTTP $code, retrying in 8s..."
+            sleep 8
           done
-          echo "smoke test failed: https://$APP_HOSTNAME/healthz unreachable" >&2
+          echo "smoke test failed: https://$APP_HOSTNAME/healthz returned non-200" >&2
           ssh "deploy@$DEPLOY_HOST" 'cd /opt/voice-hub && docker compose ps && docker compose logs --tail 50' >&2 || true
           exit 1
