@@ -399,7 +399,14 @@
                 }
             }
             const outputAvailable = this.getOutputAvailable();
-            if (outputAvailable >= 128) {
+            if (outputAvailable < 128) {
+                for (let inputNum = 0; inputNum < sourceLimit; inputNum++) {
+                    const output = outputList[inputNum];
+                    for (let channelNum = 0; channelNum < output.length; channelNum++) {
+                        output[channelNum].fill(0);
+                    }
+                }
+            } else if (outputAvailable >= 128) {
                 for (let inputNum = 0; inputNum < sourceLimit; inputNum++) {
                     const output = outputList[inputNum];
                     const channelCount = output.length;

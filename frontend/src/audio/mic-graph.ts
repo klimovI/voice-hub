@@ -29,8 +29,10 @@ export interface MicGraph {
   localMonitorAnalyser: AnalyserNode;
   localMonitorData: Uint8Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
-  // Optional denoiser handles. Add a field per future engine.
-  rnnoiseProcessorNode: AudioWorkletNode | null;
+  // Active denoiser handle (any engine), or null when engine === 'off' or
+  // initialization failed. The createXxxProcessor functions all return
+  // AudioWorkletNode | null with the same lifecycle contract.
+  denoisingNode: AudioWorkletNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
 }
@@ -96,32 +98,33 @@ export async function buildMicGraph(
   localHighPassNode.connect(localLowPassNode);
   localLowPassNode.connect(localCompressorNode);
 
-  // Build chain tail (possibly RNNoise). Both engines slot here; the field
-  // names below stay separate so teardown can target the right node.
+  // Build chain tail (possibly a denoiser). All current engines slot here as
+  // a single AudioWorkletNode; teardown only needs to know about that one
+  // handle, so we share `denoisingNode` across engines.
   let chainTail: AudioNode = localCompressorNode;
-  let rnnoiseProcessorNode: AudioWorkletNode | null = null;
+  let denoisingNode: AudioWorkletNode | null = null;
 
   if (engine === 'rnnoise') {
-    rnnoiseProcessorNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
-    if (rnnoiseProcessorNode) {
-      localCompressorNode.connect(rnnoiseProcessorNode);
-      chainTail = rnnoiseProcessorNode;
+    denoisingNode = await createRnnoiseProcessor(localAudioContext, rnnoiseMixRef());
+    if (denoisingNode) {
+      localCompressorNode.connect(denoisingNode);
+      chainTail = denoisingNode;
     } else {
       onStatusMessage('RNNoise unavailable, sending without denoiser.', true);
     }
   } else if (engine === 'rnnoise-v2') {
-    rnnoiseProcessorNode = await createRnnoiseV2Processor(localAudioContext, rnnoiseMixRef());
-    if (rnnoiseProcessorNode) {
-      localCompressorNode.connect(rnnoiseProcessorNode);
-      chainTail = rnnoiseProcessorNode;
+    denoisingNode = await createRnnoiseV2Processor(localAudioContext, rnnoiseMixRef());
+    if (denoisingNode) {
+      localCompressorNode.connect(denoisingNode);
+      chainTail = denoisingNode;
     } else {
       onStatusMessage('RNNoise (новый) недоступен, отправка без шумоподавления.', true);
     }
   } else if (engine === 'dfn3') {
-    rnnoiseProcessorNode = await createDfn3Processor(localAudioContext, rnnoiseMixRef());
-    if (rnnoiseProcessorNode) {
-      localCompressorNode.connect(rnnoiseProcessorNode);
-      chainTail = rnnoiseProcessorNode;
+    denoisingNode = await createDfn3Processor(localAudioContext, rnnoiseMixRef());
+    if (denoisingNode) {
+      localCompressorNode.connect(denoisingNode);
+      chainTail = denoisingNode;
     } else {
       onStatusMessage('DeepFilterNet3 недоступен, отправка без шумоподавления.', true);
     }
@@ -141,7 +144,7 @@ export async function buildMicGraph(
     localMonitorAnalyser,
     localMonitorData,
     processedLocalStream: localDestinationNode.stream,
-    rnnoiseProcessorNode,
+    denoisingNode,
     speakingFrameId: null,
   };
 
@@ -174,15 +177,15 @@ export function teardownMicGraph(graph: MicGraph): void {
     graph.speakingFrameId = null;
   }
 
-  if (graph.rnnoiseProcessorNode) {
+  if (graph.denoisingNode) {
     try {
-      graph.rnnoiseProcessorNode.port.postMessage({ type: 'destroy' });
+      graph.denoisingNode.port.postMessage({ type: 'destroy' });
     } catch {
       /* ignore */
     }
   }
-  safeDisconnect(graph.rnnoiseProcessorNode);
-  graph.rnnoiseProcessorNode = null;
+  safeDisconnect(graph.denoisingNode);
+  graph.denoisingNode = null;
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);

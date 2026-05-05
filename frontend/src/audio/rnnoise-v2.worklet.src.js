@@ -34,6 +34,13 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
     this.gateHold = 0;
     this.gateOpen = true;
 
+    // Gate envelope coefficients depend only on sampleRate (constant for the
+    // life of the worklet) — precompute once instead of every process() call.
+    const sr = sampleRate;
+    this.attackA = 1 - Math.exp(-1 / (GATE_ATTACK_MS * 0.001 * sr));
+    this.releaseA = 1 - Math.exp(-1 / (GATE_RELEASE_MS * 0.001 * sr));
+    this.holdSamples = Math.round(GATE_HOLD_MS * 0.001 * sr);
+
     this.port.onmessage = (e) => {
       if (e.data && e.data.type === 'destroy') {
         try {
@@ -77,10 +84,9 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
       return true;
     }
 
-    const sr = sampleRate;
-    const attackA = 1 - Math.exp(-1 / (GATE_ATTACK_MS * 0.001 * sr));
-    const releaseA = 1 - Math.exp(-1 / (GATE_RELEASE_MS * 0.001 * sr));
-    const holdSamples = Math.round(GATE_HOLD_MS * 0.001 * sr);
+    const attackA = this.attackA;
+    const releaseA = this.releaseA;
+    const holdSamples = this.holdSamples;
 
     const mixParam = parameters.mix;
     const strength = mixParam.length > 0 ? mixParam[0] : 1;
@@ -101,6 +107,11 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
 
     let consumed = 0;
     while (this.inLen - consumed >= frameSize) {
+      // Need room for a full frame in outRing — partial writes would advance
+      // `consumed` by frameSize but only emit `writable` samples, misaligning
+      // output vs input. Stall instead; downstream pull will drain outRing.
+      if (outRing.length - this.outLen < frameSize) break;
+
       for (let i = 0; i < frameSize; i++) {
         const v = inRing[consumed + i];
         original[i] = v;
@@ -112,8 +123,7 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
         this.gateHold = holdSamples;
       }
 
-      const writable = Math.min(frameSize, outRing.length - this.outLen);
-      for (let i = 0; i < writable; i++) {
+      for (let i = 0; i < frameSize; i++) {
         if (this.gateHold > 0) {
           this.gateHold -= 1;
           if (this.gateHold === 0) this.gateOpen = false;
@@ -124,7 +134,7 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
         const denoised = frame[i] / 32768;
         outRing[this.outLen + i] = (denoised * wet + original[i] * dry) * this.gateEnv;
       }
-      this.outLen += writable;
+      this.outLen += frameSize;
       consumed += frameSize;
     }
 

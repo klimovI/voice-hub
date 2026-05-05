@@ -6,17 +6,38 @@
 // to the worklet via `processorOptions` so initSync() can run inside the
 // AudioWorkletGlobalScope without any async or import.
 //
-// Slider semantics differ from RNNoise: DFN3 takes an attenuation limit in
-// dB (0..100), not a wet/dry mix. We map our 0..100 mix slider directly.
+// Slider semantics differ from RNNoise: DFN3 takes an attenuation limit in dB,
+// not a wet/dry mix. df_set_atten_lim accepts 0..100 dB but the perceptually
+// useful range is ~0..40 dB — above that suppression saturates. We map the
+// 0..100 UI slider into 0..40 dB so the slider granularity is usable.
 
 const WORKLET_URL = '/vendor/dfn3/worklet.js';
 const WASM_URL = '/vendor/dfn3/df_bg.wasm';
 const MODEL_URL = '/vendor/dfn3/model.tar.gz';
 const PROCESSOR_NAME = 'deepfilter-audio-processor';
+// DeepFilterNet's `df_set_atten_lim` accepts 0..100 dB but suppression
+// saturates around 40 dB for typical noise. The 0..100 UI slider maps into
+// 0..MAX_ATTEN_DB so its full travel is perceptually useful. Exported because
+// `formatRnnoiseMix` shows the actual applied dB in the slider label.
+export const MAX_ATTEN_DB = 40;
 
 let cachedWasmModule: WebAssembly.Module | null = null;
 let cachedModelBytes: ArrayBuffer | null = null;
 let cachedPromise: Promise<void> | null = null;
+
+async function compileWasm(url: string): Promise<WebAssembly.Module> {
+  // compileStreaming overlaps download + compile, halving first-load stall on
+  // the 9.6 MB df_bg.wasm. Falls back to compile-from-bytes if Caddy serves a
+  // bad mime type or the runtime lacks streaming support.
+  try {
+    return await WebAssembly.compileStreaming(fetch(url, { cache: 'force-cache' }));
+  } catch (err) {
+    console.warn('[dfn3] compileStreaming failed, falling back:', err);
+    const r = await fetch(url, { cache: 'force-cache' });
+    if (!r.ok) throw new Error(`${url} fetch ${r.status}`);
+    return WebAssembly.compile(await r.arrayBuffer());
+  }
+}
 
 async function fetchBytes(url: string): Promise<ArrayBuffer> {
   const r = await fetch(url, { cache: 'force-cache' });
@@ -28,11 +49,11 @@ export function preloadDfn3(): Promise<void> {
   if (cachedWasmModule && cachedModelBytes) return Promise.resolve();
   if (!cachedPromise) {
     cachedPromise = (async () => {
-      const [wasmBytes, modelBytes] = await Promise.all([
-        fetchBytes(WASM_URL),
+      const [wasmModule, modelBytes] = await Promise.all([
+        compileWasm(WASM_URL),
         fetchBytes(MODEL_URL),
       ]);
-      cachedWasmModule = await WebAssembly.compile(wasmBytes);
+      cachedWasmModule = wasmModule;
       cachedModelBytes = modelBytes;
     })().catch((err: unknown) => {
       cachedPromise = null;
@@ -87,7 +108,7 @@ export async function createDfn3Processor(
       processorOptions: {
         wasmModule: cachedWasmModule,
         modelBytes: cachedModelBytes,
-        suppressionLevel: clampLevel(level0to100),
+        suppressionLevel: levelToDb(level0to100),
       },
     });
   } catch (err) {
@@ -133,10 +154,11 @@ export async function createDfn3Processor(
 }
 
 export function setDfn3Level(node: AudioWorkletNode, level0to100: number): void {
-  node.port.postMessage({ type: 'SET_SUPPRESSION_LEVEL', value: clampLevel(level0to100) });
+  node.port.postMessage({ type: 'SET_SUPPRESSION_LEVEL', value: levelToDb(level0to100) });
 }
 
-function clampLevel(v: number): number {
-  if (!Number.isFinite(v)) return 50;
-  return Math.max(0, Math.min(100, Math.floor(v)));
+function levelToDb(v: number): number {
+  if (!Number.isFinite(v)) return Math.round(MAX_ATTEN_DB / 2);
+  const slider = Math.max(0, Math.min(100, v));
+  return Math.round((slider / 100) * MAX_ATTEN_DB);
 }

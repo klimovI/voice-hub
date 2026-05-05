@@ -221,15 +221,15 @@ export function useAudioEngine() {
 
   const updateRnnoiseMix = useCallback(() => {
     const r = refs.current;
-    if (!r.micGraph?.rnnoiseProcessorNode) return;
+    if (!r.micGraph?.denoisingNode) return;
     const { engine, rnnoiseMix } = useStore.getState();
     // v1/v2 share a `mix` AudioParam (0..1 wet/dry); dfn3 takes an attenuation
     // limit in dB via port message. Branch on engine so the same slider drives
     // both shapes.
     if (engine === 'dfn3') {
-      setDfn3Level(r.micGraph.rnnoiseProcessorNode, rnnoiseMix);
+      setDfn3Level(r.micGraph.denoisingNode, rnnoiseMix);
     } else {
-      setRnnoiseMix(r.micGraph.rnnoiseProcessorNode, rnnoiseMix);
+      setRnnoiseMix(r.micGraph.denoisingNode, rnnoiseMix);
     }
   }, []);
 

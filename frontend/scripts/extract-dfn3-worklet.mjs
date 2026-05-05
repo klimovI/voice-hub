@@ -52,6 +52,21 @@ code = code.replace(
   `${errorAnchor}\n                this.port.postMessage({ type: 'error', message: String(error?.message || error) });`,
 );
 
+// Patch: priming guard. Upstream returns from process() without writing the
+// outputs when fewer than 128 samples are available in the output ring (first
+// ~10 ms after init while the first DFN3 frame is still being accumulated).
+// AudioWorklet zero-fills outputs before process(), so this isn't undefined
+// data, but make the silence explicit so the contract matches rnnoise-v2 and
+// future readers don't have to know spec details.
+const primingAnchor = 'const outputAvailable = this.getOutputAvailable();\n            if (outputAvailable >= 128) {';
+if (!code.includes(primingAnchor)) {
+  throw new Error(`worklet patch: priming anchor not found`);
+}
+code = code.replace(
+  primingAnchor,
+  `const outputAvailable = this.getOutputAvailable();\n            if (outputAvailable < 128) {\n                for (let inputNum = 0; inputNum < sourceLimit; inputNum++) {\n                    const output = outputList[inputNum];\n                    for (let channelNum = 0; channelNum < output.length; channelNum++) {\n                        output[channelNum].fill(0);\n                    }\n                }\n            } else if (outputAvailable >= 128) {`,
+);
+
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, code);
 console.log(`wrote ${OUT} (${code.length} bytes)`);
