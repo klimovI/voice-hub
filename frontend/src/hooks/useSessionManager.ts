@@ -27,7 +27,7 @@ import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
 import { isTauri } from '../utils/tauri';
 import { createReconnectScheduler } from '../utils/reconnect';
-import type { EngineKind } from '../types';
+import type { EngineKind, ParticipantUI } from '../types';
 import type { MicGraph } from '../audio/mic-graph';
 
 export type UseSessionManagerDeps = {
@@ -417,7 +417,18 @@ export function useSessionManager({
     audio.fullCleanup();
     micGraphRef.current = null;
     peerIdRef.current = null;
-    store.clearParticipants();
+    // Optimistic transition: morph self into a lurker placeholder and drop
+    // voice peers. Avoids a 1–2 s empty-roster flash while the lurker WS
+    // handshakes; lurker.onWelcome will clear+repopulate authoritatively
+    // (clientId-dedup in upsertParticipant evicts the placeholder).
+    const prev = useStore.getState().participants;
+    const nextMap = new Map<string, ParticipantUI>();
+    for (const [id, p] of prev) {
+      if (p.isSelf) {
+        nextMap.set(id, { ...p, chatOnly: true, speaking: false, hasStream: false });
+      }
+    }
+    useStore.setState({ participants: nextMap });
     store.setJoinState('idle');
     store.setSelfMuted(false);
     store.setDeafened(false);

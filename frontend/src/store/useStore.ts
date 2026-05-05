@@ -180,6 +180,17 @@ export const useStore = create<AppState>((set, get) => ({
             hasStream: partial.hasStream ?? false,
           };
       const m = new Map(s.participants);
+      // Mirror server-side eviction: a peer arriving with a clientId already
+      // held by another entry replaces that entry (e.g. voice → lurker
+      // transition where peer-joined Y can race peer-left X). Keeps the
+      // roster consistent even if broadcast order at the source is loose.
+      if (partial.clientId) {
+        for (const [id, p] of m) {
+          if (id !== partial.id && p.clientId === partial.clientId) {
+            m.delete(id);
+          }
+        }
+      }
       m.set(partial.id, merged);
       result = merged;
       return { participants: m };
