@@ -112,20 +112,15 @@ jobs:
       - name: Pull and restart
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        # Caddyfile reload after `compose up` because compose doesn't track
-        # bind-mount file content changes — caddy keeps stale config across
-        # deploys otherwise. `caddy reload` is graceful (no dropped TLS) and
-        # idempotent, safe to run every deploy.
+        # caddy reload because compose doesn't track bind-mount changes.
         run: |
           ssh "deploy@$DEPLOY_HOST" 'cd /opt/voice-hub && docker compose pull && docker compose up -d --remove-orphans && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile && docker image prune -af'
 
       - name: Smoke test
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        # Wait for app container's docker healthcheck to flip "healthy"
-        # (compose curls /healthz every 30s). Internal check skips the CF
-        # round-trip — Bot Fight Mode 403s curl from Azure egress, so
-        # external probing needs UA spoofing or a WAF skip rule.
+        # Poll docker health status — compose already curls /healthz every
+        # 30s. Avoids GH-runner→CF (Bot Fight Mode 403s Azure egress).
         run: |
           ssh "deploy@$DEPLOY_HOST" '
             for i in $(seq 1 30); do
