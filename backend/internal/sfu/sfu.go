@@ -135,7 +135,13 @@ var errPeerOutqFull = errors.New("peer outq full")
 // writeLoop drains p.out and serializes WS writes for this peer. Started
 // once per peer in ServeWS before addPeer so the welcome message has a
 // reader. Returns on ctx cancellation or write failure.
+//
+// Also drives application-level keepalive: a 25 s ticker fires a Ping so
+// idle connections (especially lurker peers, which can sit silent for
+// minutes) survive proxy idle timeouts (typical defaults are 30–60 s).
 func (p *peer) writeLoop() {
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -143,6 +149,14 @@ func (p *peer) writeLoop() {
 		case raw := <-p.out:
 			wctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
 			err := p.ws.Write(wctx, websocket.MessageText, raw)
+			cancel()
+			if err != nil {
+				p.cancel()
+				return
+			}
+		case <-ping.C:
+			pctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+			err := p.ws.Ping(pctx)
 			cancel()
 			if err != nil {
 				p.cancel()

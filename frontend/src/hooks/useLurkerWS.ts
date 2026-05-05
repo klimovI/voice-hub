@@ -40,6 +40,9 @@ export function useLurkerWS({
 }: UseLurkerWSDeps): UseLurkerWSReturn {
   const clientRef = useRef<ChatOnlyClient | null>(null);
   const clientIdRef = useRef(loadOrCreateClientId());
+  const reconnectTimerRef = useRef<number | null>(null);
+  // False while voiceActive=true; prevents reconnect from racing a voice-WS handshake.
+  const wantOpenRef = useRef(false);
   const onChatRef = useRef(onChat);
   useEffect(() => {
     onChatRef.current = onChat;
@@ -50,11 +53,27 @@ export function useLurkerWS({
     displayNameRef.current = displayName;
   }, [displayName]);
 
+  // Stable ref so scheduleReconnect can call open() without being listed as a
+  // dep of open's useCallback (which would create a circular dep chain).
+  const openRef = useRef<() => void>(() => undefined);
+
+  const scheduleReconnect = useCallback((): void => {
+    if (!wantOpenRef.current) return;
+    if (reconnectTimerRef.current !== null) return;
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (wantOpenRef.current) openRef.current();
+    }, 2000);
+  }, []);
+
   const open = useCallback((): void => {
     if (clientRef.current) return;
 
     const client = createChatClient({
       onWelcome: ({ id, peers }) => {
+        // Welcome is authoritative — drop any stale roster entries from the
+        // previous connection (incl. our own with the old peer id).
+        useStore.getState().clearParticipants();
         useStore.getState().upsertParticipant({
           id,
           display: displayNameRef.current,
@@ -100,13 +119,15 @@ export function useLurkerWS({
         onChatRef.current(data);
       },
       onClose: () => {
-        // Server closed the connection unexpectedly (not from our disconnect()).
-        // Clear participants so the UI doesn't show stale roster entries.
-        useStore.getState().clearParticipants();
+        // Server-initiated close (not from our disconnect()). Schedule a
+        // reconnect without clearing the roster — the participant list stays
+        // visible during the 2-second gap so the UI doesn't flash empty.
+        // The next welcome will clear and repopulate authoritatively.
         clientRef.current = null;
+        scheduleReconnect();
       },
       onError: () => {
-        // onClose will fire after onerror; cleanup happens there.
+        // onClose fires after onerror; cleanup happens there.
       },
     });
 
@@ -118,23 +139,36 @@ export function useLurkerWS({
         clientId: clientIdRef.current,
       })
       .catch(() => {
+        // connect() rejected before welcome arrived. onClose may also fire;
+        // scheduleReconnect is idempotent (guards on reconnectTimerRef).
         clientRef.current = null;
-        useStore.getState().clearParticipants();
+        scheduleReconnect();
       });
-  }, []);
+  }, [scheduleReconnect]);
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   const close = useCallback((): void => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     clientRef.current?.disconnect();
     clientRef.current = null;
   }, []);
 
   useEffect(() => {
     if (voiceActive) {
+      wantOpenRef.current = false;
       close();
     } else {
+      wantOpenRef.current = true;
       open();
     }
     return () => {
+      wantOpenRef.current = false;
       close();
     };
   }, [voiceActive, open, close]);

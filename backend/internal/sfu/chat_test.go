@@ -420,6 +420,97 @@ func TestLurkerSilentDrops(t *testing.T) {
 	}
 }
 
+// TestVoiceAndLurkerCrossChat verifies the combined scenario: one voice peer and
+// one lurker are in the same room; each sends a chat message and both receive
+// both messages. This exercises broadcastChat across peer types in one room.
+func TestVoiceAndLurkerCrossChat(t *testing.T) {
+	t.Parallel()
+
+	room := &Room{
+		peers:  make(map[string]*peer),
+		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+	}
+	voice, cancelVoice := newTestPeer("voice-1", "Alice")
+	defer cancelVoice()
+	lurker, cancelLurker := newTestLurker("lurk-1", "Lurk")
+	defer cancelLurker()
+	room.peers[voice.id] = voice
+	room.peers[lurker.id] = lurker
+
+	// Voice peer sends first.
+	room.broadcastChat(voice, protocol.ChatSendPayload{Text: "from voice", ClientMsgID: "v1"})
+	for _, p := range []*peer{voice, lurker} {
+		cp, ok := drainChat(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat from voice, got none", p.id)
+		}
+		if cp.From != voice.id {
+			t.Errorf("peer %s: From=%q want %q", p.id, cp.From, voice.id)
+		}
+		if cp.Text != "from voice" {
+			t.Errorf("peer %s: Text=%q want %q", p.id, cp.Text, "from voice")
+		}
+	}
+
+	// Lurker sends second.
+	room.broadcastChat(lurker, protocol.ChatSendPayload{Text: "from lurk", ClientMsgID: "l1"})
+	for _, p := range []*peer{voice, lurker} {
+		cp, ok := drainChat(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat from lurker, got none", p.id)
+		}
+		if cp.From != lurker.id {
+			t.Errorf("peer %s: From=%q want %q", p.id, cp.From, lurker.id)
+		}
+		if cp.Text != "from lurk" {
+			t.Errorf("peer %s: Text=%q want %q", p.id, cp.Text, "from lurk")
+		}
+	}
+}
+
+// TestLurkerLeave_PeerLeftBroadcast verifies that when a lurker disconnects,
+// remaining peers receive a peer-left broadcast and signalPeerConnections does
+// not nil-deref on the remaining lurker's nil PC.
+func TestLurkerLeave_PeerLeftBroadcast(t *testing.T) {
+	t.Parallel()
+
+	// Two lurkers: one will leave, one will receive peer-left.
+	// Using lurkers only avoids needing a real pion PeerConnection while still
+	// exercising signalPeerConnections → syncOnePeer with a nil-PC peer.
+	room := &Room{
+		peers:  make(map[string]*peer),
+		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+	}
+	stayer, cancelStayer := newTestLurker("lurk-stay", "Stay")
+	defer cancelStayer()
+	leaver, cancelLeaver := newTestLurker("lurk-leave", "Leave")
+	defer cancelLeaver()
+	room.peers[stayer.id] = stayer
+	room.peers[leaver.id] = leaver
+
+	room.removePeer(leaver.id)
+
+	data, ok := drainEvent(t, stayer, "peer-left", 200*time.Millisecond)
+	if !ok {
+		t.Fatal("stayer: expected peer-left after lurker disconnect, got none")
+	}
+	var left protocol.PeerLeftPayload
+	if err := json.Unmarshal(data, &left); err != nil {
+		t.Fatalf("unmarshal PeerLeftPayload: %v", err)
+	}
+	if left.ID != leaver.id {
+		t.Errorf("peer-left ID=%q, want %q", left.ID, leaver.id)
+	}
+
+	// Room must contain only the stayer now.
+	room.mu.Lock()
+	n := len(room.peers)
+	room.mu.Unlock()
+	if n != 1 {
+		t.Errorf("room peer count=%d, want 1", n)
+	}
+}
+
 // TestChatBroadcast_SenderName verifies that SenderName is populated for voice
 // peer chat messages as well.
 func TestChatBroadcast_SenderName(t *testing.T) {

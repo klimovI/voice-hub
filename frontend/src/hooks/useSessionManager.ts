@@ -307,6 +307,10 @@ export function useSessionManager({
         },
         onWelcome: ({ id, peers }) => {
           peerIdRef.current = id;
+          // Welcome is authoritative for the roster — drop any stale entries
+          // from the prior connection (e.g. lurker self with old peerId) so
+          // we don't end up with two `isSelf` entries.
+          store.clearParticipants();
           store.upsertParticipant({
             id,
             display,
