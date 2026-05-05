@@ -9,6 +9,8 @@
     "core:default",
     "allow-shortcut",
     "allow-updater-app",
-    "allow-connection"
+    "allow-connection",
+    "opener:allow-open-url",
+    "opener:allow-default-urls"
   ]
 }

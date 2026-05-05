@@ -1,7 +1,73 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useStore, type ChatMessage } from '../store/useStore';
 import { CHAT_MAX_BYTES } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
+import { isTauri } from '../utils/tauri';
+
+// http(s):// or bare www. — greedy until whitespace/quotes/angle brackets,
+// then strip trailing punctuation and unbalanced closers (so `(see https://en.wikipedia.org/wiki/Rust_(programming_language))`
+// keeps the inner parens but drops the outer closing one).
+const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+
+function trimUrl(raw: string): string {
+  let s = raw.replace(/[.,;:!?]+$/, '');
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  while (s.length > 0) {
+    const last = s[s.length - 1];
+    const open = pairs[last];
+    if (!open) break;
+    let opens = 0;
+    let closes = 0;
+    for (const ch of s) {
+      if (ch === open) opens++;
+      else if (ch === last) closes++;
+    }
+    if (closes <= opens) break;
+    s = s.slice(0, -1);
+  }
+  return s;
+}
+
+function handleLinkClick(href: string) {
+  if (!isTauri()) return;
+  // In Tauri webview default anchor would navigate the app. Route to OS browser.
+  void import('@tauri-apps/plugin-opener')
+    .then((m) => m.openUrl(href))
+    .catch((err) => console.error('openUrl failed', err));
+}
+
+function renderText(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    const start = m.index ?? 0;
+    const raw = trimUrl(m[0]);
+    if (!raw) continue;
+    if (start > last) parts.push(text.slice(last, start));
+    const href = raw.startsWith('www.') ? `https://${raw}` : raw;
+    parts.push(
+      <a
+        key={key++}
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={(e) => {
+          if (isTauri()) {
+            e.preventDefault();
+            handleLinkClick(href);
+          }
+        }}
+        className="text-accent underline underline-offset-2 break-all hover:opacity-80"
+      >
+        {raw}
+      </a>,
+    );
+    last = start + raw.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
 
 const MAX_DISPLAY = 200;
 
@@ -222,7 +288,9 @@ function MessageRow({
         </div>
       )}
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 items-baseline">
-        <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">{msg.text}</p>
+        <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">
+          {renderText(msg.text)}
+        </p>
         {showTime && (
           <span className="text-[11px] text-muted-2 tabular-nums shrink-0">
             {formatTime(msg.ts)}
