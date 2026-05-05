@@ -74,7 +74,6 @@ jobs:
           printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      # SSH target = DEPLOY_HOST (origin), not APP_HOSTNAME (CF-proxied).
       - name: Sync deploy files
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -119,8 +118,7 @@ jobs:
       - name: Smoke test
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        # Poll docker health status — compose already curls /healthz every
-        # 30s. Avoids GH-runner→CF (Bot Fight Mode 403s Azure egress).
+        # Poll docker health status — compose already curls /healthz every 30s.
         run: |
           ssh "deploy@$DEPLOY_HOST" '
             for i in $(seq 1 30); do

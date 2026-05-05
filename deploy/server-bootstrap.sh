@@ -44,7 +44,8 @@ sysctl --system
 # --- non-root deploy user ---
 id deploy >/dev/null 2>&1 || useradd -m -s /bin/bash -G docker deploy
 
-# --- UFW: voice UDP + SSH (TCP 443 filtered separately via DOCKER-USER) ---
+# --- UFW: voice UDP + SSH ---
+# TCP 80/443 are docker-published — filtered by docker iptables, not UFW.
 ufw allow 22/tcp
 ufw allow 3478/udp comment "voice-hub stun/turn"
 ufw allow 10101:10200/udp comment "voice-hub ICE"
@@ -58,43 +59,5 @@ systemctl reload ssh
 # --- stack dir ---
 mkdir -p /opt/voice-hub/deploy
 chown -R deploy:deploy /opt/voice-hub
-
-# --- Cloudflare-only TCP 443 (DOCKER-USER chain — UFW INPUT bypassed by docker) ---
-cat > /usr/local/sbin/cf-firewall.sh <<'EOF'
-#!/bin/bash
-set -e
-CF4=$(curl -fsS https://www.cloudflare.com/ips-v4)
-CF6=$(curl -fsS https://www.cloudflare.com/ips-v6)
-iptables  -F DOCKER-USER
-ip6tables -F DOCKER-USER
-iptables  -A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-ip6tables -A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-for c in $CF4; do iptables  -A DOCKER-USER -p tcp --dport 443 -s "$c" -j RETURN; done
-for c in $CF6; do ip6tables -A DOCKER-USER -p tcp --dport 443 -s "$c" -j RETURN; done
-iptables  -A DOCKER-USER -p tcp --dport 443 -j DROP
-ip6tables -A DOCKER-USER -p tcp --dport 443 -j DROP
-EOF
-chmod 700 /usr/local/sbin/cf-firewall.sh
-
-cat > /etc/systemd/system/cf-firewall.service <<'EOF'
-[Unit]
-Description=Restrict origin TCP 443 to Cloudflare ranges
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/cf-firewall.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now cf-firewall.service
-
-# CF range list rarely changes but does — weekly auto-refresh.
-echo '0 4 * * 0 root systemctl restart cf-firewall.service' > /etc/cron.d/cf-firewall-refresh
-chmod 644 /etc/cron.d/cf-firewall-refresh
 
 echo "bootstrap done."
