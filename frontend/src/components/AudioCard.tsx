@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { clampPercentage } from '../utils/storage';
-import { formatRnnoiseMix } from '../utils/clamp';
 import type { EngineKind } from '../types';
 import { DENOISERS, DENOISER_IDS } from '../audio/denoisers/registry';
 import type { DenoiserId } from '../audio/denoisers/types';
@@ -17,7 +15,6 @@ interface Props {
   onEngineSelect: (engine: EngineKind) => void;
   onMicDeviceSelect: (deviceId: string | null) => void;
   onSendVolumeChange: (v: number) => void;
-  onRnnoiseMixChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
   onReset: () => void;
 }
@@ -59,13 +56,11 @@ export function AudioCard({
   onEngineSelect,
   onMicDeviceSelect,
   onSendVolumeChange,
-  onRnnoiseMixChange,
   onOutputVolumeChange,
   onReset,
 }: Props) {
   const engine = useStore((s) => s.engine);
   const sendVolume = useStore((s) => s.sendVolume);
-  const rnnoiseMix = useStore((s) => s.rnnoiseMix);
   const outputVolume = useStore((s) => s.outputVolume);
   const micDeviceId = useStore((s) => s.micDeviceId);
 
@@ -163,17 +158,17 @@ export function AudioCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3 py-3">
-        <span className="section-label">Шумоподавление</span>
-        <Toggle
-          checked={engine !== 'off'}
-          onChange={() => onEngineSelect(engine === 'off' ? lastVariant : 'off')}
-          ariaLabel="Шумоподавление"
-        />
-      </div>
+      <div className="grid gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="section-label">Шумоподавление</span>
+          <Toggle
+            checked={engine !== 'off'}
+            onChange={() => onEngineSelect(engine === 'off' ? lastVariant : 'off')}
+            ariaLabel="Шумоподавление"
+          />
+        </div>
 
-      {engine !== 'off' && (
-        <>
+        {engine !== 'off' && (
           <div className="grid gap-2">
             <label htmlFor="engine-variant" className="section-label">
               Алгоритм
@@ -202,22 +197,8 @@ export function AudioCard({
               </span>
             </div>
           </div>
-
-          <div className="grid gap-2">
-            <SliderHead label="Уровень" value={formatRnnoiseMix(rnnoiseMix, engine)} />
-            <input
-              id="rnnoise-mix"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              value={rnnoiseMix}
-              onChange={(e) => onRnnoiseMixChange(clampPercentage(e.target.value))}
-              className="vh-range"
-            />
-          </div>
-        </>
-      )}
+        )}
+      </div>
 
       <div className="grid gap-2">
         <SliderHead label="Громкость микрофона" value={`${sendVolume}%`} />

@@ -23,7 +23,6 @@ export const KEYS = {
   // Audio / engine
   outputVolume: 'voice-hub.output-volume',
   sendVolume: 'voice-hub.send-volume',
-  rnnoiseMix: 'voice-hub.rnnoise-mix',
   engine: 'voice-hub.engine',
   // Selected microphone deviceId, or empty string for system default.
   micDeviceId: 'voice-hub.mic-device-id',
@@ -64,16 +63,6 @@ export function loadBoolean(key: string, fallback: boolean): boolean {
   const raw = localStorage.getItem(key);
   if (raw === null) return fallback;
   return raw === 'true';
-}
-
-export function loadPercentage(key: string, fallback: number): number {
-  return clampPercentage(loadNumber(key, fallback));
-}
-
-export function clampPercentage(value: number | string): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 90; // DEFAULT_RNNOISE_MIX
-  return Math.min(100, Math.max(0, Math.round(numeric)));
 }
 
 // ---------------------------------------------------------------------------
@@ -139,10 +128,6 @@ export function saveBoolean(key: string, v: boolean): void {
   localStorage.setItem(key, String(v));
 }
 
-export function saveRnnoiseMix(v: number): void {
-  localStorage.setItem(KEYS.rnnoiseMix, String(v));
-}
-
 export function saveOutputVolume(v: number): void {
   localStorage.setItem(KEYS.outputVolume, String(v));
 }
@@ -197,6 +182,7 @@ export function consumeRejoinFlag(): boolean {
 export function clearLegacyStorage(): void {
   localStorage.removeItem('voice-hub.mic-mode');
   localStorage.removeItem('voice-hub.rnnoise-enabled');
+  localStorage.removeItem('voice-hub.rnnoise-mix');
   localStorage.removeItem('voice-hub.gate-enabled');
   localStorage.removeItem('voice-hub.gate-threshold');
   localStorage.removeItem('voice-hub.gate-attack');

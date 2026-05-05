@@ -169,14 +169,6 @@ export function App() {
     [audio],
   );
 
-  const handleRnnoiseMixChange = useCallback(
-    (v: number) => {
-      useStore.getState().setRnnoiseMix(v);
-      audio.updateRnnoiseMix();
-    },
-    [audio],
-  );
-
   const handleOutputVolumeChange = useCallback(
     (v: number) => {
       useStore.getState().setOutputVolume(v);
@@ -188,10 +180,8 @@ export function App() {
   const handleAudioReset = useCallback(() => {
     const s = useStore.getState();
     s.setSendVolume(100);
-    s.setRnnoiseMix(90);
     s.setOutputVolume(100);
     audio.updateSendGain();
-    audio.updateRnnoiseMix();
     audio.applyAllRemoteGains();
 
     if (s.engine !== 'rnnoise-v2') {
@@ -249,7 +239,6 @@ export function App() {
               onEngineSelect={handleEngineSelect}
               onMicDeviceSelect={handleMicDeviceSelect}
               onSendVolumeChange={handleSendVolumeChange}
-              onRnnoiseMixChange={handleRnnoiseMixChange}
               onOutputVolumeChange={handleOutputVolumeChange}
               onReset={handleAudioReset}
             />

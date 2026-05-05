@@ -2,9 +2,9 @@
 // DynamicsCompressor → [Denoiser] → GainNode → MediaStreamDestination.
 //
 // The denoiser slot is engine-agnostic: a `DenoiserNode` exposes
-// { input, output, setLevel, dispose }. Engines that need extra topology
-// (e.g. DTLN's dry/wet crossfade) hide it behind input/output passthroughs,
-// so this module never branches on engine id.
+// { input, output, dispose }. Engines that need extra topology hide it
+// behind input/output passthroughs, so this module never branches on
+// engine id.
 
 import type { EngineKind } from '../types';
 import { getDenoiser } from './denoisers/registry';
@@ -25,8 +25,8 @@ export interface MicGraph {
   localMonitorData: Uint8Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
   // Active denoiser, or null when engine === 'off' or initialization
-  // failed. setLevel/dispose are called via this handle — mic-graph
-  // never inspects which concrete engine is running.
+  // failed. dispose is called via this handle — mic-graph never
+  // inspects which concrete engine is running.
   denoiser: DenoiserNode | null;
   // Speaking loop handle:
   speakingFrameId: number | null;
@@ -47,7 +47,6 @@ export function createLocalAudioContext(): AudioContext {
 export async function buildMicGraph(
   rawLocalStream: MediaStream,
   engine: EngineKind,
-  rnnoiseMixRef: () => number,
   sendVolumeRef: () => number,
   onStatusMessage: (msg: string, isError?: boolean) => void,
   prebuiltContext?: AudioContext,
@@ -93,7 +92,7 @@ export async function buildMicGraph(
 
   const denoiserDef = engine === 'off' ? null : getDenoiser(engine);
   if (denoiserDef) {
-    denoiser = await denoiserDef.create(localAudioContext, rnnoiseMixRef());
+    denoiser = await denoiserDef.create(localAudioContext);
     if (denoiser) {
       localCompressorNode.connect(denoiser.input);
       chainTail = denoiser.output;

@@ -44,7 +44,6 @@ function ensureRegistered(ctx: AudioContext): Promise<void> {
 
 export async function createRnnoiseV2Processor(
   ctx: AudioContext,
-  mix0to100: number,
 ): Promise<AudioWorkletNode | null> {
   if (ctx.sampleRate !== 48000) {
     console.warn(`[rnnoise-v2] disabled: sampleRate=${ctx.sampleRate} (need 48000)`);
@@ -64,7 +63,7 @@ export async function createRnnoiseV2Processor(
       numberOfInputs: 1,
       numberOfOutputs: 1,
       channelCount: 1,
-      parameterData: { mix: mix0to100 / 100 },
+      parameterData: { mix: 1 },
     });
   } catch (err) {
     console.error('[rnnoise-v2] node construction failed:', err);
@@ -104,8 +103,3 @@ export async function createRnnoiseV2Processor(
   }
 }
 
-export function setRnnoiseV2Mix(node: AudioWorkletNode, mix0to100: number): void {
-  const param = node.parameters.get('mix');
-  if (!param) return;
-  param.setValueAtTime(mix0to100 / 100, node.context.currentTime);
-}

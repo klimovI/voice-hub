@@ -35,7 +35,6 @@ export interface AudioEngineRef {
   remoteSpeakingLoop: RemoteSpeakingLoop;
   // stable send-volume ref for the ScriptProcessor callback
   sendVolume: number;
-  rnnoiseMix: number;
 }
 
 export function useAudioEngine() {
@@ -48,12 +47,10 @@ export function useAudioEngine() {
     remoteAudioCtx: null,
     remoteSpeakingLoop: createRemoteSpeakingLoop(),
     sendVolume: store.sendVolume,
-    rnnoiseMix: store.rnnoiseMix,
   });
 
   // Keep refs in sync with store without triggering re-renders.
   refs.current.sendVolume = store.sendVolume;
-  refs.current.rnnoiseMix = store.rnnoiseMix;
 
   // ---- Mic graph ----
 
@@ -96,7 +93,6 @@ export function useAudioEngine() {
       const graph = await buildMicGraph(
         r.rawLocalStream,
         engine,
-        () => refs.current.rnnoiseMix,
         () => refs.current.sendVolume,
         (msg, isError) => setStatus(msg, isError),
         prebuiltContext,
@@ -217,11 +213,6 @@ export function useAudioEngine() {
     applySendGain(r.micGraph, () => useStore.getState().sendVolume);
   }, []);
 
-  const updateRnnoiseMix = useCallback(() => {
-    const r = refs.current;
-    r.micGraph?.denoiser?.setLevel(useStore.getState().rnnoiseMix);
-  }, []);
-
   const startSpeaking = useCallback(
     (
       graph: MicGraph,
@@ -316,7 +307,6 @@ export function useAudioEngine() {
     switchMicDevice,
     teardownGraph,
     updateSendGain,
-    updateRnnoiseMix,
     startSpeaking,
     attachRemoteStream,
     detachRemoteStream,

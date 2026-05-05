@@ -11,10 +11,8 @@ import {
   loadEngine,
   loadMicDeviceId,
   loadNumber,
-  loadPercentage,
   saveBoolean,
   saveSendVolume,
-  saveRnnoiseMix,
   saveOutputVolume,
   saveEngine,
   saveMicDeviceId,
@@ -53,8 +51,6 @@ export interface AppState {
 
   sendVolume: number;
   setSendVolume: (v: number) => void;
-  rnnoiseMix: number;
-  setRnnoiseMix: (v: number) => void;
   outputVolume: number;
   setOutputVolume: (v: number) => void;
 
@@ -116,11 +112,6 @@ export const useStore = create<AppState>((set, get) => ({
   setSendVolume: (v) => {
     saveSendVolume(v);
     set({ sendVolume: v });
-  },
-  rnnoiseMix: loadPercentage(KEYS.rnnoiseMix, 90),
-  setRnnoiseMix: (v) => {
-    saveRnnoiseMix(v);
-    set({ rnnoiseMix: v });
   },
   outputVolume: loadNumber(KEYS.outputVolume, 100),
   setOutputVolume: (v) => {

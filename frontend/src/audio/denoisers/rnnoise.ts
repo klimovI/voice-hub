@@ -1,4 +1,4 @@
-import { preloadRnnoise, isRnnoiseReady, createRnnoiseProcessor, setRnnoiseMix } from '../rnnoise';
+import { preloadRnnoise, isRnnoiseReady, createRnnoiseProcessor } from '../rnnoise';
 import type { Denoiser } from './types';
 
 export const rnnoise: Denoiser = {
@@ -6,14 +6,12 @@ export const rnnoise: Denoiser = {
   label: 'RNNoise (текущий)',
   preload: preloadRnnoise,
   isReady: isRnnoiseReady,
-  formatLevel: (pct) => `${pct}%`,
-  async create(ctx, level) {
-    const node = await createRnnoiseProcessor(ctx, level);
+  async create(ctx) {
+    const node = await createRnnoiseProcessor(ctx);
     if (!node) return null;
     return {
       input: node,
       output: node,
-      setLevel: (pct) => setRnnoiseMix(node, pct),
       dispose() {
         try {
           node.port.postMessage({ type: 'destroy' });

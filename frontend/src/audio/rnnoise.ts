@@ -100,7 +100,6 @@ export function ensureRnnoiseWorkletRegistered(ctx: AudioContext): Promise<void>
 
 export async function createRnnoiseProcessor(
   ctx: AudioContext,
-  mix0to100: number,
 ): Promise<AudioWorkletNode | null> {
   // RNNoise frame contract is 48 kHz.
   if (ctx.sampleRate !== 48000) {
@@ -120,7 +119,7 @@ export async function createRnnoiseProcessor(
       numberOfInputs: 1,
       numberOfOutputs: 1,
       channelCount: 1,
-      parameterData: { mix: mix0to100 / 100 },
+      parameterData: { mix: 1 },
     });
   } catch (err) {
     console.error('[rnnoise] AudioWorkletNode construction failed:', err);
@@ -160,8 +159,3 @@ export async function createRnnoiseProcessor(
   }
 }
 
-export function setRnnoiseMix(node: AudioWorkletNode, mix0to100: number): void {
-  const param = node.parameters.get('mix');
-  if (!param) return;
-  param.setValueAtTime(mix0to100 / 100, node.context.currentTime);
-}

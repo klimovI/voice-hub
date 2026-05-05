@@ -6,20 +6,15 @@
 // to the worklet via `processorOptions` so initSync() can run inside the
 // AudioWorkletGlobalScope without any async or import.
 //
-// Slider semantics differ from RNNoise: DFN3 takes an attenuation limit in dB,
-// not a wet/dry mix. df_set_atten_lim accepts 0..100 dB but the perceptually
-// useful range is ~0..40 dB — above that suppression saturates. We map the
-// 0..100 UI slider into 0..40 dB so the slider granularity is usable.
+// DFN3 takes an attenuation limit in dB. df_set_atten_lim accepts 0..100 dB
+// but suppression saturates around 40 dB for typical noise — anything beyond
+// is wasted, so we hardcode that cap here.
 
 const WORKLET_URL = '/vendor/dfn3/worklet.js';
 const WASM_URL = '/vendor/dfn3/df_bg.wasm';
 const MODEL_URL = '/vendor/dfn3/model.tar.gz';
 const PROCESSOR_NAME = 'deepfilter-audio-processor';
-// DeepFilterNet's `df_set_atten_lim` accepts 0..100 dB but suppression
-// saturates around 40 dB for typical noise. The 0..100 UI slider maps into
-// 0..MAX_ATTEN_DB so its full travel is perceptually useful. Exported because
-// `formatRnnoiseMix` shows the actual applied dB in the slider label.
-export const MAX_ATTEN_DB = 40;
+const ATTEN_DB = 40;
 
 let cachedWasmModule: WebAssembly.Module | null = null;
 let cachedModelBytes: ArrayBuffer | null = null;
@@ -80,10 +75,7 @@ function ensureRegistered(ctx: AudioContext): Promise<void> {
   return p;
 }
 
-export async function createDfn3Processor(
-  ctx: AudioContext,
-  level0to100: number,
-): Promise<AudioWorkletNode | null> {
+export async function createDfn3Processor(ctx: AudioContext): Promise<AudioWorkletNode | null> {
   if (ctx.sampleRate !== 48000) {
     console.warn(`[dfn3] disabled: sampleRate=${ctx.sampleRate} (need 48000)`);
     return null;
@@ -108,7 +100,7 @@ export async function createDfn3Processor(
       processorOptions: {
         wasmModule: cachedWasmModule,
         modelBytes: cachedModelBytes,
-        suppressionLevel: levelToDb(level0to100),
+        suppressionLevel: ATTEN_DB,
       },
     });
   } catch (err) {
@@ -151,14 +143,4 @@ export async function createDfn3Processor(
     }
     return null;
   }
-}
-
-export function setDfn3Level(node: AudioWorkletNode, level0to100: number): void {
-  node.port.postMessage({ type: 'SET_SUPPRESSION_LEVEL', value: levelToDb(level0to100) });
-}
-
-function levelToDb(v: number): number {
-  if (!Number.isFinite(v)) return Math.round(MAX_ATTEN_DB / 2);
-  const slider = Math.max(0, Math.min(100, v));
-  return Math.round((slider / 100) * MAX_ATTEN_DB);
 }
