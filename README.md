@@ -48,7 +48,7 @@ cd frontend && npm install && npm run dev            # vite на :5173
 
 ## Production
 
-VPS + GitHub Actions + Caddy auto-TLS. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер. Детали в [DEPLOY.md](DEPLOY.md).
+VPS + GitHub Actions + Caddy + Cloudflare proxy. Push в master → CI собирает образы в `ghcr.io` и деплоит на сервер.
 
 TURN поднимается одним транспортом: `turn://:3478?transport=udp`. Voice — UDP-only, как у Discord. Сети, где UDP полностью зарезан, не поддерживаются: TCP/TLS-фолбэка нет, и стоковый `caddy:2-alpine` его не предполагает.
 
@@ -102,7 +102,7 @@ deploy/    Caddyfile
 .github/   CI: build & push в ghcr.io, deploy по SSH, release desktop
 ```
 
-Дальше: [DEPLOY.md](DEPLOY.md) — прод на VPS · [ROADMAP.md](ROADMAP.md) — что сделано и что дальше · [AGENTS.md](AGENTS.md) — правила для AI-агентов.
+Дальше: [ROADMAP.md](ROADMAP.md) — что сделано и что дальше · [AGENTS.md](AGENTS.md) — правила для AI-агентов.
 
 ---
 

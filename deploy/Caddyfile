@@ -1,4 +1,12 @@
+# CF orange-cloud terminates client TLS; Caddy only serves 443 to CF.
+{
+	auto_https disable_redirects
+}
+
 {$APP_HOSTNAME} {
+	# CF Origin Certificate, provisioned out-of-band. CF mode = Full (strict).
+	tls /etc/caddy/origin.crt /etc/caddy/origin.key
+
 	encode zstd gzip
 
 	header {

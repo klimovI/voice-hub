@@ -69,8 +69,10 @@ func main() {
 
 	limiter := auth.NewAuthLimiter(10, 15*time.Minute)
 
-	stunURL := "stun:" + cfg.AppHostname + ":3478"
-	turnURL := "turn:" + cfg.AppHostname + ":3478?transport=udp"
+	// Literal IP, not AppHostname: hostname may proxy through CDN that
+	// drops UDP. IP only reaches clients via auth-gated /api/config.
+	stunURL := "stun:" + cfg.PublicIP + ":3478"
+	turnURL := "turn:" + cfg.PublicIP + ":3478?transport=udp"
 
 	room, err := sfu.NewRoom(sfu.Config{
 		ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},

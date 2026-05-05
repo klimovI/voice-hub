@@ -16,12 +16,13 @@ services:
     mem_limit: 128m
     mem_reservation: 32m
     ports:
-      - "80:80"
       - "443:443"
     environment:
       APP_HOSTNAME: ${APP_HOSTNAME}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/origin.crt:/etc/caddy/origin.crt:ro
+      - ./deploy/origin.key:/etc/caddy/origin.key:ro
       - caddy_data:/data
     security_opt:
       - no-new-privileges:true
