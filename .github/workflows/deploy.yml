@@ -121,27 +121,23 @@ jobs:
 
       - name: Smoke test
         env:
-          DEPLOY_HOST:  ${{ secrets.DEPLOY_HOST }}
-          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
-        # Hit public HTTPS /healthz: proves DNS, TLS, caddy routing, AND
-        # caddy<->app reachability all the way through. In-container
-        # healthcheck does not.
-        # 12×8s = ~100s window. Tolerates CF AOP cert propagation across
-        # edges and caddy reload settle. Echoes HTTP code on failure to
-        # distinguish 525 (CF↔origin TLS) from 5xx (origin app error) from
-        # 403 (CF Bot Fight / WAF — Azure egress flagged). Real browser UA
-        # avoids the curl/* signature trip.
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        # Wait for app container's docker healthcheck to flip "healthy"
+        # (compose curls /healthz every 30s). Internal check skips the CF
+        # round-trip — Bot Fight Mode 403s curl from Azure egress, so
+        # external probing needs UA spoofing or a WAF skip rule.
         run: |
-          UA='Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0'
-          for i in $(seq 1 12); do
-            code=$(curl -fsS -A "$UA" -o /dev/null -w "%{http_code}" --max-time 8 "https://$APP_HOSTNAME/healthz" || true)
-            if [ "$code" = "200" ]; then
-              echo "smoke test passed on attempt $i"
-              exit 0
-            fi
-            echo "attempt $i: HTTP $code, retrying in 8s..."
-            sleep 8
-          done
-          echo "smoke test failed: https://$APP_HOSTNAME/healthz returned non-200" >&2
-          ssh "deploy@$DEPLOY_HOST" 'cd /opt/voice-hub && docker compose ps && docker compose logs --tail 50' >&2 || true
-          exit 1
+          ssh "deploy@$DEPLOY_HOST" '
+            for i in $(seq 1 30); do
+              status=$(docker inspect --format "{{.State.Health.Status}}" voice-hub-app-1 2>/dev/null || echo missing)
+              if [ "$status" = "healthy" ]; then
+                echo "app healthy on attempt $i"
+                exit 0
+              fi
+              echo "attempt $i: status=$status, retrying in 2s..."
+              sleep 2
+            done
+            echo "app never reported healthy" >&2
+            cd /opt/voice-hub && docker compose ps && docker compose logs --tail 50 >&2
+            exit 1
+          '
