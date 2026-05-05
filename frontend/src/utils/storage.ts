@@ -43,6 +43,68 @@ export const KEYS = {
   rejoinOnLoad: 'voice-hub.rejoin-on-load',
 } as const;
 
+// Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].
+// Two retention rules applied together (whichever is stricter wins):
+//   1. Drop messages older than CHAT_TTL_MS (rolling window).
+//   2. Cap to CHAT_HISTORY_CAP entries (FIFO eviction on write).
+// Pruning runs on both load and save so stale entries don't linger across
+// sessions where the user just reads without writing.
+const CHAT_KEY_PREFIX = 'voice-hub.chat.';
+export const CHAT_HISTORY_CAP = 500;
+export const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type PersistedChatMessage = {
+  id: string;
+  from: string;
+  text: string;
+  ts: number;
+  clientMsgId?: string;
+  pending?: boolean;
+  // Snapshot of sender display name at send/receive time. Survives peer leave
+  // and reconnects, where `from` (ephemeral peer id) can no longer be resolved
+  // via the participants map.
+  senderName?: string;
+  // Stable per-install id of the sender. Lets MessageRow identify own messages
+  // after our own peerId rotates (leave + rejoin).
+  senderClientId?: string;
+};
+
+function pruneChatHistory(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+  const cutoff = Date.now() - CHAT_TTL_MS;
+  const fresh = messages.filter((m) => m.ts >= cutoff);
+  return fresh.length > CHAT_HISTORY_CAP ? fresh.slice(fresh.length - CHAT_HISTORY_CAP) : fresh;
+}
+
+export function loadChatHistory(roomId: string): PersistedChatMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_KEY_PREFIX + roomId);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const pruned = pruneChatHistory(parsed as PersistedChatMessage[]);
+    // Persist the pruned view so a session that only reads still expires stale
+    // entries on disk.
+    if (pruned.length !== (parsed as unknown[]).length) {
+      try {
+        localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(pruned));
+      } catch {
+        /* best effort */
+      }
+    }
+    return pruned;
+  } catch {
+    return [];
+  }
+}
+
+export function saveChatHistory(roomId: string, messages: PersistedChatMessage[]): void {
+  try {
+    localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(pruneChatHistory(messages)));
+  } catch {
+    /* quota exceeded — best effort */
+  }
+}
+
 // Prefix for per-peer volume entries: voice-hub.peer-volume.<clientId> = number.
 // Keyed by the peer's stable clientId, not the ephemeral SFU peer ID, so the
 // setting survives both their reconnects and ours.

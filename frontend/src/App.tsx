@@ -16,9 +16,12 @@ import { SessionCard } from './components/SessionCard';
 import { AudioCard } from './components/AudioCard';
 import { HotkeyCard } from './components/HotkeyCard';
 import { ParticipantsCard } from './components/ParticipantsCard';
+import { LurkersCard } from './components/LurkersCard';
+import { ChatPanel } from './components/ChatPanel';
 import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
 import { useAppVersion } from './hooks/useAppVersion';
+import { useLurkerWS } from './hooks/useLurkerWS';
 
 export function App() {
   // App does not render any store field directly — children subscribe per-card.
@@ -211,11 +214,31 @@ export function App() {
     [session],
   );
 
+  const joinState = useStore((s) => s.joinState);
+  const voiceActive = joinState === 'joined' || joinState === 'joining';
+
+  const lurker = useLurkerWS({
+    displayName,
+    onChat: session.handleChatReceive,
+    voiceActive,
+  });
+
+  const handleChatSend = useCallback(
+    (text: string, clientMsgId: string) => {
+      if (voiceActive) {
+        session.sendChat(text, clientMsgId);
+      } else {
+        lurker.sendChat({ text, clientMsgId });
+      }
+    },
+    [voiceActive, session, lurker],
+  );
+
   return (
     <>
       <main
         className="grid gap-4 mx-auto
-          w-[min(1180px,100%)] px-5 pt-5 pb-12
+          w-[min(1560px,100%)] px-5 pt-5 pb-12
           max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-8"
       >
         <TopBar />
@@ -225,7 +248,7 @@ export function App() {
           applyDesktopUpdate={applyDesktopUpdate}
           desktopApplyState={desktopApplyState}
         />
-        <div className="grid gap-4 grid-cols-[380px_1fr] max-[960px]:grid-cols-1">
+        <div className="grid gap-4 grid-cols-[400px_minmax(0,1fr)_400px] max-[1340px]:grid-cols-1 items-start">
           <div className="grid gap-4 content-start">
             <SessionCard
               onJoin={session.join}
@@ -235,6 +258,13 @@ export function App() {
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
             />
+            <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
+            <LurkersCard />
+          </div>
+          <div className="grid gap-4 content-start">
+            <ChatPanel roomId={session.getRoomId()} onSend={handleChatSend} />
+          </div>
+          <div className="grid gap-4 content-start">
             <AudioCard
               onEngineSelect={handleEngineSelect}
               onMicDeviceSelect={handleMicDeviceSelect}
@@ -243,9 +273,6 @@ export function App() {
               onReset={handleAudioReset}
             />
             <HotkeyCard onStatusMessage={handleStatusMessage} />
-          </div>
-          <div className="grid gap-4 content-start">
-            <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} />
           </div>
         </div>
         <Footer uiVersion={bootVersion} />

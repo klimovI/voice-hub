@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/coder/websocket v1.8.14
+	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pion/interceptor v0.1.44
 	github.com/pion/logging v0.2.4
 	github.com/pion/rtp v1.10.1

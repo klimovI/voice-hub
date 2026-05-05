@@ -29,6 +29,13 @@ export type PeerInfo = {
   clientId?: string;
   selfMuted?: boolean;
   deafened?: boolean;
+  /**
+   * True for lurker (chat-only) peers. Lurkers are included in the room
+   * roster (welcome.peers, peer-joined, peer-left) and should be rendered
+   * visually distinct and sorted below voice peers in the participants list.
+   * Absent / false for normal voice peers.
+   */
+  chatOnly?: boolean;
 };
 
 // Server → Client payloads
@@ -64,6 +71,19 @@ export type HelloPayload = {
    * per-peer UI prefs by something that survives reconnects.
    */
   clientId: string;
+  /**
+   * When true, places this connection in lurker (chat-only) mode:
+   * - Server includes the lurker in the room roster with PeerInfo.chatOnly=true.
+   * - "peer-joined" (chatOnly=true) is broadcast to all peers on connect;
+   *   "peer-left" is broadcast to all peers on disconnect.
+   * - Lurker is included in welcome.peers for all clients (symmetric visibility).
+   * - welcome.peers sent to the lurker includes all current peers (voice + lurker).
+   * - Lurker may send "chat-send" and receives all "chat" broadcasts.
+   * - Lurker must NOT send offer / answer / candidate / set-state / set-displayname
+   *   (server silently drops them).
+   * Omit or set false for normal voice-participant behaviour (default).
+   */
+  chatOnly?: boolean;
 };
 
 /** Data field of "set-displayname" — mid-session display name update. */
@@ -77,6 +97,57 @@ export type SetStatePayload = {
   deafened: boolean;
 };
 
+// Text chat
+
+/**
+ * Maximum UTF-8 byte length the server accepts for a chat message.
+ * Mirror of protocol.ChatMaxBytes in messages.go.
+ * Validate with: new TextEncoder().encode(text).length <= CHAT_MAX_BYTES
+ */
+export const CHAT_MAX_BYTES = 2000;
+
+/**
+ * Data field of "chat-send" (C→S).
+ *
+ * Rejected by server if: peer has not sent "hello" yet; text is empty after
+ * trim; UTF-8 byte length exceeds CHAT_MAX_BYTES.
+ *
+ * clientMsgId is a client-generated dedup key (UUIDv4 recommended). Echoed
+ * back in the ChatPayload broadcast so the sender can reconcile its optimistic
+ * local entry with the canonical server-assigned id and ts.
+ */
+export type ChatSendPayload = {
+  text: string;
+  clientMsgId: string;
+};
+
+/**
+ * Data field of "chat" (S→C). Broadcast to all peers including the sender.
+ *
+ * id — ULID assigned by the server; lexicographically sortable by creation
+ *      time. Use as the stable local key for persisted chat history.
+ * from — peer id of the sender (matches PeerInfo.id).
+ * ts — server Unix timestamp in milliseconds; use for display only. Redundant
+ *      with the timestamp in `id` but avoids parsing the ULID in JS.
+ * clientMsgId — echoed from ChatSendPayload; present on all broadcasts.
+ *               Sender uses it to find and replace its optimistic local entry.
+ *               Other peers may ignore it.
+ * senderName — display name of the sender at broadcast time, set by the server
+ *              from the sender's hello'd displayName. Present when non-empty.
+ *              Use this when the participants map lookup on `from` misses —
+ *              two cases: (1) sender is a lurker (chat-only peer, never in
+ *              participants map); (2) sender left before the message is rendered.
+ *              Prefer this over a stale participants-map entry when both exist.
+ */
+export type ChatPayload = {
+  id: string;
+  from: string;
+  text: string;
+  ts: number;
+  clientMsgId?: string;
+  senderName?: string;
+};
+
 // Discriminated union — all server→client variants
 
 export type ServerMessage =
@@ -85,6 +156,7 @@ export type ServerMessage =
   | { event: 'peer-left'; data: PeerLeftPayload }
   | { event: 'peer-info'; data: PeerInfo }
   | { event: 'peer-state'; data: PeerStatePayload }
+  | { event: 'chat'; data: ChatPayload }
   | { event: 'offer'; data: RTCSessionDescriptionInit }
   | { event: 'candidate'; data: RTCIceCandidateInit };
 
@@ -95,7 +167,8 @@ export type ClientMessage =
   | { event: 'answer'; data: RTCSessionDescriptionInit }
   | { event: 'candidate'; data: RTCIceCandidateInit }
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
-  | { event: 'set-state'; data: SetStatePayload };
+  | { event: 'set-state'; data: SetStatePayload }
+  | { event: 'chat-send'; data: ChatSendPayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -208,6 +281,22 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         return null;
       }
       return { event, data: data as RTCIceCandidateInit };
+    }
+
+    case 'chat': {
+      const d = data as Record<string, unknown>;
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof d.id !== 'string' ||
+        typeof d.from !== 'string' ||
+        typeof d.text !== 'string' ||
+        typeof d.ts !== 'number'
+      ) {
+        console.warn("[protocol] malformed 'chat' payload:", data);
+        return null;
+      }
+      return { event, data: data as ChatPayload };
     }
 
     default:

@@ -11,11 +11,16 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
   const joinState = useStore((s) => s.joinState);
   const preview = usePeersPreview();
 
-  const sorted = Array.from(participants.values()).sort((a, b) => {
-    if (a.isSelf) return -1;
-    if (b.isSelf) return 1;
-    return a.display.localeCompare(b.display);
-  });
+  // Voice peers only — lurkers go into a separate card.
+  const sorted = Array.from(participants.values())
+    .filter((p) => !p.chatOnly)
+    .sort((a, b) => {
+      if (a.isSelf) return -1;
+      if (b.isSelf) return 1;
+      // Stable by clientId (per-install) so renames don't reorder. Fallback to
+      // peer id for peers without a clientId.
+      return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
+    });
 
   const showPreview = sorted.length === 0 && joinState !== 'joined' && preview.length > 0;
   const showEmpty = sorted.length === 0 && !showPreview;
@@ -25,20 +30,16 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
   return (
     <section className="card p-6">
       <div className="flex items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <h2 className="card-title">Участники</h2>
           {liveCount > 0 && (
-            <span className="w-1.5 h-1.5 bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite]" />
+            <span className="w-1.5 h-1.5 bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite] shrink-0" />
           )}
         </div>
-        {showPreview ? (
-          <span className="card-hint">В комнате — войдите, чтобы говорить</span>
-        ) : (
-          liveCount > 0 && (
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums">
-              {liveCount}
-            </span>
-          )
+        {!showPreview && liveCount > 0 && (
+          <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums shrink-0">
+            {liveCount}
+          </span>
         )}
       </div>
       <div id="participants" className="grid gap-2">

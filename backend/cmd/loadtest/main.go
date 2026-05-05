@@ -49,14 +49,14 @@ import (
 
 func main() {
 	var (
-		target   = flag.String("target", "http://localhost:8080", "voice-hub base URL (http:// or https://)")
+		target        = flag.String("target", "http://localhost:8080", "voice-hub base URL (http:// or https://)")
 		password      = flag.String("password", "", "admin password for /api/login (mutually exclusive with -password-stdin)")
 		passwordStdin = flag.Bool("password-stdin", false, "read password from stdin (use this to avoid leaving the secret in argv / shell history)")
-		peers    = flag.Int("peers", 10, "number of synthetic peers")
-		duration   = flag.Duration("duration", 30*time.Second, "how long to run after all peers connect")
-		publish    = flag.Bool("publish", false, "have ALL peers publish a fake Opus track at 50 pps (overridden by -publishers)")
-		publishers = flag.Int("publishers", -1, "if >= 0, only the first K peers publish; the rest are listeners. Models a real room (few speakers, many listeners)")
-		ramp       = flag.Duration("ramp", 0, "spread peer connect over this duration (0 = all at once)")
+		peers         = flag.Int("peers", 10, "number of synthetic peers")
+		duration      = flag.Duration("duration", 30*time.Second, "how long to run after all peers connect")
+		publish       = flag.Bool("publish", false, "have ALL peers publish a fake Opus track at 50 pps (overridden by -publishers)")
+		publishers    = flag.Int("publishers", -1, "if >= 0, only the first K peers publish; the rest are listeners. Models a real room (few speakers, many listeners)")
+		ramp          = flag.Duration("ramp", 0, "spread peer connect over this duration (0 = all at once)")
 	)
 	flag.Parse()
 

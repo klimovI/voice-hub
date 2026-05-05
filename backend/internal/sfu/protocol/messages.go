@@ -33,12 +33,17 @@ type Envelope struct {
 // (e.g. volume sliders) by something that survives reconnects.
 // SelfMuted and Deafened default to false on join and reflect the peer's
 // last reported audio state as set via set-state.
+// ChatOnly is true for lurker (chat-only) peers. Lurker peers are included
+// in the room roster (welcome.peers and peer-joined/peer-left broadcasts)
+// so all clients can display them; they should be rendered visually distinct
+// and sorted below voice peers. Omitted from JSON when false (voice peers).
 type PeerInfo struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName,omitempty"`
 	ClientID    string `json:"clientId,omitempty"`
 	SelfMuted   bool   `json:"selfMuted,omitempty"`
 	Deafened    bool   `json:"deafened,omitempty"`
+	ChatOnly    bool   `json:"chatOnly,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -77,9 +82,27 @@ type PeerLeftPayload struct {
 // state (volume, mute, etc.) by it instead of the ephemeral per-connection
 // peer ID. May be empty for older clients; consumers must treat absence as
 // "no stable identity available".
+//
+// ChatOnly, when true, places the connecting client in lurker mode:
+//   - The server allocates a peer ID and includes the lurker in the room roster
+//     with PeerInfo.ChatOnly=true. Lurkers are visible to all participants.
+//   - A "peer-joined" broadcast (PeerInfo.ChatOnly=true) is sent to all peers
+//     (voice and lurker) when a lurker connects.
+//   - A "peer-left" broadcast is sent to all peers when a lurker disconnects.
+//   - Lurkers are included in welcome.peers (with ChatOnly=true) for all clients
+//     (voice peers and other lurkers). Symmetric: lurkers see the full roster too.
+//   - The server sends "welcome" to the lurker with its assigned peer ID;
+//     welcome.peers includes all currently connected peers (voice and lurker).
+//   - The lurker MAY send "chat-send" and will receive all "chat" broadcasts.
+//   - If the lurker sends "offer", "answer", "candidate", "set-state", or
+//     "set-displayname", the server silently drops the message (matches the
+//     existing silent-drop pattern for unexpected messages).
+//   - Lurker peer IDs use the same opaque format as voice peer IDs.
+//   - Default false; omitted from JSON when false (backward compatible).
 type HelloPayload struct {
 	DisplayName string `json:"displayName"`
 	ClientID    string `json:"clientId,omitempty"`
+	ChatOnly    bool   `json:"chatOnly,omitempty"`
 }
 
 // SetDisplayNamePayload is the data field of the "set-displayname" message,
@@ -104,4 +127,69 @@ type PeerStatePayload struct {
 	ID        string `json:"id"`
 	SelfMuted bool   `json:"selfMuted"`
 	Deafened  bool   `json:"deafened"`
+}
+
+// --- Text chat ---
+
+// ChatMaxBytes is the maximum allowed UTF-8 byte length for a chat message
+// text field. 2000 bytes matches Discord's well-understood limit, fits
+// comfortably in a single WebSocket frame, and keeps server logs readable.
+// Note: 2000 bytes is tighter than 2000 chars for multi-byte scripts (e.g.
+// ~667 CJK characters), which is intentional — the server validates
+// len([]byte(text)) not len([]rune(text)).
+const ChatMaxBytes = 2000
+
+// ChatSendPayload is the data field of the "chat-send" C→S message.
+// It is rejected by the server if:
+//   - the peer has not yet sent "hello" (hello is required session-init)
+//   - Text is empty after trimming whitespace
+//   - len([]byte(Text)) > ChatMaxBytes
+//
+// ClientMsgID is a client-generated opaque dedup key (recommended: UUIDv4 or
+// similar random string). The server echoes it unchanged in the ChatPayload
+// broadcast so the sender can reconcile its optimistic local entry with the
+// canonical server-assigned ID and timestamp. No uniqueness guarantee is
+// enforced server-side; clients must treat it as advisory only.
+type ChatSendPayload struct {
+	Text        string `json:"text"`
+	ClientMsgID string `json:"clientMsgId"`
+}
+
+// ChatPayload is the data field of the "chat" S→C message. The server
+// broadcasts this to ALL peers in the room including the original sender.
+// Echo-to-sender is intentional: it delivers the canonical server-assigned ID
+// and timestamp so the sender can reconcile its optimistic local entry. The
+// sender matches on ClientMsgID; all other peers can ignore that field.
+//
+// ID is a ULID (https://github.com/oklog/ulid): 26-char base32, lexicographically
+// sortable by creation time, no central coordination required. Using ULID rather
+// than a plain integer avoids ordering gaps if multiple rooms run concurrently.
+//
+// Ts is the server-assigned Unix timestamp in milliseconds. It is redundant
+// with the timestamp encoded in ID but is kept as a plain int64 for easy
+// construction of a JS Date without parsing the ULID.
+//
+// ClientMsgID echoes the value from ChatSendPayload unchanged. All clients
+// receive it; non-senders may ignore it. Keeping it unconditional simplifies
+// the broadcast path (no per-connection filtering required).
+//
+// SenderName is the display name of the sender at the moment the message was
+// broadcast, taken from the sender's hello'd DisplayName. It is included so
+// that receiving clients can render the correct name in two cases where the
+// participants map lookup on From would fail:
+//   - The sender is a lurker (chat-only peer): voice peers never receive a
+//     "peer-joined" for lurkers, so From is not in their participants map.
+//   - The sender has left the room before the recipient renders the message
+//     (e.g. on reconnect with a local chat history replay).
+//
+// Clients SHOULD prefer SenderName over a stale participants-map entry when
+// both are available, since the server snapshot is authoritative at send time.
+// Omitted from JSON when empty (older server versions or empty display names).
+type ChatPayload struct {
+	ID          string `json:"id"`
+	From        string `json:"from"`
+	Text        string `json:"text"`
+	Ts          int64  `json:"ts"`
+	ClientMsgID string `json:"clientMsgId,omitempty"`
+	SenderName  string `json:"senderName,omitempty"`
 }

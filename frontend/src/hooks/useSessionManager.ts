@@ -21,6 +21,8 @@ import {
   loadOrCreateClientId,
   loadPeerVolume,
 } from '../utils/storage';
+import type { ChatPayload } from '../sfu/protocol';
+import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
 import { isTauri } from '../utils/tauri';
@@ -71,6 +73,18 @@ export type UseSessionManagerReturn = {
    * Broadcast local mic/deafen state to all peers. No-op when not joined.
    */
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
+  /**
+   * Send a chat message. No-op when not joined.
+   * Caller must have already appended the optimistic entry to the store.
+   */
+  sendChat: (text: string, clientMsgId: string) => void;
+  /** Room ID used as the localStorage key for chat history. */
+  getRoomId: () => string;
+  /**
+   * Stable callback — funnels an incoming ChatPayload into the store.
+   * Both the voice WS and the lurker WS call this so dedup/persist run once.
+   */
+  handleChatReceive: (data: ChatPayload) => void;
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
@@ -203,6 +217,43 @@ export function useSessionManager({
     [sfu],
   );
 
+  // Stable room ID: the server host. All users on the same host share one history bucket.
+  const roomId = window.location.host;
+
+  const getRoomId = useCallback(() => roomId, [roomId]);
+
+  const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schedulePersist = useCallback((): void => {
+    if (persistDebounceRef.current !== null) clearTimeout(persistDebounceRef.current);
+    persistDebounceRef.current = setTimeout(() => {
+      persistDebounceRef.current = null;
+      useStore.getState().persistChat(roomId);
+    }, 250);
+  }, [roomId]);
+
+  const sendChat = useCallback(
+    (text: string, clientMsgId: string): void => {
+      sfu.getClient()?.sendChat({ text, clientMsgId });
+    },
+    [sfu],
+  );
+
+  const handleChatReceive = useCallback(
+    (data: ChatPayload): void => {
+      const sender = useStore.getState().participants.get(data.from);
+      // Prefer server-snapshotted name (survives lurker / post-leave lookup).
+      // Fall back to participants map entry for older server versions.
+      useStore.getState().chatReceive(roomId, {
+        ...data,
+        pending: false,
+        senderName: data.senderName ?? sender?.display,
+        senderClientId: sender?.clientId,
+      });
+      schedulePersist();
+    },
+    [roomId, schedulePersist],
+  );
+
   // ---- Reconnect scheduler ----
   // Created once; options that need freshness use refs (isLeaving, onAttempt).
 
@@ -261,6 +312,7 @@ export function useSessionManager({
             display,
             isSelf: true,
             clientId: clientIdRef.current,
+            chatOnly: false,
           });
           for (const p of peers ?? []) {
             const stored = p.clientId ? loadPeerVolume(p.clientId) : null;
@@ -270,11 +322,22 @@ export function useSessionManager({
               clientId: p.clientId,
               remoteMuted: p.selfMuted ?? false,
               remoteDeafened: p.deafened ?? false,
+              chatOnly: p.chatOnly ?? false,
               ...(stored !== null ? { localVolume: stored } : {}),
             });
           }
+          // Re-send our own pending chat messages whose echo we missed during
+          // the previous WS rotation (e.g. lurker → voice transition).
+          retryPendingChats((payload) => sfu.getClient()?.sendChat(payload), clientIdRef.current);
         },
-        onPeerJoined: ({ id, displayName: peerDisplay, clientId, selfMuted, deafened }) => {
+        onPeerJoined: ({
+          id,
+          displayName: peerDisplay,
+          clientId,
+          selfMuted,
+          deafened,
+          chatOnly,
+        }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
           store.upsertParticipant({
             id,
@@ -282,6 +345,7 @@ export function useSessionManager({
             clientId,
             remoteMuted: selfMuted ?? false,
             remoteDeafened: deafened ?? false,
+            chatOnly: chatOnly ?? false,
             ...(stored !== null ? { localVolume: stored } : {}),
           });
         },
@@ -304,6 +368,7 @@ export function useSessionManager({
         onPeerState: ({ id, selfMuted, deafened }) => {
           store.updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
+        onChat: handleChatReceive,
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== 'audio') return;
           store.upsertParticipant({ id: peerId, hasStream: true });
@@ -331,7 +396,7 @@ export function useSessionManager({
         client.sendSetState(s.selfMuted, s.deafened);
       }
     },
-    [store, audio, sfu],
+    [store, audio, sfu, handleChatReceive],
   );
 
   // Keep connectSfuRef in sync so the scheduler always calls the latest closure.
@@ -377,6 +442,7 @@ export function useSessionManager({
       lastDisplayNameRef.current = display;
 
       store.setJoinState('joining');
+      store.loadChatRoom(roomId);
       store.setStatus('Запрашиваю микрофон…');
 
       // Hot-swap path: join with engine=off if WASM not ready yet, rebuild in
@@ -435,7 +501,7 @@ export function useSessionManager({
         store.setStatus(error instanceof Error ? error.message : String(error), true);
       }
     },
-    [store, audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop],
+    [store, audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop, roomId],
   );
 
   useEffect(() => {
@@ -498,5 +564,8 @@ export function useSessionManager({
     switchMicDevice,
     setRemoteDisplayName,
     sendSetState,
+    sendChat,
+    getRoomId,
+    handleChatReceive,
   };
 }

@@ -28,4 +28,5 @@ export type ParticipantUI = {
   hasStream: boolean;
   remoteMuted?: boolean;
   remoteDeafened?: boolean;
+  chatOnly?: boolean;
 };

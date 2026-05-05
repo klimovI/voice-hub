@@ -1,0 +1,16 @@
+{
+  "id": "abc12345def56789",
+  "peers": [
+    {
+      "id": "11223344aabbccdd",
+      "displayName": "Alice",
+      "clientId": "cli_alice_uuid"
+    },
+    {
+      "id": "aabbccddeeff0011",
+      "displayName": "Lurker",
+      "clientId": "cli_lurker_uuid",
+      "chatOnly": true
+    }
+  ]
+}

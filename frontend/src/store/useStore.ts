@@ -16,7 +16,12 @@ import {
   saveOutputVolume,
   saveEngine,
   saveMicDeviceId,
+  loadChatHistory,
+  saveChatHistory,
+  type PersistedChatMessage,
 } from '../utils/storage';
+
+export type ChatMessage = PersistedChatMessage;
 
 export type JoinState = 'idle' | 'joining' | 'joined';
 export type StatusState = 'idle' | 'ok' | 'err';
@@ -75,6 +80,17 @@ export interface AppState {
   removeParticipant: (id: string) => void;
   clearParticipants: () => void;
   updateParticipant: (id: string, patch: Partial<ParticipantUI>) => void;
+
+  // Chat — per-room message history. roomId matches the SFU room / host.
+  chatByRoom: Record<string, ChatMessage[]>;
+  // Load persisted history for a room on join.
+  loadChatRoom: (roomId: string) => void;
+  // Append an optimistic (pending) outgoing message before the server echoes it.
+  chatSendOptimistic: (roomId: string, msg: ChatMessage) => void;
+  // Reconcile server echo: replace pending entry matching clientMsgId, or append.
+  chatReceive: (roomId: string, msg: ChatMessage) => void;
+  // Persist current history to localStorage (debounce externally).
+  persistChat: (roomId: string) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -185,4 +201,30 @@ export const useStore = create<AppState>((set, get) => ({
       m.set(id, { ...existing, ...patch });
       return { participants: m };
     }),
+
+  chatByRoom: {},
+  loadChatRoom: (roomId) =>
+    set((s) => ({
+      chatByRoom: { ...s.chatByRoom, [roomId]: loadChatHistory(roomId) },
+    })),
+  chatSendOptimistic: (roomId, msg) =>
+    set((s) => ({
+      chatByRoom: { ...s.chatByRoom, [roomId]: [...(s.chatByRoom[roomId] ?? []), msg] },
+    })),
+  chatReceive: (roomId, msg) =>
+    set((s) => {
+      const existing = s.chatByRoom[roomId] ?? [];
+      const idx = msg.clientMsgId
+        ? existing.findIndex((m) => m.clientMsgId === msg.clientMsgId && m.pending)
+        : -1;
+      const next =
+        idx >= 0
+          ? [...existing.slice(0, idx), msg, ...existing.slice(idx + 1)]
+          : [...existing, msg];
+      return { chatByRoom: { ...s.chatByRoom, [roomId]: next } };
+    }),
+  persistChat: (roomId) => {
+    const msgs = useStore.getState().chatByRoom[roomId];
+    if (msgs) saveChatHistory(roomId, msgs);
+  },
 }));

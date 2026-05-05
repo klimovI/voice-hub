@@ -11,13 +11,16 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"maps"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/oklog/ulid/v2"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -70,6 +73,9 @@ type peer struct {
 	clientID  string
 	selfMuted bool
 	deafened  bool
+	// chatOnly is true for lurker peers. pc is nil for lurker peers; any
+	// code path that touches pc must guard on this field first.
+	chatOnly bool
 
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
@@ -78,7 +84,7 @@ type peer struct {
 	// loops enqueue here non-blocking and never wait on a slow socket; if
 	// the queue is full, the peer is treated as dead and its context is
 	// cancelled so it can be torn down without holding up other peers.
-	out chan []byte
+	out    chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -239,20 +245,6 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "")
 
-	pc, err := r.api.NewPeerConnection(webrtc.Configuration{ICEServers: r.cfg.ICEServers})
-	if err != nil {
-		log.Printf("sfu: new pc: %v", err)
-		return
-	}
-	defer pc.Close()
-
-	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
-		Direction: webrtc.RTPTransceiverDirectionRecvonly,
-	}); err != nil {
-		log.Printf("sfu: add transceiver: %v", err)
-		return
-	}
-
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
@@ -274,6 +266,25 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 	var hello protocol.HelloPayload
 	_ = json.Unmarshal(helloMsg.Data, &hello)
+
+	if hello.ChatOnly {
+		r.serveWSlurker(ctx, cancel, ws, hello)
+		return
+	}
+
+	pc, err := r.api.NewPeerConnection(webrtc.Configuration{ICEServers: r.cfg.ICEServers})
+	if err != nil {
+		log.Printf("sfu: new pc: %v", err)
+		return
+	}
+	defer pc.Close()
+
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		log.Printf("sfu: add transceiver: %v", err)
+		return
+	}
 
 	p := &peer{
 		id:          newPeerID(),
@@ -357,7 +368,55 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// serveWSlurker runs a chat-only (lurker) peer session. No PeerConnection is
+// created; the peer is added to the room roster and may only send chat-send.
+func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws *websocket.Conn, hello protocol.HelloPayload) {
+	p := &peer{
+		id:          newPeerID(),
+		displayName: hello.DisplayName,
+		clientID:    hello.ClientID,
+		chatOnly:    true,
+		ws:          ws,
+		out:         make(chan []byte, peerOutBufLen),
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+	go p.writeLoop()
+
+	r.addPeer(p)
+	defer r.removePeer(p.id)
+
+	for {
+		_, raw, err := ws.Read(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Printf("sfu: ws read lurker (%s): %v", p.id, err)
+			}
+			return
+		}
+		var msg protocol.Envelope
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.Printf("sfu: bad json from lurker %s: %v", p.id, err)
+			continue
+		}
+		r.handleClientMessage(p, msg)
+	}
+}
+
 func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
+	// Lurkers may only send chat-send. Silently drop all other message types.
+	if p.chatOnly {
+		if msg.Event != "chat-send" {
+			return
+		}
+		var cs protocol.ChatSendPayload
+		if err := json.Unmarshal(msg.Data, &cs); err != nil {
+			return
+		}
+		r.broadcastChat(p, cs)
+		return
+	}
+
 	switch msg.Event {
 	case "answer":
 		var sd webrtc.SessionDescription
@@ -387,6 +446,25 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.setState(p.id, ss.SelfMuted, ss.Deafened)
+	case "chat-send":
+		var cs protocol.ChatSendPayload
+		if err := json.Unmarshal(msg.Data, &cs); err != nil {
+			return
+		}
+		r.broadcastChat(p, cs)
+	}
+}
+
+// peerInfo builds a PeerInfo from p's current state. Caller must not hold r.mu
+// since this function does not access room state directly.
+func peerInfo(p *peer) protocol.PeerInfo {
+	return protocol.PeerInfo{
+		ID:          p.id,
+		DisplayName: p.displayName,
+		ClientID:    p.clientID,
+		SelfMuted:   p.selfMuted,
+		Deafened:    p.deafened,
+		ChatOnly:    p.chatOnly,
 	}
 }
 
@@ -397,7 +475,7 @@ func (r *Room) Peers() []protocol.PeerInfo {
 	defer r.mu.Unlock()
 	out := make([]protocol.PeerInfo, 0, len(r.peers))
 	for _, p := range r.peers {
-		out = append(out, protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID, SelfMuted: p.selfMuted, Deafened: p.deafened})
+		out = append(out, peerInfo(p))
 	}
 	return out
 }
@@ -420,7 +498,7 @@ func (r *Room) addPeer(p *peer) {
 	existing := make([]protocol.PeerInfo, 0, len(r.peers))
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
-		existing = append(existing, protocol.PeerInfo{ID: op.id, DisplayName: op.displayName, ClientID: op.clientID, SelfMuted: op.selfMuted, Deafened: op.deafened})
+		existing = append(existing, peerInfo(op))
 		others = append(others, op)
 	}
 	r.peers[p.id] = p
@@ -439,12 +517,12 @@ func (r *Room) addPeer(p *peer) {
 		}
 	}
 
-	log.Printf("sfu: peer joined id=%s name=%q clientId=%q peers=%d", p.id, p.displayName, p.clientID, count)
+	log.Printf("sfu: peer joined id=%s name=%q clientId=%q chatOnly=%v peers=%d", p.id, p.displayName, p.clientID, p.chatOnly, count)
 
 	welcome, _ := json.Marshal(protocol.WelcomePayload{ID: p.id, Peers: existing})
 	_ = p.write(protocol.Envelope{Event: "welcome", Data: welcome})
 
-	joined, _ := json.Marshal(protocol.PeerInfo{ID: p.id, DisplayName: p.displayName, ClientID: p.clientID, SelfMuted: p.selfMuted, Deafened: p.deafened})
+	joined, _ := json.Marshal(peerInfo(p))
 	joinedEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-joined", Data: joined})
 	for _, op := range others {
 		_ = op.writeRaw(joinedEnv)
@@ -515,9 +593,7 @@ func (r *Room) setDisplayName(id, name string) {
 		return
 	}
 	p.displayName = name
-	clientID := p.clientID
-	selfMuted := p.selfMuted
-	deafened := p.deafened
+	info := peerInfo(p)
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		if op.id != id {
@@ -526,8 +602,8 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	r.mu.Unlock()
 
-	info, _ := json.Marshal(protocol.PeerInfo{ID: id, DisplayName: name, ClientID: clientID, SelfMuted: selfMuted, Deafened: deafened})
-	infoEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-info", Data: info})
+	infoData, _ := json.Marshal(info)
+	infoEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-info", Data: infoData})
 	for _, op := range others {
 		_ = op.writeRaw(infoEnv)
 	}
@@ -555,6 +631,53 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	for _, op := range others {
 		_ = op.writeRaw(stateEnv)
 	}
+}
+
+func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
+	if sender.displayName == "" {
+		slog.Debug("sfu: chat-send before hello, dropping", "peer", sender.id)
+		return
+	}
+
+	text := strings.TrimSpace(cs.Text)
+	if text == "" {
+		slog.Debug("sfu: chat-send empty text, dropping", "peer", sender.id)
+		return
+	}
+	if len([]byte(text)) > protocol.ChatMaxBytes {
+		slog.Debug("sfu: chat-send oversized, dropping", "peer", sender.id, "bytes", len([]byte(text)))
+		return
+	}
+
+	now := time.Now()
+	id := newChatID(now)
+
+	slog.Debug("sfu: chat", "id", id, "from", sender.id, "bytes", len([]byte(text)))
+
+	payload, _ := json.Marshal(protocol.ChatPayload{
+		ID:          id,
+		From:        sender.id,
+		Text:        text,
+		Ts:          now.UnixMilli(),
+		ClientMsgID: cs.ClientMsgID,
+		SenderName:  sender.displayName,
+	})
+	env, _ := json.Marshal(protocol.Envelope{Event: "chat", Data: payload})
+
+	r.mu.Lock()
+	all := make([]*peer, 0, len(r.peers))
+	for _, p := range r.peers {
+		all = append(all, p)
+	}
+	r.mu.Unlock()
+
+	for _, p := range all {
+		_ = p.writeRaw(env)
+	}
+}
+
+func newChatID(t time.Time) string {
+	return ulid.MustNew(ulid.Timestamp(t), rand.Reader).String()
 }
 
 func (r *Room) publishTrack(ownerID string, t *webrtc.TrackLocalStaticRTP) {
@@ -660,6 +783,10 @@ var syncBufsPool = sync.Pool{
 }
 
 func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
+	// Lurker peers have no PeerConnection; nothing to sync.
+	if p.pc == nil {
+		return false
+	}
 	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		r.removePeer(p.id)
 		return true

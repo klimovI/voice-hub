@@ -9,7 +9,7 @@ export interface PeerPreview {
 const POLL_INTERVAL_MS = 5000;
 
 interface PeersResponse {
-  peers?: { id: string; displayName?: string }[];
+  peers?: { id: string; displayName?: string; chatOnly?: boolean }[];
 }
 
 async function fetchPeers(): Promise<PeerPreview[] | null> {
@@ -20,10 +20,14 @@ async function fetchPeers(): Promise<PeerPreview[] | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as PeersResponse;
-    return (data.peers ?? []).map((p) => ({
-      id: p.id,
-      displayName: p.displayName?.trim() || `peer-${p.id}`,
-    }));
+    // Preview is the voice roster. Lurkers are rendered separately by
+    // LurkersCard (off the live participants store), so filter them out here.
+    return (data.peers ?? [])
+      .filter((p) => !p.chatOnly)
+      .map((p) => ({
+        id: p.id,
+        displayName: p.displayName?.trim() || `peer-${p.id}`,
+      }));
   } catch {
     return null;
   }

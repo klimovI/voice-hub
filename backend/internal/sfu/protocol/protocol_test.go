@@ -69,6 +69,54 @@ var fixtureCases = []fixtureCase{
 		name:    "peer-state",
 		payload: protocol.PeerStatePayload{ID: "11223344aabbccdd", SelfMuted: true, Deafened: false},
 	},
+	{
+		name:    "chat-send",
+		payload: protocol.ChatSendPayload{Text: "hello room", ClientMsgID: "01JXXXXXXXXXXXXXXXXXXXXXXX"},
+	},
+	{
+		name: "chat",
+		payload: protocol.ChatPayload{
+			ID:          "01JXXXXXXXXXXXXXXXXXXXXXXX",
+			From:        "11223344aabbccdd",
+			Text:        "hello room",
+			Ts:          1746403200000,
+			ClientMsgID: "01JXXXXXXXXXXXXXXXXXXXXXXX",
+		},
+	},
+	// chat-with-sender: exercises SenderName field. Used for lurker messages and
+	// for messages where the sender may have left before rendering.
+	{
+		name: "chat-with-sender",
+		payload: protocol.ChatPayload{
+			ID:          "01JXXXXXXXXXXXXXXXXXXXXXXX",
+			From:        "aabbccddeeff0011",
+			Text:        "I am running late",
+			Ts:          1746403200000,
+			ClientMsgID: "01JXXXXXXXXXXXXXXXXXXXXXXX",
+			SenderName:  "Bob",
+		},
+	},
+	// hello-chat-only: exercises ChatOnly lurker flag.
+	{
+		name:    "hello-chat-only",
+		payload: protocol.HelloPayload{DisplayName: "Lurker", ClientID: "cli_lurker_uuid", ChatOnly: true},
+	},
+	// peer-joined-lurker: a lurker peer-joined broadcast; chatOnly=true must round-trip.
+	{
+		name:    "peer-joined-lurker",
+		payload: protocol.PeerInfo{ID: "aabbccddeeff0011", DisplayName: "Lurker", ClientID: "cli_lurker_uuid", ChatOnly: true},
+	},
+	// welcome-with-lurker: welcome payload where peers includes a lurker alongside a voice peer.
+	{
+		name: "welcome-with-lurker",
+		payload: protocol.WelcomePayload{
+			ID: "abc12345def56789",
+			Peers: []protocol.PeerInfo{
+				{ID: "11223344aabbccdd", DisplayName: "Alice", ClientID: "cli_alice_uuid"},
+				{ID: "aabbccddeeff0011", DisplayName: "Lurker", ClientID: "cli_lurker_uuid", ChatOnly: true},
+			},
+		},
+	},
 }
 
 // TestGoldenFixtures marshals each payload type and asserts the result
@@ -188,6 +236,9 @@ func TestPeerInfoOmitEmpty(t *testing.T) {
 	}
 	if bytes.Contains(b, []byte("deafened")) {
 		t.Errorf("expected no deafened key when false, got: %s", b)
+	}
+	if bytes.Contains(b, []byte("chatOnly")) {
+		t.Errorf("expected no chatOnly key when false, got: %s", b)
 	}
 }
 
