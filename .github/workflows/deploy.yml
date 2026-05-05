@@ -128,10 +128,13 @@ jobs:
         # healthcheck does not.
         # 12×8s = ~100s window. Tolerates CF AOP cert propagation across
         # edges and caddy reload settle. Echoes HTTP code on failure to
-        # distinguish 525 (CF↔origin TLS) from 5xx (origin app error).
+        # distinguish 525 (CF↔origin TLS) from 5xx (origin app error) from
+        # 403 (CF Bot Fight / WAF — Azure egress flagged). Real browser UA
+        # avoids the curl/* signature trip.
         run: |
+          UA='Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0'
           for i in $(seq 1 12); do
-            code=$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 8 "https://$APP_HOSTNAME/healthz" || true)
+            code=$(curl -fsS -A "$UA" -o /dev/null -w "%{http_code}" --max-time 8 "https://$APP_HOSTNAME/healthz" || true)
             if [ "$code" = "200" ]; then
               echo "smoke test passed on attempt $i"
               exit 0
