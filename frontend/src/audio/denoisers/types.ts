@@ -7,7 +7,7 @@
 // branches. Engines that need extra topology hide it behind input/output
 // passthroughs.
 
-export type DenoiserId = 'rnnoise' | 'rnnoise-v2';
+export type DenoiserId = 'rnnoise' | 'rnnoise-old';
 
 export type DenoiserNode = {
   // Upstream graph connects into `input`; downstream reads from `output`.

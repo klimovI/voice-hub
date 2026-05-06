@@ -187,8 +187,8 @@ export function App() {
     audio.updateSendGain();
     audio.applyAllRemoteGains();
 
-    if (s.engine !== 'rnnoise-v2') {
-      void handleEngineSelect('rnnoise-v2');
+    if (s.engine !== 'rnnoise') {
+      void handleEngineSelect('rnnoise');
     }
     if (s.micDeviceId !== null) {
       void handleMicDeviceSelect(null);

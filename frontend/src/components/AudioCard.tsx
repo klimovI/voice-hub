@@ -68,7 +68,7 @@ export function AudioCard({
   // Remembers the last non-off engine so toggling the switch back on restores
   // the chosen variant rather than resetting to the default.
   const [lastVariant, setLastVariant] = useState<DenoiserVariant>(
-    engine === 'off' ? 'rnnoise-v2' : engine,
+    engine === 'off' ? 'rnnoise' : engine,
   );
   useEffect(() => {
     if (engine !== 'off') setLastVariant(engine);

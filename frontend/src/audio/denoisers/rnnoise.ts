@@ -3,7 +3,7 @@ import type { Denoiser } from './types';
 
 export const rnnoise: Denoiser = {
   id: 'rnnoise',
-  label: 'RNNoise (текущий)',
+  label: 'RNNoise',
   preload: preloadRnnoise,
   isReady: isRnnoiseReady,
   async create(ctx) {

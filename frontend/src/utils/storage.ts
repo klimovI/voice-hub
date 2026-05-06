@@ -198,7 +198,7 @@ const ENGINE_VALUES: EngineKind[] = ['off', ...DENOISER_IDS];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);
-  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : 'rnnoise-v2';
+  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : 'rnnoise';
 }
 
 export function saveEngine(e: EngineKind): void {
