@@ -1,5 +1,9 @@
 // Local mic AudioContext graph: mic → HPF(110Hz) → [Denoiser] →
-// DynamicsCompressor → GainNode → MediaStreamDestination.
+// GainNode → MediaStreamDestination.
+//
+// Gain control is the browser's AGC (autoGainControl: true). A graph-level
+// DynamicsCompressor on top of AGC creates a pumping feedback loop, so
+// the graph has none.
 //
 // The denoiser slot is engine-agnostic: a `DenoiserNode` exposes
 // { input, output, dispose }. Engines that need extra topology hide it
@@ -14,7 +18,6 @@ export interface MicGraph {
   localAudioContext: AudioContext;
   localSourceNode: MediaStreamAudioSourceNode;
   localHighPassNode: BiquadFilterNode;
-  localCompressorNode: DynamicsCompressorNode;
   localGainNode: GainNode;
   localDestinationNode: MediaStreamAudioDestinationNode;
   localMonitorAnalyser: AnalyserNode;
@@ -66,13 +69,6 @@ export async function buildMicGraph(
   localHighPassNode.frequency.value = 110;
   localHighPassNode.Q.value = 0.707;
 
-  const localCompressorNode = localAudioContext.createDynamicsCompressor();
-  localCompressorNode.threshold.value = -22;
-  localCompressorNode.knee.value = 8;
-  localCompressorNode.ratio.value = 3;
-  localCompressorNode.attack.value = 0.005;
-  localCompressorNode.release.value = 0.1;
-
   localSourceNode.connect(localHighPassNode);
 
   let chainTail: AudioNode = localHighPassNode;
@@ -89,19 +85,16 @@ export async function buildMicGraph(
     }
   }
 
-  chainTail.connect(localCompressorNode);
-  localCompressorNode.connect(localGainNode);
+  chainTail.connect(localGainNode);
   localGainNode.connect(localDestinationNode);
 
-  // Tap speaking indicator post-denoiser/post-compressor so it fires only on
-  // signal that survives the chain, not on background noise the denoiser cuts.
-  localCompressorNode.connect(localMonitorAnalyser);
+  // Tap pre-volume so the speaking threshold doesn't track the user's slider.
+  chainTail.connect(localMonitorAnalyser);
 
   const graph: MicGraph = {
     localAudioContext,
     localSourceNode,
     localHighPassNode,
-    localCompressorNode,
     localGainNode,
     localDestinationNode,
     localMonitorAnalyser,
@@ -141,7 +134,6 @@ export function teardownMicGraph(graph: MicGraph): void {
 
   safeDisconnect(graph.localSourceNode);
   safeDisconnect(graph.localHighPassNode);
-  safeDisconnect(graph.localCompressorNode);
   safeDisconnect(graph.localGainNode);
   safeDisconnect(graph.localMonitorAnalyser);
 
