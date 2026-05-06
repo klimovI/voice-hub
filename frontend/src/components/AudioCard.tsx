@@ -5,8 +5,10 @@ import { DENOISERS, DENOISER_IDS } from '../audio/denoisers/registry';
 import type { DenoiserId } from '../audio/denoisers/types';
 import { startMicTest, type MicTestHandle } from '../audio/mic-test';
 import { detectLevel } from '../audio/level-detect';
+import type { MicGraph } from '../audio/mic-graph';
 
 type DenoiserVariant = DenoiserId;
+type MicTestMode = 'standalone' | 'voice';
 
 const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = DENOISER_IDS.map((id) => ({
   value: id,
@@ -18,6 +20,8 @@ interface Props {
   onMicDeviceSelect: (deviceId: string | null) => void;
   onSendVolumeChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
+  onVoiceMicTestStart: () => MicGraph;
+  onVoiceMicTestStop: () => void;
   onReset: () => void;
 }
 
@@ -59,6 +63,8 @@ export function AudioCard({
   onMicDeviceSelect,
   onSendVolumeChange,
   onOutputVolumeChange,
+  onVoiceMicTestStart,
+  onVoiceMicTestStop,
   onReset,
 }: Props) {
   const engine = useStore((s) => s.engine);
@@ -73,6 +79,8 @@ export function AudioCard({
   const [testActive, setTestActive] = useState(false);
   const [testLevel, setTestLevel] = useState(0);
   const testHandleRef = useRef<MicTestHandle | null>(null);
+  const testGraphRef = useRef<MicGraph | null>(null);
+  const testModeRef = useRef<MicTestMode | null>(null);
   const testTimeoutRef = useRef<number | null>(null);
   const testRafRef = useRef<number | null>(null);
   // Remembers the last non-off engine so toggling the switch back on restores
@@ -134,35 +142,56 @@ export function AudioCard({
       cancelAnimationFrame(testRafRef.current);
       testRafRef.current = null;
     }
-    testHandleRef.current?.stop();
+    if (testModeRef.current === 'voice') {
+      onVoiceMicTestStop();
+    } else {
+      testHandleRef.current?.stop();
+    }
     testHandleRef.current = null;
+    testGraphRef.current = null;
+    testModeRef.current = null;
     setTestActive(false);
     setTestLevel(0);
+  }, [onVoiceMicTestStop]);
+
+  const watchTestLevel = useCallback((graph: MicGraph) => {
+    const tick = () => {
+      setTestLevel(detectLevel(graph.localMonitorAnalyser, graph.localMonitorData));
+      testRafRef.current = requestAnimationFrame(tick);
+    };
+    testRafRef.current = requestAnimationFrame(tick);
   }, []);
 
   const startTest = async () => {
-    if (testHandleRef.current) return;
-    if (voiceActive) {
-      setStatus('Тест микрофона недоступен во время голосового подключения.', true);
-      return;
-    }
+    if (testModeRef.current) return;
     const gen = ++startGenRef.current;
     try {
+      if (voiceActive) {
+        const graph = onVoiceMicTestStart();
+        if (gen !== startGenRef.current) {
+          onVoiceMicTestStop();
+          return;
+        }
+        testModeRef.current = 'voice';
+        testGraphRef.current = graph;
+        setTestActive(true);
+        setStatus('Тест микрофона: остальные участники временно приглушены.', false, true);
+        testTimeoutRef.current = window.setTimeout(stopTest, 30000);
+        watchTestLevel(graph);
+        return;
+      }
+
       const handle = await startMicTest(engine, () => useStore.getState().sendVolume, micDeviceId);
       if (gen !== startGenRef.current) {
         handle.stop();
         return;
       }
+      testModeRef.current = 'standalone';
       testHandleRef.current = handle;
+      testGraphRef.current = handle.graph;
       setTestActive(true);
       testTimeoutRef.current = window.setTimeout(stopTest, 30000);
-      const tick = () => {
-        const g = testHandleRef.current?.graph;
-        if (!g) return;
-        setTestLevel(detectLevel(g.localMonitorAnalyser, g.localMonitorData));
-        testRafRef.current = requestAnimationFrame(tick);
-      };
-      testRafRef.current = requestAnimationFrame(tick);
+      watchTestLevel(handle.graph);
     } catch (err) {
       if (gen !== startGenRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
@@ -171,11 +200,11 @@ export function AudioCard({
   };
 
   useEffect(() => {
-    if (testHandleRef.current) stopTest();
+    if (testModeRef.current === 'standalone') stopTest();
   }, [engine, micDeviceId, stopTest]);
 
   useEffect(() => {
-    if (voiceActive) stopTest();
+    if (!voiceActive && testModeRef.current === 'voice') stopTest();
   }, [voiceActive, stopTest]);
 
   useEffect(() => stopTest, [stopTest]);
@@ -288,8 +317,6 @@ export function AudioCard({
           onClick={testActive ? stopTest : startTest}
           className="btn btn-secondary"
           aria-pressed={testActive}
-          disabled={voiceActive}
-          title={voiceActive ? 'Выйдите из голосового чата перед тестом микрофона' : undefined}
         >
           {testActive ? 'Остановить тест' : 'Тест микрофона'}
         </button>
@@ -309,7 +336,9 @@ export function AudioCard({
               />
             </div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-muted">
-              Используйте наушники для точного теста
+              {testModeRef.current === 'voice'
+                ? 'Остальные участники временно приглушены'
+                : 'Используйте наушники для точного теста'}
             </p>
           </>
         )}
