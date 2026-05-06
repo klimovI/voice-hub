@@ -83,6 +83,14 @@ export function AudioCard({
   const testModeRef = useRef<MicTestMode | null>(null);
   const testTimeoutRef = useRef<number | null>(null);
   const testRafRef = useRef<number | null>(null);
+  const onVoiceMicTestStartRef = useRef(onVoiceMicTestStart);
+  const onVoiceMicTestStopRef = useRef(onVoiceMicTestStop);
+
+  useEffect(() => {
+    onVoiceMicTestStartRef.current = onVoiceMicTestStart;
+    onVoiceMicTestStopRef.current = onVoiceMicTestStop;
+  }, [onVoiceMicTestStart, onVoiceMicTestStop]);
+
   // Remembers the last non-off engine so toggling the switch back on restores
   // the chosen variant rather than resetting to the default.
   const [lastVariant, setLastVariant] = useState<DenoiserVariant>(
@@ -143,7 +151,7 @@ export function AudioCard({
       testRafRef.current = null;
     }
     if (testModeRef.current === 'voice') {
-      onVoiceMicTestStop();
+      onVoiceMicTestStopRef.current();
     } else {
       testHandleRef.current?.stop();
     }
@@ -152,7 +160,7 @@ export function AudioCard({
     testModeRef.current = null;
     setTestActive(false);
     setTestLevel(0);
-  }, [onVoiceMicTestStop]);
+  }, []);
 
   const watchTestLevel = useCallback((graph: MicGraph) => {
     const tick = () => {
@@ -167,9 +175,9 @@ export function AudioCard({
     const gen = ++startGenRef.current;
     try {
       if (voiceActive) {
-        const graph = onVoiceMicTestStart();
+        const graph = onVoiceMicTestStartRef.current();
         if (gen !== startGenRef.current) {
-          onVoiceMicTestStop();
+          onVoiceMicTestStopRef.current();
           return;
         }
         testModeRef.current = 'voice';
@@ -207,7 +215,7 @@ export function AudioCard({
     if (!voiceActive && testModeRef.current === 'voice') stopTest();
   }, [voiceActive, stopTest]);
 
-  useEffect(() => stopTest, [stopTest]);
+  useEffect(() => () => stopTest(), [stopTest]);
 
   return (
     <section className="card grid gap-5 p-6">
