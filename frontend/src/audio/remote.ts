@@ -1,11 +1,10 @@
-// Remote audio: per-participant MediaStreamSource → GainNode → DynamicsCompressor → destination.
+// Remote audio: per-participant MediaStreamSource → GainNode → destination.
 // <audio> element is muted and used only to keep the stream alive.
 // Volume can exceed 100% (WebAudio gain).
 
 export interface RemoteParticipantAudio {
   audioEl: HTMLAudioElement;
   gainNode: GainNode;
-  limiterNode: DynamicsCompressorNode;
   sourceNode: MediaStreamAudioSourceNode | null;
   analyser: AnalyserNode;
   monitorData: Float32Array<ArrayBuffer>;
@@ -36,17 +35,7 @@ export function setupParticipantAudio(
     );
 
   const gainNode = ctx.createGain();
-  const limiterNode = ctx.createDynamicsCompressor();
-  // Softer than a brick wall: hard-knee 1ms-attack limiters on Web Audio's
-  // DynamicsCompressor introduce intermodulation distortion that sounds like
-  // crackling on speech transients.
-  limiterNode.threshold.value = -6;
-  limiterNode.knee.value = 6;
-  limiterNode.ratio.value = 8;
-  limiterNode.attack.value = 0.005;
-  limiterNode.release.value = 0.1;
-  gainNode.connect(limiterNode);
-  limiterNode.connect(ctx.destination);
+  gainNode.connect(ctx.destination);
 
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
@@ -65,7 +54,6 @@ export function setupParticipantAudio(
   return {
     audioEl,
     gainNode,
-    limiterNode,
     sourceNode,
     analyser,
     monitorData,
@@ -80,11 +68,6 @@ export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
   }
   try {
     audio.gainNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    audio.limiterNode.disconnect();
   } catch {
     /* ignore */
   }
