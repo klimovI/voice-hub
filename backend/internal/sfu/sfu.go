@@ -181,12 +181,6 @@ type Room struct {
 	// pending at a time; further exhaustions while pending are no-ops
 	// (the in-flight retry already covers the latest state).
 	resyncPending atomic.Bool
-
-	// attemptSyncCount counts attemptSync invocations across the room's
-	// lifetime. Used by load tests to verify the deferred retry loop
-	// continues firing under sustained pathology rather than stopping
-	// after one window. No production observer.
-	attemptSyncCount atomic.Int64
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -361,7 +355,9 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			if err := pkt.Unmarshal(buf[:n]); err != nil {
 				return
 			}
-			// Strip header extensions; they were added for video codecs and can confuse subscribers.
+			// Strip RTP header extensions: the publisher negotiated extension IDs
+			// that subscribers did not, so forwarding them would cause subscribers
+			// to misparse the extension block.
 			pkt.Extension = false
 			pkt.Extensions = nil
 			if err := local.WriteRTP(pkt); err != nil {
@@ -733,7 +729,7 @@ func (r *Room) signalPeerConnections() {
 // false only when all attempts exhausted with attemptSync still wanting
 // to retry.
 func (r *Room) runSyncAttempts() bool {
-	const maxAttempts = 25
+	const maxAttempts = 5
 	for range maxAttempts {
 		if !r.attemptSync() {
 			return true
@@ -769,7 +765,6 @@ func (r *Room) deferredResyncLoop() {
 }
 
 func (r *Room) attemptSync() (retry bool) {
-	r.attemptSyncCount.Add(1)
 	r.mu.Lock()
 	peers := make([]*peer, 0, len(r.peers))
 	for _, p := range r.peers {
