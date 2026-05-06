@@ -1,9 +1,7 @@
 import { formatBinding } from '../utils/binding';
 import { type HotkeyApi } from '../hooks/useKeyboardCapture';
-import { isTauri } from '../utils/tauri';
 
 export function HotkeyCardView({ api }: { api: HotkeyApi }) {
-  const desktop = isTauri();
   let display: string;
   if (api.capturing) {
     display = api.liveKeys.length > 0 ? api.liveKeys.join(' + ') : 'Жду нажатия…';
@@ -60,10 +58,6 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
           )}
         </div>
       </div>
-      <p className="text-[12px] text-muted-2 leading-snug">
-        Кликните в поле и зажмите Ctrl, Shift или Alt с клавишей
-        {desktop ? ' или боковой кнопкой мыши' : ''}. Сохранится после отпускания.
-      </p>
       {api.capturing && (
         <div className="flex flex-wrap gap-2">
           <button
