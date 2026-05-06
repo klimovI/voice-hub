@@ -1,14 +1,14 @@
-// Loopback monitor: dedicated mic graph + AudioContext, processed signal
-// routed to ctx.destination so the user hears their own outgoing audio.
-// AEC stays on so the loopback is removed from mic input — feedback-safe
-// on speakers, but headphones recommended for accurate listening.
+// Standalone mic test: owns a temporary mic stream + graph.
+// Voice-mode mic test reuses the active graph instead of calling getUserMedia again.
 
 import type { EngineKind } from '../types';
 import {
   buildMicGraph,
   teardownMicGraph,
   createLocalAudioContext,
+  startMicLoopback,
   type MicGraph,
+  type MicLoopbackHandle,
 } from './mic-graph';
 
 export type MicTestHandle = {
@@ -50,6 +50,7 @@ export async function startMicTest(
   await ctx.resume();
 
   let graph: MicGraph;
+  let loopback: MicLoopbackHandle;
   try {
     graph = await buildMicGraph(
       rawStream,
@@ -58,18 +59,18 @@ export async function startMicTest(
       () => undefined,
       ctx,
     );
+    loopback = startMicLoopback(graph);
   } catch (err) {
     rawStream.getTracks().forEach((t) => t.stop());
     void ctx.close().catch(() => undefined);
     throw err;
   }
 
-  graph.localGainNode.connect(ctx.destination);
-
   let stopped = false;
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    loopback.stop();
     teardownMicGraph(graph);
     rawStream.getTracks().forEach((t) => t.stop());
   };
