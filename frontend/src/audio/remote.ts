@@ -2,20 +2,14 @@
 // <audio> element is muted and used only to keep the stream alive.
 // Volume can exceed 100% (WebAudio gain).
 
-import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
-
 export interface RemoteParticipantAudio {
   audioEl: HTMLAudioElement;
   gainNode: GainNode;
   limiterNode: DynamicsCompressorNode;
   sourceNode: MediaStreamAudioSourceNode | null;
   analyser: AnalyserNode;
-  monitorData: Uint8Array<ArrayBuffer>;
-  speaking: boolean;
-  speakingHoldUntil: number;
+  monitorData: Float32Array<ArrayBuffer>;
 }
-
-const SPEAKING_HOLD_MS = 250;
 
 export function createRemoteAudioContext(): AudioContext {
   const Ctor =
@@ -57,7 +51,7 @@ export function setupParticipantAudio(
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
   analyser.smoothingTimeConstant = 0;
-  const monitorData = new Uint8Array(analyser.fftSize) as Uint8Array<ArrayBuffer>;
+  const monitorData = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
 
   let sourceNode: MediaStreamAudioSourceNode | null = null;
   try {
@@ -75,8 +69,6 @@ export function setupParticipantAudio(
     sourceNode,
     analyser,
     monitorData,
-    speaking: false,
-    speakingHoldUntil: 0,
   };
 }
 
@@ -103,46 +95,6 @@ export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
   }
   audio.audioEl.pause();
   audio.audioEl.srcObject = null;
-}
-
-export interface RemoteSpeakingLoop {
-  start(
-    getMap: () => Map<string, RemoteParticipantAudio>,
-    onChange: (participantId: string, speaking: boolean) => void,
-  ): void;
-  stop(): void;
-}
-
-export function createRemoteSpeakingLoop(): RemoteSpeakingLoop {
-  let frameId: number | null = null;
-  return {
-    start(getMap, onChange) {
-      if (frameId !== null) return;
-      const tick = () => {
-        const now = performance.now();
-        const map = getMap();
-        for (const [id, audio] of map) {
-          const level = detectLevel(audio.analyser, audio.monitorData);
-          if (level > SPEAKING_THRESHOLD) {
-            audio.speakingHoldUntil = now + SPEAKING_HOLD_MS;
-          }
-          const speakingNow = audio.speakingHoldUntil > now;
-          if (speakingNow !== audio.speaking) {
-            audio.speaking = speakingNow;
-            onChange(id, speakingNow);
-          }
-        }
-        frameId = requestAnimationFrame(tick);
-      };
-      frameId = requestAnimationFrame(tick);
-    },
-    stop() {
-      if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-    },
-  };
 }
 
 export function applyParticipantGain(

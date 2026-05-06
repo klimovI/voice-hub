@@ -9,7 +9,6 @@
 import type { EngineKind } from '../types';
 import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
-import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
 export interface MicGraph {
   localAudioContext: AudioContext;
@@ -19,14 +18,12 @@ export interface MicGraph {
   localGainNode: GainNode;
   localDestinationNode: MediaStreamAudioDestinationNode;
   localMonitorAnalyser: AnalyserNode;
-  localMonitorData: Uint8Array<ArrayBuffer>;
+  localMonitorData: Float32Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
   // Active denoiser, or null when engine === 'off' or initialization
   // failed. dispose is called via this handle — mic-graph never
   // inspects which concrete engine is running.
   denoiser: DenoiserNode | null;
-  // Speaking loop handle:
-  speakingFrameId: number | null;
 }
 
 export function createLocalAudioContext(): AudioContext {
@@ -57,7 +54,9 @@ export async function buildMicGraph(
 
   const localMonitorAnalyser = localAudioContext.createAnalyser();
   localMonitorAnalyser.fftSize = 512;
-  const localMonitorData = new Uint8Array(localMonitorAnalyser.fftSize) as Uint8Array<ArrayBuffer>;
+  const localMonitorData = new Float32Array(
+    localMonitorAnalyser.fftSize,
+  ) as Float32Array<ArrayBuffer>;
 
   const localGainNode = localAudioContext.createGain();
   const localDestinationNode = localAudioContext.createMediaStreamDestination();
@@ -109,7 +108,6 @@ export async function buildMicGraph(
     localMonitorData,
     processedLocalStream: localDestinationNode.stream,
     denoiser,
-    speakingFrameId: null,
   };
 
   applySendGain(graph, sendVolumeRef);
@@ -136,11 +134,6 @@ function safeDisconnect(node: { disconnect(): void } | null | undefined): void {
 }
 
 export function teardownMicGraph(graph: MicGraph): void {
-  if (graph.speakingFrameId !== null) {
-    cancelAnimationFrame(graph.speakingFrameId);
-    graph.speakingFrameId = null;
-  }
-
   if (graph.denoiser) {
     graph.denoiser.dispose();
     graph.denoiser = null;
@@ -154,26 +147,4 @@ export function teardownMicGraph(graph: MicGraph): void {
 
   graph.processedLocalStream.getTracks().forEach((t) => t.stop());
   void graph.localAudioContext.close().catch(() => undefined);
-}
-
-export function startSpeakingLoop(
-  graph: MicGraph,
-  getSelfMuted: () => boolean,
-  _getPeerId: () => string | null,
-  onSpeakingChange: (speaking: boolean) => void,
-): void {
-  if (graph.speakingFrameId !== null) return;
-
-  const tick = () => {
-    if (!graph.localMonitorAnalyser || !graph.localMonitorData) {
-      graph.speakingFrameId = requestAnimationFrame(tick);
-      return;
-    }
-    const level = detectLevel(graph.localMonitorAnalyser, graph.localMonitorData);
-    const speakingNow = !getSelfMuted() && level > SPEAKING_THRESHOLD;
-    onSpeakingChange(speakingNow);
-    graph.speakingFrameId = requestAnimationFrame(tick);
-  };
-
-  graph.speakingFrameId = requestAnimationFrame(tick);
 }

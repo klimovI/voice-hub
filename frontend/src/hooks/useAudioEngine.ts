@@ -9,7 +9,6 @@ import {
   buildMicGraph,
   teardownMicGraph,
   applySendGain,
-  startSpeakingLoop,
   createLocalAudioContext,
   type MicGraph,
 } from '../audio/mic-graph';
@@ -18,11 +17,12 @@ import {
   setupParticipantAudio,
   teardownParticipantAudio,
   applyParticipantGain,
-  createRemoteSpeakingLoop,
   type RemoteParticipantAudio,
-  type RemoteSpeakingLoop,
 } from '../audio/remote';
+import { createSpeakingLoop, type SpeakingLoop } from '../audio/speaking-loop';
 import { preloadEngine } from '../audio/engine';
+
+const LOCAL_SPEAKING_ID = 'local';
 
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
@@ -31,8 +31,8 @@ export interface AudioEngineRef {
   remoteAudio: Map<string, RemoteParticipantAudio>;
   // one AudioContext shared across all remote participants; created lazily
   remoteAudioCtx: AudioContext | null;
-  // hook-owned RAF loop driving remote speaking detection
-  remoteSpeakingLoop: RemoteSpeakingLoop;
+  // central setInterval-driven speaking detector for local + all remotes
+  speakingLoop: SpeakingLoop;
   // stable send-volume ref for the ScriptProcessor callback
   sendVolume: number;
 }
@@ -45,7 +45,7 @@ export function useAudioEngine() {
     micGraph: null,
     remoteAudio: new Map(),
     remoteAudioCtx: null,
-    remoteSpeakingLoop: createRemoteSpeakingLoop(),
+    speakingLoop: createSpeakingLoop(),
     sendVolume: store.sendVolume,
   });
 
@@ -105,6 +105,7 @@ export function useAudioEngine() {
 
   const teardownGraph = useCallback(() => {
     const r = refs.current;
+    r.speakingLoop.unregister(LOCAL_SPEAKING_ID);
     if (r.micGraph) {
       teardownMicGraph(r.micGraph);
       r.micGraph = null;
@@ -174,7 +175,10 @@ export function useAudioEngine() {
           }
         }
       }
-      if (oldGraph) teardownMicGraph(oldGraph);
+      if (oldGraph) {
+        r.speakingLoop.unregister(LOCAL_SPEAKING_ID);
+        teardownMicGraph(oldGraph);
+      }
       return graph;
     },
     [buildGraph],
@@ -217,10 +221,15 @@ export function useAudioEngine() {
     (
       graph: MicGraph,
       getSelfMuted: () => boolean,
-      getPeerId: () => string | null,
+      _getPeerId: () => string | null,
       onSpeakingChange: (speaking: boolean) => void,
     ) => {
-      startSpeakingLoop(graph, getSelfMuted, getPeerId, onSpeakingChange);
+      refs.current.speakingLoop.register(LOCAL_SPEAKING_ID, {
+        analyser: graph.localMonitorAnalyser,
+        data: graph.localMonitorData,
+        getMuted: getSelfMuted,
+        onChange: onSpeakingChange,
+      });
     },
     [],
   );
@@ -248,6 +257,7 @@ export function useAudioEngine() {
       // Tear down existing audio for this participant if present.
       const existing = r.remoteAudio.get(participantId);
       if (existing) {
+        r.speakingLoop.unregister(participantId);
         teardownParticipantAudio(existing);
       }
       // Create the shared remote AudioContext lazily on first attach.
@@ -257,18 +267,19 @@ export function useAudioEngine() {
       const audio = setupParticipantAudio(r.remoteAudioCtx, stream);
       r.remoteAudio.set(participantId, audio);
       applyAllRemoteGains();
-      // useStore.getState() inside the RAF callback is intentional: this is a
+      // useStore.getState() inside the tick callback is intentional: this is a
       // periodic snapshot read, not a reactive subscription. Audio modules
       // must not re-render on store changes.
-      r.remoteSpeakingLoop.start(
-        () => refs.current.remoteAudio,
-        (id, speaking) => {
-          const current = useStore.getState().participants.get(id);
+      r.speakingLoop.register(participantId, {
+        analyser: audio.analyser,
+        data: audio.monitorData,
+        onChange: (speaking) => {
+          const current = useStore.getState().participants.get(participantId);
           if (current && current.speaking !== speaking) {
-            useStore.getState().updateParticipant(id, { speaking });
+            useStore.getState().updateParticipant(participantId, { speaking });
           }
         },
-      );
+      });
     },
     [applyAllRemoteGains],
   );
@@ -277,6 +288,7 @@ export function useAudioEngine() {
     const r = refs.current;
     const audio = r.remoteAudio.get(participantId);
     if (audio) {
+      r.speakingLoop.unregister(participantId);
       teardownParticipantAudio(audio);
       r.remoteAudio.delete(participantId);
     }
@@ -284,7 +296,9 @@ export function useAudioEngine() {
 
   const cleanupAllRemote = useCallback(() => {
     const r = refs.current;
-    r.remoteSpeakingLoop.stop();
+    for (const id of r.remoteAudio.keys()) {
+      r.speakingLoop.unregister(id);
+    }
     for (const audio of r.remoteAudio.values()) {
       teardownParticipantAudio(audio);
     }
