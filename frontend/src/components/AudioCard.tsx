@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
 import { DENOISERS, DENOISER_IDS } from '../audio/denoisers/registry';
 import type { DenoiserId } from '../audio/denoisers/types';
-import { startMicTest, type MicTestHandle } from '../audio/mic-test';
-import { detectLevel } from '../audio/level-detect';
-import type { MicGraph } from '../audio/mic-graph';
 
 type DenoiserVariant = DenoiserId;
-type MicTestMode = 'standalone' | 'voice';
 
 const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = DENOISER_IDS.map((id) => ({
   value: id,
@@ -20,8 +16,6 @@ interface Props {
   onMicDeviceSelect: (deviceId: string | null) => void;
   onSendVolumeChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
-  onVoiceMicTestStart: () => MicGraph;
-  onVoiceMicTestStop: () => void;
   onReset: () => void;
 }
 
@@ -63,34 +57,14 @@ export function AudioCard({
   onMicDeviceSelect,
   onSendVolumeChange,
   onOutputVolumeChange,
-  onVoiceMicTestStart,
-  onVoiceMicTestStop,
   onReset,
 }: Props) {
   const engine = useStore((s) => s.engine);
   const sendVolume = useStore((s) => s.sendVolume);
   const outputVolume = useStore((s) => s.outputVolume);
   const micDeviceId = useStore((s) => s.micDeviceId);
-  const joinState = useStore((s) => s.joinState);
-  const setStatus = useStore((s) => s.setStatus);
-  const voiceActive = joinState === 'joined' || joinState === 'joining';
 
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
-  const [testActive, setTestActive] = useState(false);
-  const [testLevel, setTestLevel] = useState(0);
-  const testHandleRef = useRef<MicTestHandle | null>(null);
-  const testGraphRef = useRef<MicGraph | null>(null);
-  const testModeRef = useRef<MicTestMode | null>(null);
-  const testTimeoutRef = useRef<number | null>(null);
-  const testRafRef = useRef<number | null>(null);
-  const onVoiceMicTestStartRef = useRef(onVoiceMicTestStart);
-  const onVoiceMicTestStopRef = useRef(onVoiceMicTestStop);
-
-  useEffect(() => {
-    onVoiceMicTestStartRef.current = onVoiceMicTestStart;
-    onVoiceMicTestStopRef.current = onVoiceMicTestStop;
-  }, [onVoiceMicTestStart, onVoiceMicTestStop]);
-
   // Remembers the last non-off engine so toggling the switch back on restores
   // the chosen variant rather than resetting to the default.
   const [lastVariant, setLastVariant] = useState<DenoiserVariant>(
@@ -137,85 +111,6 @@ export function AudioCard({
   }, [micDeviceId, micDevices, onMicDeviceSelect]);
 
   const showMicPicker = micDevices.length > 1;
-
-  const startGenRef = useRef(0);
-
-  const stopTest = useCallback(() => {
-    startGenRef.current += 1;
-    if (testTimeoutRef.current !== null) {
-      window.clearTimeout(testTimeoutRef.current);
-      testTimeoutRef.current = null;
-    }
-    if (testRafRef.current !== null) {
-      cancelAnimationFrame(testRafRef.current);
-      testRafRef.current = null;
-    }
-    if (testModeRef.current === 'voice') {
-      onVoiceMicTestStopRef.current();
-    } else {
-      testHandleRef.current?.stop();
-    }
-    testHandleRef.current = null;
-    testGraphRef.current = null;
-    testModeRef.current = null;
-    setTestActive(false);
-    setTestLevel(0);
-  }, []);
-
-  const watchTestLevel = useCallback((graph: MicGraph) => {
-    const tick = () => {
-      setTestLevel(detectLevel(graph.localMonitorAnalyser, graph.localMonitorData));
-      testRafRef.current = requestAnimationFrame(tick);
-    };
-    testRafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const startTest = async () => {
-    if (testModeRef.current) return;
-    const gen = ++startGenRef.current;
-    try {
-      if (voiceActive) {
-        const graph = onVoiceMicTestStartRef.current();
-        if (gen !== startGenRef.current) {
-          onVoiceMicTestStopRef.current();
-          return;
-        }
-        testModeRef.current = 'voice';
-        testGraphRef.current = graph;
-        setTestActive(true);
-        setStatus('Тест микрофона: остальные участники временно приглушены.', false, true);
-        testTimeoutRef.current = window.setTimeout(stopTest, 30000);
-        watchTestLevel(graph);
-        return;
-      }
-
-      const handle = await startMicTest(engine, () => useStore.getState().sendVolume, micDeviceId);
-      if (gen !== startGenRef.current) {
-        handle.stop();
-        return;
-      }
-      testModeRef.current = 'standalone';
-      testHandleRef.current = handle;
-      testGraphRef.current = handle.graph;
-      setTestActive(true);
-      testTimeoutRef.current = window.setTimeout(stopTest, 30000);
-      watchTestLevel(handle.graph);
-    } catch (err) {
-      if (gen !== startGenRef.current) return;
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`Не удалось начать тест микрофона: ${msg}`, true);
-    }
-  };
-
-  useEffect(() => {
-    if (testModeRef.current === 'standalone') stopTest();
-  }, [engine, micDeviceId, stopTest]);
-
-  useEffect(() => {
-    if (!voiceActive && testModeRef.current === 'voice') stopTest();
-  }, [voiceActive, stopTest]);
-
-  useEffect(() => () => stopTest(), [stopTest]);
 
   return (
     <section className="card grid gap-5 p-6">
@@ -317,39 +212,6 @@ export function AudioCard({
           onChange={(e) => onSendVolumeChange(Number(e.target.value))}
           className="vh-range"
         />
-      </div>
-
-      <div className="grid gap-2">
-        <button
-          type="button"
-          onClick={testActive ? stopTest : startTest}
-          className="btn btn-secondary"
-          aria-pressed={testActive}
-        >
-          {testActive ? 'Остановить тест' : 'Тест микрофона'}
-        </button>
-        {testActive && (
-          <>
-            <div
-              className="h-1 bg-bg-input border border-line overflow-hidden"
-              role="meter"
-              aria-label="Уровень микрофона"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.min(100, Math.round(testLevel * 400))}
-            >
-              <div
-                className="h-full bg-accent transition-[width] duration-75"
-                style={{ width: `${Math.min(100, testLevel * 400)}%` }}
-              />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted">
-              {testModeRef.current === 'voice'
-                ? 'Остальные участники временно приглушены'
-                : 'Используйте наушники для точного теста'}
-            </p>
-          </>
-        )}
       </div>
 
       <div className="grid gap-2">

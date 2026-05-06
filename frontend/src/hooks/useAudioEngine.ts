@@ -11,9 +11,7 @@ import {
   applySendGain,
   startSpeakingLoop,
   createLocalAudioContext,
-  startMicLoopback,
   type MicGraph,
-  type MicLoopbackHandle,
 } from '../audio/mic-graph';
 import {
   createRemoteAudioContext,
@@ -29,8 +27,6 @@ import { preloadEngine } from '../audio/engine';
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
   micGraph: MicGraph | null;
-  micLoopback: MicLoopbackHandle | null;
-  remotePlaybackSuppressed: boolean;
   // per-participant audio nodes keyed by participant id
   remoteAudio: Map<string, RemoteParticipantAudio>;
   // one AudioContext shared across all remote participants; created lazily
@@ -47,8 +43,6 @@ export function useAudioEngine() {
   const refs = useRef<AudioEngineRef>({
     rawLocalStream: null,
     micGraph: null,
-    micLoopback: null,
-    remotePlaybackSuppressed: false,
     remoteAudio: new Map(),
     remoteAudioCtx: null,
     remoteSpeakingLoop: createRemoteSpeakingLoop(),
@@ -109,28 +103,13 @@ export function useAudioEngine() {
     [setStatus],
   );
 
-  const stopMicLoopback = useCallback(() => {
-    const r = refs.current;
-    r.micLoopback?.stop();
-    r.micLoopback = null;
-  }, []);
-
-  const startMicLoopbackForCurrentGraph = useCallback(() => {
-    const r = refs.current;
-    if (!r.micGraph) throw new Error('No active mic graph');
-    stopMicLoopback();
-    r.micLoopback = startMicLoopback(r.micGraph);
-    return r.micGraph;
-  }, [stopMicLoopback]);
-
   const teardownGraph = useCallback(() => {
     const r = refs.current;
-    stopMicLoopback();
     if (r.micGraph) {
       teardownMicGraph(r.micGraph);
       r.micGraph = null;
     }
-  }, [stopMicLoopback]);
+  }, []);
 
   const prepareLocalAudio = useCallback(
     async (engine: EngineKind, onProgress?: (stage: 'mic-ready') => void) => {
@@ -164,7 +143,6 @@ export function useAudioEngine() {
       // compile (esp. on first switch to v2: ~5 MB worklet bundle), and some
       // peers don't recover when the new track arrives.
       const r = refs.current;
-      stopMicLoopback();
       const oldGraph = r.micGraph;
       r.micGraph = null;
       let graph: MicGraph;
@@ -199,7 +177,7 @@ export function useAudioEngine() {
       if (oldGraph) teardownMicGraph(oldGraph);
       return graph;
     },
-    [buildGraph, stopMicLoopback],
+    [buildGraph],
   );
 
   const switchMicDevice = useCallback(
@@ -258,19 +236,11 @@ export function useAudioEngine() {
         audio,
         outputVolume,
         deafened,
-        r.remotePlaybackSuppressed || (p?.localMuted ?? false),
+        p?.localMuted ?? false,
         p?.localVolume ?? 100,
       );
     }
   }, []);
-
-  const setRemotePlaybackSuppressed = useCallback(
-    (suppressed: boolean) => {
-      refs.current.remotePlaybackSuppressed = suppressed;
-      applyAllRemoteGains();
-    },
-    [applyAllRemoteGains],
-  );
 
   const attachRemoteStream = useCallback(
     (participantId: string, stream: MediaStream) => {
@@ -314,7 +284,6 @@ export function useAudioEngine() {
 
   const cleanupAllRemote = useCallback(() => {
     const r = refs.current;
-    r.remotePlaybackSuppressed = false;
     r.remoteSpeakingLoop.stop();
     for (const audio of r.remoteAudio.values()) {
       teardownParticipantAudio(audio);
@@ -339,9 +308,6 @@ export function useAudioEngine() {
     teardownGraph,
     updateSendGain,
     startSpeaking,
-    startMicLoopbackForCurrentGraph,
-    stopMicLoopback,
-    setRemotePlaybackSuppressed,
     attachRemoteStream,
     detachRemoteStream,
     applyAllRemoteGains,

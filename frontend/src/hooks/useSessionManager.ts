@@ -64,10 +64,6 @@ export type UseSessionManagerReturn = {
    * before calling. Throws on failure; caller wraps in try/catch.
    */
   switchMicDevice: () => Promise<void>;
-  /** Start local-only loopback from the active voice mic graph. */
-  startVoiceMicTest: () => MicGraph;
-  /** Stop local-only loopback and restore participant playback. */
-  stopVoiceMicTest: () => void;
   /**
    * Sync the display name to the SFU and update the self-participant in the
    * store. No-op when not joined.
@@ -178,26 +174,8 @@ export function useSessionManager({
     [audio, store],
   );
 
-  const stopVoiceMicTest = useCallback((): void => {
-    audio.stopMicLoopback();
-    audio.setRemotePlaybackSuppressed(false);
-  }, [audio]);
-
-  const startVoiceMicTest = useCallback((): MicGraph => {
-    const graph = micGraphRef.current;
-    if (!graph) throw new Error('No active mic graph');
-    audio.setRemotePlaybackSuppressed(true);
-    try {
-      return audio.startMicLoopbackForCurrentGraph();
-    } catch (err) {
-      audio.setRemotePlaybackSuppressed(false);
-      throw err;
-    }
-  }, [audio]);
-
   const switchEngine = useCallback(
     async (engine: EngineKind): Promise<void> => {
-      stopVoiceMicTest();
       const graph = await audio.rebuildLocalAudio(
         engine,
         useStore.getState().selfMuted,
@@ -207,16 +185,15 @@ export function useSessionManager({
       micGraphRef.current = graph;
       attachSpeakingLoop(graph);
     },
-    [audio, sfu, attachSpeakingLoop, stopVoiceMicTest],
+    [audio, sfu, attachSpeakingLoop],
   );
 
   const switchMicDevice = useCallback(async (): Promise<void> => {
-    stopVoiceMicTest();
     const s = useStore.getState();
     const graph = await audio.switchMicDevice(s.engine, s.selfMuted, () => sfu.getPeerConnection());
     micGraphRef.current = graph;
     attachSpeakingLoop(graph);
-  }, [audio, sfu, attachSpeakingLoop, stopVoiceMicTest]);
+  }, [audio, sfu, attachSpeakingLoop]);
 
   const setRemoteDisplayName = useCallback(
     (name: string): void => {
@@ -294,7 +271,6 @@ export function useSessionManager({
           reconnectSchedulerRef.current.reset();
           throw new Error('mic graph gone');
         }
-        stopVoiceMicTest();
         sfu.disconnect();
         audio.cleanupAllRemote();
         store.clearParticipants();
@@ -437,7 +413,6 @@ export function useSessionManager({
   const handleLeave = useCallback(() => {
     userLeavingRef.current = true;
     reconnectSchedulerRef.current.reset();
-    stopVoiceMicTest();
     sfu.disconnect();
     audio.fullCleanup();
     micGraphRef.current = null;
@@ -458,7 +433,7 @@ export function useSessionManager({
     store.setSelfMuted(false);
     store.setDeafened(false);
     store.setStatus('Отключено');
-  }, [sfu, audio, store, stopVoiceMicTest]);
+  }, [sfu, audio, store]);
 
   // ---- Join ----
 
@@ -602,8 +577,6 @@ export function useSessionManager({
     setMicEnabled,
     switchEngine,
     switchMicDevice,
-    startVoiceMicTest,
-    stopVoiceMicTest,
     setRemoteDisplayName,
     sendSetState,
     sendChat,

@@ -270,8 +270,6 @@ export function App() {
               onMicDeviceSelect={handleMicDeviceSelect}
               onSendVolumeChange={handleSendVolumeChange}
               onOutputVolumeChange={handleOutputVolumeChange}
-              onVoiceMicTestStart={session.startVoiceMicTest}
-              onVoiceMicTestStop={session.stopVoiceMicTest}
               onReset={handleAudioReset}
             />
             <HotkeyCard onStatusMessage={handleStatusMessage} />
