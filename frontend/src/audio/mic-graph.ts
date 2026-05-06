@@ -29,6 +29,10 @@ export interface MicGraph {
   speakingFrameId: number | null;
 }
 
+export type MicLoopbackHandle = {
+  stop: () => void;
+};
+
 export function createLocalAudioContext(): AudioContext {
   const AudioContextCtor =
     (window as Window & typeof globalThis).AudioContext ??
@@ -120,6 +124,26 @@ export async function buildMicGraph(
 export function applySendGain(graph: MicGraph, sendVolumeRef: () => number): void {
   const sendVolume = sendVolumeRef();
   graph.localGainNode.gain.value = sendVolume / 100;
+}
+
+export function startMicLoopback(graph: MicGraph): MicLoopbackHandle {
+  const loopbackGainNode = graph.localAudioContext.createGain();
+  graph.localGainNode.connect(loopbackGainNode);
+  loopbackGainNode.connect(graph.localAudioContext.destination);
+
+  let stopped = false;
+  return {
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        graph.localGainNode.disconnect(loopbackGainNode);
+      } catch {
+        /* ignore */
+      }
+      safeDisconnect(loopbackGainNode);
+    },
+  };
 }
 
 // Disconnects a Web Audio node, swallowing the InvalidAccessError that
