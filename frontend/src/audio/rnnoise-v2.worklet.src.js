@@ -5,8 +5,12 @@
 // so this file can use `Rnnoise` directly. Do not import anything here —
 // AudioWorkletGlobalScope rejects ESM in WebView2.
 
-const RING_CAPACITY = 4096;
+// Jitsi-style LCM ring: lcm(128 quantum, 480 frame) = 1920. Frame slots
+// {0,480,960,1440} and quantum slots {0,128,...,1792} both tile 1920 exactly,
+// so neither subarray ever crosses the wrap boundary. No copyWithin, no shifts.
 const QUANTUM = 128;
+const FRAME = 480;
+const RING_CAPACITY = 1920;
 
 class RnnoiseV2Processor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -17,14 +21,15 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
     super();
     this.ready = false;
     this.primed = false;
-    this.frameSize = 0;
     this.state = null;
     this.frame = null;
-    this.original = null;
-    this.inRing = new Float32Array(RING_CAPACITY);
-    this.outRing = new Float32Array(RING_CAPACITY);
-    this.inLen = 0;
-    this.outLen = 0;
+    this.inBuf = new Float32Array(RING_CAPACITY);
+    this.outBuf = new Float32Array(RING_CAPACITY);
+    this.writeHead = 0; // next input write position
+    this.denoisedUpTo = 0; // next frame slot to denoise (also outBuf write slot)
+    this.readHead = 0; // next output read position
+    this.buffered = 0; // unprocessed input samples in inBuf
+    this.pending = 0; // denoised samples ready in outBuf
 
     this.port.onmessage = (e) => {
       if (e.data && e.data.type === 'destroy') {
@@ -44,10 +49,12 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
   async _init() {
     try {
       const Rn = await Rnnoise.load();
+      // LCM ring sizing assumes 480 — guard against future vendor changes.
+      if (Rn.frameSize !== FRAME) {
+        throw new Error(`rnnoise frameSize ${Rn.frameSize} != expected ${FRAME}`);
+      }
       this.state = Rn.createDenoiseState();
-      this.frameSize = Rn.frameSize;
-      this.frame = new Float32Array(this.frameSize);
-      this.original = new Float32Array(this.frameSize);
+      this.frame = new Float32Array(FRAME);
       this.ready = true;
       this.port.postMessage({ type: 'ready' });
     } catch (err) {
@@ -74,49 +81,37 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
     const wet = strength;
     const dry = 1 - strength;
 
-    const frameSize = this.frameSize;
     const frame = this.frame;
-    const original = this.original;
-    const inRing = this.inRing;
-    const outRing = this.outRing;
+    const inBuf = this.inBuf;
+    const outBuf = this.outBuf;
 
-    const room = inRing.length - this.inLen;
-    const append = Math.min(input.length, room);
-    inRing.set(input.subarray(0, append), this.inLen);
-    this.inLen += append;
+    // 1. Write input quantum into inBuf. AudioWorklet always delivers exactly
+    // QUANTUM (128) samples per render, and 1920 % 128 === 0 so this never
+    // crosses the wrap boundary — single set() suffices.
+    inBuf.set(input, this.writeHead);
+    this.writeHead = (this.writeHead + QUANTUM) % RING_CAPACITY;
+    this.buffered += QUANTUM;
 
-    let consumed = 0;
-    while (this.inLen - consumed >= frameSize) {
-      // Need room for a full frame in outRing — partial writes would advance
-      // `consumed` by frameSize but only emit `writable` samples, misaligning
-      // output vs input. Stall instead; downstream pull will drain outRing.
-      if (outRing.length - this.outLen < frameSize) break;
-
-      for (let i = 0; i < frameSize; i++) {
-        const v = inRing[consumed + i];
-        original[i] = v;
-        frame[i] = v * 32768;
-      }
+    // 2. Denoise complete frames in place. inBuf slot becomes the dry source,
+    // outBuf same slot receives wet/dry mix. 1920 % 480 === 0 so frame slot
+    // never wraps either.
+    while (this.buffered >= FRAME) {
+      const slot = this.denoisedUpTo;
+      for (let i = 0; i < FRAME; i++) frame[i] = inBuf[slot + i] * 32768;
       this.state.processFrame(frame);
-
-      for (let i = 0; i < frameSize; i++) {
-        const denoised = frame[i] / 32768;
-        outRing[this.outLen + i] = denoised * wet + original[i] * dry;
+      for (let i = 0; i < FRAME; i++) {
+        outBuf[slot + i] = (frame[i] / 32768) * wet + inBuf[slot + i] * dry;
       }
-      this.outLen += frameSize;
-      consumed += frameSize;
+      this.denoisedUpTo = (slot + FRAME) % RING_CAPACITY;
+      this.buffered -= FRAME;
+      this.pending += FRAME;
     }
 
-    if (consumed > 0) {
-      const remaining = this.inLen - consumed;
-      if (remaining > 0) inRing.copyWithin(0, consumed, consumed + remaining);
-      this.inLen = remaining;
-    }
-
-    // Hold output silent until ring has frame+quantum so the bursty 480/128
-    // production cadence never underruns. One-time ~13ms latency.
+    // 3. Hold output silent until pending has FRAME+QUANTUM (608 samples)
+    // cushion so the bursty 480/128 production cadence never underruns. The
+    // gate opens after the second frame produces (~8 quanta = 21ms first-emit).
     if (!this.primed) {
-      if (this.outLen >= frameSize + QUANTUM) {
+      if (this.pending >= FRAME + QUANTUM) {
         this.primed = true;
       } else {
         output.fill(0);
@@ -124,12 +119,14 @@ class RnnoiseV2Processor extends AudioWorkletProcessor {
       }
     }
 
-    const take = Math.min(QUANTUM, this.outLen);
-    output.set(outRing.subarray(0, take), 0);
-    if (take < QUANTUM) output.fill(0, take);
-    const remaining = this.outLen - take;
-    if (remaining > 0) outRing.copyWithin(0, take, take + remaining);
-    this.outLen = remaining;
+    // 4. Emit output quantum from outBuf.
+    if (this.pending >= QUANTUM) {
+      output.set(outBuf.subarray(this.readHead, this.readHead + QUANTUM));
+      this.readHead = (this.readHead + QUANTUM) % RING_CAPACITY;
+      this.pending -= QUANTUM;
+    } else {
+      output.fill(0);
+    }
 
     return true;
   }
