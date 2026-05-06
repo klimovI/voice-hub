@@ -65,7 +65,9 @@ export function AudioCard({
   const sendVolume = useStore((s) => s.sendVolume);
   const outputVolume = useStore((s) => s.outputVolume);
   const micDeviceId = useStore((s) => s.micDeviceId);
+  const joinState = useStore((s) => s.joinState);
   const setStatus = useStore((s) => s.setStatus);
+  const voiceActive = joinState === 'joined' || joinState === 'joining';
 
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [testActive, setTestActive] = useState(false);
@@ -140,6 +142,10 @@ export function AudioCard({
 
   const startTest = async () => {
     if (testHandleRef.current) return;
+    if (voiceActive) {
+      setStatus('Тест микрофона недоступен во время голосового подключения.', true);
+      return;
+    }
     const gen = ++startGenRef.current;
     try {
       const handle = await startMicTest(engine, () => useStore.getState().sendVolume, micDeviceId);
@@ -165,8 +171,12 @@ export function AudioCard({
   };
 
   useEffect(() => {
-    if (testActive) stopTest();
-  }, [engine, micDeviceId, testActive, stopTest]);
+    if (testHandleRef.current) stopTest();
+  }, [engine, micDeviceId, stopTest]);
+
+  useEffect(() => {
+    if (voiceActive) stopTest();
+  }, [voiceActive, stopTest]);
 
   useEffect(() => stopTest, [stopTest]);
 
@@ -278,6 +288,8 @@ export function AudioCard({
           onClick={testActive ? stopTest : startTest}
           className="btn btn-secondary"
           aria-pressed={testActive}
+          disabled={voiceActive}
+          title={voiceActive ? 'Выйдите из голосового чата перед тестом микрофона' : undefined}
         >
           {testActive ? 'Остановить тест' : 'Тест микрофона'}
         </button>
