@@ -98,7 +98,7 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
 
   return (
     <div
-      className={`grid gap-3 px-4 ${participant.isSelf ? 'h-[72px] items-center' : 'py-3'} transition-[border-color,background] duration-150 ${rowClass}`}
+      className={`grid gap-3 px-4 ${participant.isSelf ? 'h-[72px] items-center' : 'py-3'} transition-[border-color,background] duration-75 ${rowClass}`}
     >
       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 items-center">
         <div

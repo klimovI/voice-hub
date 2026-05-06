@@ -1,7 +1,7 @@
 import { detectLevel, SPEAKING_THRESHOLD } from './level-detect';
 
-const TICK_MS = 150;
-const HOLD_MS = 350;
+const TICK_MS = 50;
+const HOLD_MS = 200;
 
 export type SpeakingTarget = {
   analyser: AnalyserNode;
