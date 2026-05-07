@@ -119,7 +119,7 @@ export function SessionCard({
                 volume_up
               </span>
               <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                {earOn ? 'Звук' : 'Тихо'}
+                {earOn ? 'Звук' : 'Выкл'}
               </span>
             </button>
           </div>

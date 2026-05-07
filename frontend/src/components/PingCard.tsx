@@ -20,15 +20,10 @@ function Toggle({
       aria-checked={checked}
       aria-label={ariaLabel}
       onClick={onChange}
-      className={`relative w-10 h-6 rounded-full transition-colors duration-150 shrink-0 ${
-        checked ? 'bg-accent' : 'bg-line'
-      }`}
+      className="vh-toggle"
+      data-checked={checked}
     >
-      <span
-        className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform duration-150 ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
+      <span className="vh-toggle-dot" />
     </button>
   );
 }
@@ -45,8 +40,11 @@ export function PingCard({ onPing }: Props) {
   const coolingDown = Date.now() - lastPingSentAt < 10000;
   const disabled = !hasConnection || coolingDown;
 
+  const tile =
+    'w-full flex items-center p-6 transition-colors duration-150 bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
+
   return (
-    <section className="card grid gap-4 p-6">
+    <section className="card grid gap-5 p-6">
       <h2 className="card-title">Пинг</h2>
 
       <button
@@ -55,12 +53,14 @@ export function PingCard({ onPing }: Props) {
         disabled={disabled}
         aria-label="Пингануть всех"
         onClick={onPing}
-        className={`btn ${disabled ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
+        className={`${tile} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
-        <span className="msym shrink-0" style={{ fontSize: 20 }}>
+        <span className="msym shrink-0" style={{ fontSize: 32 }}>
           notifications
         </span>
-        <span className="flex-1 text-center">Пингануть всех</span>
+        <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
+          Пингануть
+        </span>
       </button>
 
       <div className="grid gap-3">
