@@ -2,7 +2,8 @@
 
 import type { DenoiserId } from './audio/denoisers/types';
 
-export type EngineKind = 'off' | DenoiserId;
+export type CaptureEngineId = 'browser';
+export type EngineKind = 'off' | CaptureEngineId | DenoiserId;
 
 export type Role = 'admin' | 'user';
 

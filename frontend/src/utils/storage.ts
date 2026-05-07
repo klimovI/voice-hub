@@ -4,6 +4,7 @@
 
 import type { EngineKind } from '../types';
 import { DENOISER_IDS } from '../audio/denoisers/registry';
+import { CAPTURE_ENGINE_IDS } from '../audio/engine';
 
 // Legacy key, no longer written. We migrate it away on startup so users who
 // reloaded while deafened don't get stuck with output muted forever (the
@@ -194,7 +195,7 @@ export function saveOutputVolume(v: number): void {
   localStorage.setItem(KEYS.outputVolume, String(v));
 }
 
-const ENGINE_VALUES: EngineKind[] = ['off', ...DENOISER_IDS];
+const ENGINE_VALUES: EngineKind[] = ['off', ...CAPTURE_ENGINE_IDS, ...DENOISER_IDS];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);

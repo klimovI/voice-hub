@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
-import { DENOISERS, DENOISER_IDS } from '../audio/denoisers/registry';
-import type { DenoiserId } from '../audio/denoisers/types';
+import { DENOISER_IDS } from '../audio/denoisers/registry';
+import { CAPTURE_ENGINE_IDS, getEngineLabel, type ActiveEngineKind } from '../audio/engine';
 
-type DenoiserVariant = DenoiserId;
-
-const VARIANT_OPTIONS: { value: DenoiserVariant; label: string }[] = DENOISER_IDS.map((id) => ({
+const ACTIVE_ENGINE_IDS: ActiveEngineKind[] = [...CAPTURE_ENGINE_IDS, ...DENOISER_IDS];
+const VARIANT_OPTIONS: { value: ActiveEngineKind; label: string }[] = ACTIVE_ENGINE_IDS.map((id) => ({
   value: id,
-  label: DENOISERS[id].label,
+  label: getEngineLabel(id) ?? id,
 }));
 
 interface Props {
@@ -67,7 +66,7 @@ export function AudioCard({
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   // Remembers the last non-off engine so toggling the switch back on restores
   // the chosen variant rather than resetting to the default.
-  const [lastVariant, setLastVariant] = useState<DenoiserVariant>(
+  const [lastVariant, setLastVariant] = useState<ActiveEngineKind>(
     engine === 'off' ? 'rnnoise' : engine,
   );
   useEffect(() => {
@@ -177,7 +176,7 @@ export function AudioCard({
               <select
                 id="engine-variant"
                 value={engine}
-                onChange={(e) => onEngineSelect(e.target.value as DenoiserVariant)}
+                onChange={(e) => onEngineSelect(e.target.value as ActiveEngineKind)}
                 className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
                   bg-bg-input border border-line text-body cursor-pointer
                   hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"

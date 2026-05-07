@@ -3,15 +3,39 @@
 
 import type { EngineKind } from '../types';
 import { getDenoiser } from './denoisers/registry';
+import type { DenoiserId } from './denoisers/types';
+
+export type ActiveEngineKind = Exclude<EngineKind, 'off'>;
+
+const CAPTURE_ENGINE_LABELS = {
+  browser: 'Браузерное',
+} as const satisfies Record<Exclude<EngineKind, 'off' | DenoiserId>, string>;
+
+export const CAPTURE_ENGINE_IDS = Object.keys(CAPTURE_ENGINE_LABELS) as Exclude<
+  EngineKind,
+  'off' | DenoiserId
+>[];
+
+export function isCaptureEngine(engine: EngineKind): boolean {
+  return engine in CAPTURE_ENGINE_LABELS;
+}
+
+export function getEngineLabel(engine: string): string | null {
+  if (engine === 'off') return 'Выкл.';
+  if (engine in CAPTURE_ENGINE_LABELS) {
+    return CAPTURE_ENGINE_LABELS[engine as keyof typeof CAPTURE_ENGINE_LABELS];
+  }
+  return getDenoiser(engine)?.label ?? null;
+}
 
 export function preloadEngine(engine: EngineKind): Promise<void> {
-  if (engine === 'off') return Promise.resolve();
+  if (engine === 'off' || isCaptureEngine(engine)) return Promise.resolve();
   const d = getDenoiser(engine);
   return d ? d.preload() : Promise.resolve();
 }
 
 export function isEngineReady(engine: EngineKind): boolean {
-  if (engine === 'off') return true;
+  if (engine === 'off' || isCaptureEngine(engine)) return true;
   const d = getDenoiser(engine);
   // Unknown engine id (shouldn't happen — type-checked) is treated as
   // not-ready so a future bad value can't masquerade as ready.

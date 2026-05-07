@@ -1,12 +1,11 @@
-import { getDenoiser } from '../audio/denoisers/registry';
+import { getEngineLabel } from '../audio/engine';
 
 export function clampVolume(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
 export function formatEngine(engine: string): string {
-  if (engine === 'off') return 'Выкл.';
-  return getDenoiser(engine)?.label ?? engine;
+  return getEngineLabel(engine) ?? engine;
 }
 
 export function makeGuestName(): string {

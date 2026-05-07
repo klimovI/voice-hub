@@ -11,6 +11,7 @@
 // engine id.
 
 import type { EngineKind } from '../types';
+import { isCaptureEngine } from './engine';
 import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
 
@@ -74,7 +75,7 @@ export async function buildMicGraph(
   let chainTail: AudioNode = localHighPassNode;
   let denoiser: DenoiserNode | null = null;
 
-  const denoiserDef = engine === 'off' ? null : getDenoiser(engine);
+  const denoiserDef = engine === 'off' || isCaptureEngine(engine) ? null : getDenoiser(engine);
   if (denoiserDef) {
     denoiser = await denoiserDef.create(localAudioContext);
     if (denoiser) {

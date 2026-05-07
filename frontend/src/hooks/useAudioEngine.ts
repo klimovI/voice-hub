@@ -20,12 +20,21 @@ import {
   type RemoteParticipantAudio,
 } from '../audio/remote';
 import { createSpeakingLoop, type SpeakingLoop } from '../audio/speaking-loop';
-import { preloadEngine } from '../audio/engine';
+import { isCaptureEngine, preloadEngine } from '../audio/engine';
 
 const LOCAL_SPEAKING_ID = 'local';
 
+function stopStream(stream: MediaStream | null | undefined): void {
+  stream?.getTracks().forEach((t) => t.stop());
+}
+
+function getAudioSender(pc: RTCPeerConnection | null): RTCRtpSender | null {
+  return pc?.getSenders().find((s) => s.track?.kind === 'audio') ?? null;
+}
+
 export interface AudioEngineRef {
   rawLocalStream: MediaStream | null;
+  rawLocalStreamUsesBrowserNs: boolean | null;
   micGraph: MicGraph | null;
   // per-participant audio nodes keyed by participant id
   remoteAudio: Map<string, RemoteParticipantAudio>;
@@ -39,6 +48,7 @@ export function useAudioEngine() {
   const setStatus = useStore((s) => s.setStatus);
   const refs = useRef<AudioEngineRef>({
     rawLocalStream: null,
+    rawLocalStreamUsesBrowserNs: null,
     micGraph: null,
     remoteAudio: new Map(),
     remoteAudioCtx: null,
@@ -47,44 +57,55 @@ export function useAudioEngine() {
 
   // ---- Mic graph ----
 
-  const acquireMic = useCallback(async () => {
-    const r = refs.current;
-    const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === 'live');
-    if (haveLiveMic) return;
+  const openMicStream = useCallback(async (engine: EngineKind): Promise<MediaStream> => {
     const deviceId = useStore.getState().micDeviceId;
+    const useBrowserNs = isCaptureEngine(engine);
     const baseConstraints: MediaTrackConstraints = {
       channelCount: 1,
       sampleRate: 48000,
       echoCancellation: true,
-      noiseSuppression: false,
+      noiseSuppression: useBrowserNs,
       autoGainControl: true,
     };
     try {
       const audio: MediaTrackConstraints = deviceId
         ? { ...baseConstraints, deviceId: { exact: deviceId } }
         : baseConstraints;
-      r.rawLocalStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+      return await navigator.mediaDevices.getUserMedia({ audio, video: false });
     } catch (err) {
       // Saved deviceId may refer to an unplugged/revoked device. Drop the
       // pinned id and retry with system default rather than failing the join.
       if (deviceId && err instanceof Error && err.name === 'OverconstrainedError') {
         useStore.getState().setMicDeviceId(null);
-        r.rawLocalStream = await navigator.mediaDevices.getUserMedia({
+        return await navigator.mediaDevices.getUserMedia({
           audio: baseConstraints,
           video: false,
         });
-        return;
       }
       throw err;
     }
   }, []);
 
-  const buildGraph = useCallback(
-    async (engine: EngineKind, prebuiltContext?: AudioContext) => {
+  const acquireMic = useCallback(
+    async (engine: EngineKind) => {
       const r = refs.current;
-      if (!r.rawLocalStream) throw new Error('No mic stream');
+      const useBrowserNs = isCaptureEngine(engine);
+      const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === 'live');
+      if (haveLiveMic && r.rawLocalStreamUsesBrowserNs === useBrowserNs) return;
+      r.rawLocalStream?.getTracks().forEach((t) => t.stop());
+      r.rawLocalStream = await openMicStream(engine);
+      r.rawLocalStreamUsesBrowserNs = useBrowserNs;
+    },
+    [openMicStream],
+  );
+
+  const buildGraph = useCallback(
+    async (engine: EngineKind, prebuiltContext?: AudioContext, rawStream?: MediaStream) => {
+      const r = refs.current;
+      const stream = rawStream ?? r.rawLocalStream;
+      if (!stream) throw new Error('No mic stream');
       const graph = await buildMicGraph(
-        r.rawLocalStream,
+        stream,
         engine,
         () => useStore.getState().sendVolume,
         (msg, isError) => setStatus(msg, isError),
@@ -96,7 +117,7 @@ export function useAudioEngine() {
     [setStatus],
   );
 
-  const teardownGraph = useCallback(() => {
+  const clearLocalGraph = useCallback(() => {
     const r = refs.current;
     r.speakingLoop.unregister(LOCAL_SPEAKING_ID);
     if (r.micGraph) {
@@ -104,6 +125,40 @@ export function useAudioEngine() {
       r.micGraph = null;
     }
   }, []);
+
+  const clearRawMic = useCallback(() => {
+    const r = refs.current;
+    stopStream(r.rawLocalStream);
+    r.rawLocalStream = null;
+    r.rawLocalStreamUsesBrowserNs = null;
+  }, []);
+
+  const prepareRawMicForEngine = useCallback(
+    async (engine: EngineKind): Promise<{ stream: MediaStream; captureModeChanged: boolean }> => {
+      const r = refs.current;
+      const useBrowserNs = isCaptureEngine(engine);
+      const captureModeChanged = r.rawLocalStreamUsesBrowserNs !== useBrowserNs;
+      const haveLiveMic = r.rawLocalStream?.getAudioTracks().some((t) => t.readyState === 'live');
+      if (haveLiveMic && !captureModeChanged && r.rawLocalStream) {
+        return { stream: r.rawLocalStream, captureModeChanged: false };
+      }
+
+      if (captureModeChanged) {
+        clearLocalGraph();
+      }
+      clearRawMic();
+
+      const stream = await openMicStream(engine);
+      r.rawLocalStream = stream;
+      r.rawLocalStreamUsesBrowserNs = useBrowserNs;
+      return { stream, captureModeChanged };
+    },
+    [clearLocalGraph, clearRawMic, openMicStream],
+  );
+
+  const teardownGraph = useCallback(() => {
+    clearLocalGraph();
+  }, [clearLocalGraph]);
 
   const prepareLocalAudio = useCallback(
     async (engine: EngineKind, onProgress?: (stage: 'mic-ready') => void) => {
@@ -116,7 +171,7 @@ export function useAudioEngine() {
         await ctx.resume();
         return ctx;
       })();
-      const [, ctx] = await Promise.all([acquireMic(), ctxPromise]);
+      const [, ctx] = await Promise.all([acquireMic(engine), ctxPromise]);
       onProgress?.('mic-ready');
       return buildGraph(engine, ctx);
     },
@@ -130,51 +185,60 @@ export function useAudioEngine() {
       _peerId: string | null,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
-      // Build new graph BEFORE tearing down old. The SFU sender keeps a live
-      // track during the rebuild; both contexts share rawLocalStream (multiple
-      // MediaStreamAudioSourceNodes on the same stream is allowed). Tearing
-      // down first creates a dead-track window during async addModule + WASM
-      // compile (esp. on first switch to v2: ~5 MB worklet bundle), and some
-      // peers don't recover when the new track arrives.
+      // For worklet-only switches, build the new graph before tearing down
+      // the old one so the SFU sender keeps a live track. Capture-level
+      // switches (Browser NS on/off) must recreate the raw mic first because
+      // browsers often only apply native noise suppression at getUserMedia.
       const r = refs.current;
       const oldGraph = r.micGraph;
+      const { stream: rawStream, captureModeChanged } = await prepareRawMicForEngine(engine);
       r.micGraph = null;
       let graph: MicGraph;
       try {
-        graph = await buildGraph(engine);
+        graph = await buildGraph(engine, undefined, rawStream);
       } catch (err) {
-        r.micGraph = oldGraph;
+        if (captureModeChanged) {
+          clearRawMic();
+        } else {
+          r.micGraph = oldGraph;
+        }
         throw err;
       }
       const newTrack = graph.processedLocalStream.getAudioTracks()[0];
       if (!newTrack) {
         teardownMicGraph(graph);
-        r.micGraph = oldGraph;
+        if (captureModeChanged) {
+          clearRawMic();
+        } else {
+          r.micGraph = oldGraph;
+        }
         throw new Error('No audio track after rebuild');
       }
       newTrack.enabled = !selfMuted;
-      const pc = getSFUPeerConnection();
-      if (pc) {
-        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
-        if (sender) {
-          try {
-            await sender.replaceTrack(newTrack);
-          } catch (err) {
-            // Sender rejected the new track — discard the freshly-built graph
-            // and restore the old one so the user keeps a working mic.
-            teardownMicGraph(graph);
+      const sender = getAudioSender(getSFUPeerConnection());
+      if (sender) {
+        try {
+          await sender.replaceTrack(newTrack);
+        } catch (err) {
+          // Sender rejected the new track — discard the freshly-built graph
+          // and restore the old one so the user keeps a working mic when
+          // possible. Capture-level switches already stopped the old mic.
+          teardownMicGraph(graph);
+          if (captureModeChanged) {
+            clearRawMic();
+          } else {
             r.micGraph = oldGraph;
-            throw err;
           }
+          throw err;
         }
       }
-      if (oldGraph) {
+      if (!captureModeChanged && oldGraph) {
         r.speakingLoop.unregister(LOCAL_SPEAKING_ID);
         teardownMicGraph(oldGraph);
       }
       return graph;
     },
-    [buildGraph],
+    [buildGraph, clearRawMic, prepareRawMicForEngine],
   );
 
   const switchMicDevice = useCallback(
@@ -183,23 +247,18 @@ export function useAudioEngine() {
       selfMuted: boolean,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
-      const r = refs.current;
       teardownGraph();
-      r.rawLocalStream?.getTracks().forEach((t) => t.stop());
-      r.rawLocalStream = null;
-      await acquireMic();
+      clearRawMic();
+      await acquireMic(engine);
       const graph = await buildGraph(engine);
       const newTrack = graph.processedLocalStream.getAudioTracks()[0];
       if (!newTrack) throw new Error('No audio track after device switch');
       newTrack.enabled = !selfMuted;
-      const pc = getSFUPeerConnection();
-      if (pc) {
-        const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
-        if (sender) await sender.replaceTrack(newTrack);
-      }
+      const sender = getAudioSender(getSFUPeerConnection());
+      if (sender) await sender.replaceTrack(newTrack);
       return graph;
     },
-    [acquireMic, buildGraph, teardownGraph],
+    [acquireMic, buildGraph, clearRawMic, teardownGraph],
   );
 
   const updateSendGain = useCallback(() => {
@@ -302,10 +361,8 @@ export function useAudioEngine() {
   const fullCleanup = useCallback(() => {
     teardownGraph();
     cleanupAllRemote();
-    const r = refs.current;
-    r.rawLocalStream?.getTracks().forEach((t) => t.stop());
-    r.rawLocalStream = null;
-  }, [teardownGraph, cleanupAllRemote]);
+    clearRawMic();
+  }, [teardownGraph, cleanupAllRemote, clearRawMic]);
 
   return {
     prepareLocalAudio,

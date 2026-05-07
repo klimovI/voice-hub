@@ -1,5 +1,7 @@
 // RNNoise AudioWorkletProcessor.
 //
+/* global AudioWorkletProcessor, Rnnoise, registerProcessor */
+
 // At build time scripts/bundle-rnnoise.mjs prepends the Shiguredo vendor
 // (with the ESM export stripped and `var Rnnoise = ...;` exposed in scope),
 // so this file can use `Rnnoise` directly. Do not import anything here —
