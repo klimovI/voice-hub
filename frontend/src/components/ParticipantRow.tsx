@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { savePeerVolume } from '../utils/storage';
 import type { ParticipantUI } from '../types';
@@ -11,7 +12,14 @@ interface Props {
 export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Props) {
   const updateParticipant = useStore((s) => s.updateParticipant);
   const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
+  const [, forceTick] = useState(0);
   const pingCoolingDown = Date.now() - lastPingSentAt < 10000;
+  useEffect(() => {
+    if (!pingCoolingDown) return;
+    const remaining = 10000 - (Date.now() - lastPingSentAt);
+    const t = window.setTimeout(() => forceTick((v) => v + 1), remaining + 50);
+    return () => clearTimeout(t);
+  }, [lastPingSentAt, pingCoolingDown]);
 
   const isLurker = Boolean(participant.chatOnly);
   const isMuted = participant.isSelf ? participant.selfMuted : participant.localMuted;
@@ -118,7 +126,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
               {initial}
             </span>
             {!pingCoolingDown && (
-              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 text-accent">
+              <span className={`absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${isLurker ? 'text-accent' : 'text-accent-ink'}`}>
                 <span className="msym" style={{ fontSize: 20 }}>
                   notifications
                 </span>
