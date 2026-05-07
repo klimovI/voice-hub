@@ -104,14 +104,14 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
       className={`grid gap-3 px-4 ${participant.isSelf ? 'h-[72px] items-center' : 'py-3'} transition-[border-color,background] duration-75 ${rowClass}`}
     >
       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 items-center">
-        {isLurker && !participant.isSelf && onPing != null ? (
+        {!participant.isSelf && onPing != null ? (
           <button
             type="button"
             disabled={pingCoolingDown}
             onClick={() => onPing(participant.id)}
             aria-label={`Пингануть ${participant.display}`}
             title={pingCoolingDown ? 'Подождите 10 с' : `Пингануть ${participant.display}`}
-            className={`group relative grid place-items-center bg-bg-3 text-muted font-extrabold text-[20px] uppercase shrink-0 border-2 border-transparent transition-[border-color] duration-150 ${pingCoolingDown ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent cursor-pointer'}`}
+            className={`group relative grid place-items-center ${isLurker ? 'bg-bg-3 text-muted' : 'bg-accent text-accent-ink'} font-extrabold text-[20px] uppercase shrink-0 border-2 border-transparent transition-[border-color] duration-150 ${avatarRing} ${pingCoolingDown ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent cursor-pointer'}`}
             style={{ width: 40, height: 40 }}
           >
             <span className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${pingCoolingDown ? '' : 'group-hover:opacity-0'}`}>

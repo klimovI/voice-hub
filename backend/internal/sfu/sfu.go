@@ -718,7 +718,7 @@ func (r *Room) handlePing(p *peer, msg protocol.Envelope) {
 	target := r.peers[pc.To]
 	r.mu.Unlock()
 
-	if target == nil || !target.chatOnly {
+	if target == nil {
 		return
 	}
 	if time.Since(p.lastPingTo[pc.To]) < 10*time.Second {
