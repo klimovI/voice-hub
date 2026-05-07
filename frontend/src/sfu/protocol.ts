@@ -150,6 +150,11 @@ export type ChatPayload = {
 
 // Discriminated union — all server→client variants
 
+export type PingPayload = {
+  from: string;
+  fromName: string;
+};
+
 export type ServerMessage =
   | { event: 'welcome'; data: WelcomePayload }
   | { event: 'peer-joined'; data: PeerInfo }
@@ -157,6 +162,7 @@ export type ServerMessage =
   | { event: 'peer-info'; data: PeerInfo }
   | { event: 'peer-state'; data: PeerStatePayload }
   | { event: 'chat'; data: ChatPayload }
+  | { event: 'ping'; data: PingPayload }
   | { event: 'offer'; data: RTCSessionDescriptionInit }
   | { event: 'candidate'; data: RTCIceCandidateInit };
 
@@ -168,7 +174,8 @@ export type ClientMessage =
   | { event: 'candidate'; data: RTCIceCandidateInit }
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
   | { event: 'set-state'; data: SetStatePayload }
-  | { event: 'chat-send'; data: ChatSendPayload };
+  | { event: 'chat-send'; data: ChatSendPayload }
+  | { event: 'ping'; data: Record<string, never> };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -297,6 +304,20 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         return null;
       }
       return { event, data: data as ChatPayload };
+    }
+
+    case 'ping': {
+      const d = data as Record<string, unknown>;
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof d.from !== 'string' ||
+        typeof d.fromName !== 'string'
+      ) {
+        console.warn("[protocol] malformed 'ping' payload:", data);
+        return null;
+      }
+      return { event, data: data as PingPayload };
     }
 
     default:

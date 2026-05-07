@@ -41,6 +41,9 @@ export const KEYS = {
   shortcut: 'voice-hub.shortcut',
   // One-shot flag set before reload so the app can auto-rejoin on startup.
   rejoinOnLoad: 'voice-hub.rejoin-on-load',
+  // Ping feature
+  pingSoundEnabled: 'voice-hub.ping-sound-enabled',
+  muteIncomingPings: 'voice-hub.mute-incoming-pings',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].

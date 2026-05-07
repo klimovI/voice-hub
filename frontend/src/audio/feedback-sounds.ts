@@ -38,3 +38,31 @@ export function playMuteSound(): void {
 export function playUnmuteSound(): void {
   playGlide(440, 880);
 }
+
+export function playPing(): void {
+  let ctx: AudioContext;
+  try {
+    const Ctor =
+      (window as Window & typeof globalThis).AudioContext ??
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    ctx = new Ctor({ sampleRate: 48000 });
+  } catch {
+    return;
+  }
+  const t0 = ctx.currentTime;
+  const TOTAL = 0.12;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, t0);
+  osc.frequency.exponentialRampToValueAtTime(1320, t0 + TOTAL * 0.4);
+  osc.frequency.setValueAtTime(1320, t0 + TOTAL * 0.4);
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(PEAK, t0 + 0.008);
+  gain.gain.linearRampToValueAtTime(0, t0 + TOTAL);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.onended = () => void ctx.close().catch(() => undefined);
+  osc.start(t0);
+  osc.stop(t0 + TOTAL + 0.02);
+}

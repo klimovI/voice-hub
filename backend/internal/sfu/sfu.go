@@ -80,6 +80,8 @@ type peer struct {
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
 
+	lastPingAt time.Time
+
 	// out is the per-peer outbound queue, drained by writeLoop. Broadcast
 	// loops enqueue here non-blocking and never wait on a slow socket; if
 	// the queue is full, the peer is treated as dead and its context is
@@ -422,6 +424,11 @@ func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws 
 }
 
 func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
+	if msg.Event == protocol.MsgTypePing {
+		r.handlePing(p)
+		return
+	}
+
 	// Lurkers may only send chat-send. Silently drop all other message types.
 	if p.chatOnly {
 		if msg.Event != "chat-send" {
@@ -693,6 +700,29 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 
 	for _, p := range all {
 		_ = p.writeRaw(env)
+	}
+}
+
+func (r *Room) handlePing(p *peer) {
+	if time.Since(p.lastPingAt) < 10*time.Second {
+		return
+	}
+	p.lastPingAt = time.Now()
+
+	payload, _ := json.Marshal(protocol.PingServer{From: p.id, FromName: p.displayName})
+	env, _ := json.Marshal(protocol.Envelope{Event: protocol.MsgTypePing, Data: payload})
+
+	r.mu.Lock()
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != p.id {
+			others = append(others, op)
+		}
+	}
+	r.mu.Unlock()
+
+	for _, op := range others {
+		_ = op.writeRaw(env)
 	}
 }
 

@@ -22,6 +22,7 @@ import {
   loadPeerVolume,
 } from '../utils/storage';
 import type { ChatPayload } from '../sfu/protocol';
+import { playPing } from '../audio/feedback-sounds';
 import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
@@ -78,6 +79,8 @@ export type UseSessionManagerReturn = {
    * Caller must have already appended the optimistic entry to the store.
    */
   sendChat: (text: string, clientMsgId: string) => void;
+  /** Send a ping to all peers in the room. No-op when not joined. */
+  sendPing: () => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
   /**
@@ -222,6 +225,8 @@ export function useSessionManager({
 
   const getRoomId = useCallback(() => roomId, [roomId]);
 
+  const pingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const persistDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schedulePersist = useCallback((): void => {
     if (persistDebounceRef.current !== null) clearTimeout(persistDebounceRef.current);
@@ -237,6 +242,10 @@ export function useSessionManager({
     },
     [sfu],
   );
+
+  const sendPing = useCallback((): void => {
+    sfu.getClient()?.sendPing();
+  }, [sfu]);
 
   const handleChatReceive = useCallback(
     (data: ChatPayload): void => {
@@ -373,6 +382,17 @@ export function useSessionManager({
           getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
         onChat: handleChatReceive,
+        onPing: ({ fromName }) => {
+          const s = useStore.getState(); // snapshot read, not subscription
+          if (s.muteIncomingPings) return;
+          s.setIncomingPing({ fromName, at: Date.now() });
+          if (pingClearRef.current !== null) clearTimeout(pingClearRef.current);
+          pingClearRef.current = setTimeout(() => {
+            pingClearRef.current = null;
+            useStore.getState().clearIncomingPing();
+          }, 4000);
+          if (s.pingSoundEnabled) playPing();
+        },
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== 'audio') return;
           getStore().upsertParticipant({ id: peerId, hasStream: true });
@@ -580,6 +600,7 @@ export function useSessionManager({
     setRemoteDisplayName,
     sendSetState,
     sendChat,
+    sendPing,
     getRoomId,
     handleChatReceive,
   };

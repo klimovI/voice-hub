@@ -20,6 +20,7 @@ import { LurkersCard } from './components/LurkersCard';
 import { ChatPanel } from './components/ChatPanel';
 import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
+import { PingToast } from './components/PingToast';
 import { useAppVersion } from './hooks/useAppVersion';
 import { useLurkerWS } from './hooks/useLurkerWS';
 
@@ -234,8 +235,16 @@ export function App() {
     [voiceActive, session, lurker],
   );
 
+  const handlePing = useCallback(() => {
+    const s = useStore.getState(); // snapshot read, not subscription
+    if (Date.now() - s.lastPingSentAt < 10000) return;
+    session.sendPing();
+    s.markPingSent();
+  }, [session]);
+
   return (
     <>
+      <PingToast />
       <main
         className="grid gap-4 mx-auto
           w-[min(1560px,100%)] px-5 pt-5 pb-12
@@ -255,6 +264,7 @@ export function App() {
               onLeave={session.leave}
               onToggleSelfMute={handleToggleSelfMute}
               onToggleDeafen={handleToggleDeafen}
+              onPing={handlePing}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
             />

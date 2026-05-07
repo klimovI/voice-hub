@@ -7,6 +7,7 @@ import {
   type PeerStatePayload,
   type ChatPayload,
   type ChatSendPayload,
+  type PingPayload,
 } from './protocol';
 
 export type SFUHandlers = {
@@ -17,6 +18,7 @@ export type SFUHandlers = {
   onPeerInfo: (data: PeerInfo) => void;
   onPeerState: (data: PeerStatePayload) => void;
   onChat: (data: ChatPayload) => void;
+  onPing: (data: PingPayload) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
   onError: (err: unknown) => void;
 };
@@ -35,6 +37,7 @@ export type SFUClient = {
   setDisplayName(name: string): void;
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
+  sendPing(): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
 };
@@ -52,6 +55,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onPeerInfo: handlers.onPeerInfo ?? noop,
     onPeerState: handlers.onPeerState ?? noop,
     onChat: handlers.onChat ?? noop,
+    onPing: handlers.onPing ?? noop,
     onTrack: handlers.onTrack ?? noop,
     onError: handlers.onError ?? noop,
   };
@@ -167,6 +171,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       case 'chat':
         on.onChat(msg.data);
         break;
+      case 'ping':
+        on.onPing(msg.data);
+        break;
       case 'offer': {
         if (!pc) return;
         await pc.setRemoteDescription(msg.data);
@@ -196,6 +203,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function sendChat(payload: ChatSendPayload): void {
     send('chat-send', payload);
+  }
+
+  function sendPing(): void {
+    send('ping', {});
   }
 
   function getPeerConnection(): RTCPeerConnection | null {
@@ -239,7 +250,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     myId = null;
   }
 
-  return { connect, disconnect, setDisplayName, sendSetState, sendChat, getPeerConnection, getId };
+  return { connect, disconnect, setDisplayName, sendSetState, sendChat, sendPing, getPeerConnection, getId };
 }
 
 // --------------------------------------------------------------------------

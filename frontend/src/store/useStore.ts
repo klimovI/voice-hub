@@ -109,6 +109,17 @@ export interface AppState {
   clearParticipants: () => void;
   updateParticipant: (id: string, patch: Partial<ParticipantUI>) => void;
 
+  // Ping feature
+  pingSoundEnabled: boolean;
+  setPingSoundEnabled: (v: boolean) => void;
+  muteIncomingPings: boolean;
+  setMuteIncomingPings: (v: boolean) => void;
+  incomingPing: { fromName: string; at: number } | null;
+  setIncomingPing: (p: { fromName: string; at: number }) => void;
+  clearIncomingPing: () => void;
+  lastPingSentAt: number;
+  markPingSent: () => void;
+
   // Chat — per-room message history. roomId matches the SFU room / host.
   chatByRoom: Record<string, ChatMessage[]>;
   // Load persisted history for a room on join.
@@ -189,6 +200,26 @@ export const useStore = create<AppState>((set, get) => ({
       statusState: isError ? 'err' : currentJoined ? 'ok' : 'idle',
     });
   },
+
+  pingSoundEnabled: loadBoolean(KEYS.pingSoundEnabled, true),
+  setPingSoundEnabled: (v) => {
+    saveBoolean(KEYS.pingSoundEnabled, v);
+    set({ pingSoundEnabled: v });
+  },
+  muteIncomingPings: loadBoolean(KEYS.muteIncomingPings, false),
+  setMuteIncomingPings: (v) => {
+    saveBoolean(KEYS.muteIncomingPings, v);
+    set({ muteIncomingPings: v });
+  },
+  incomingPing: null,
+  setIncomingPing: (p) =>
+    set((s) => {
+      if (s.muteIncomingPings) return {};
+      return { incomingPing: p };
+    }),
+  clearIncomingPing: () => set({ incomingPing: null }),
+  lastPingSentAt: 0,
+  markPingSent: () => set({ lastPingSentAt: Date.now() }),
 
   participants: new Map(),
   upsertParticipant: (partial) => {

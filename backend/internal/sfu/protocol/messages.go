@@ -131,6 +131,20 @@ type PeerStatePayload struct {
 
 // --- Text chat ---
 
+// MsgTypePing is the event name for the ping signaling message (both C→S and S→C).
+const MsgTypePing = "ping"
+
+// PingClient is the payload of the C→S "ping" message. No fields; sender is
+// derived from the peer session.
+type PingClient struct{}
+
+// PingServer is the payload of the S→C "ping" broadcast sent to all peers
+// except the sender.
+type PingServer struct {
+	From     string `json:"from"`
+	FromName string `json:"fromName"`
+}
+
 // ChatMaxBytes is the maximum allowed UTF-8 byte length for a chat message
 // text field. 2000 bytes matches Discord's well-understood limit, fits
 // comfortably in a single WebSocket frame, and keeps server logs readable.

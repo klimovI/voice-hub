@@ -55,6 +55,10 @@ export function AudioCard({
   const sendVolume = useStore((s) => s.sendVolume);
   const outputVolume = useStore((s) => s.outputVolume);
   const micDeviceId = useStore((s) => s.micDeviceId);
+  const pingSoundEnabled = useStore((s) => s.pingSoundEnabled);
+  const muteIncomingPings = useStore((s) => s.muteIncomingPings);
+  const setPingSoundEnabled = useStore((s) => s.setPingSoundEnabled);
+  const setMuteIncomingPings = useStore((s) => s.setMuteIncomingPings);
 
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   // Remembers the last non-off engine so toggling the switch back on restores
@@ -217,6 +221,24 @@ export function AudioCard({
           value={outputVolume}
           onChange={(e) => onOutputVolumeChange(Number(e.target.value))}
           className="vh-range"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <span className="section-label">Звук пинга</span>
+        <Toggle
+          checked={pingSoundEnabled}
+          onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
+          ariaLabel="Звук пинга"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <span className="section-label">Не показывать пинги</span>
+        <Toggle
+          checked={muteIncomingPings}
+          onChange={() => setMuteIncomingPings(!muteIncomingPings)}
+          ariaLabel="Не показывать пинги"
         />
       </div>
     </section>
