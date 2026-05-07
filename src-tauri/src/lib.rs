@@ -109,6 +109,9 @@ pub fn run() {
                         }
                     }
                     if *focused {
+                        if let Err(e) = tray_flash::revert_if_active(window.app_handle()) {
+                            log::warn!("focus: tray_flash revert failed: {e}");
+                        }
                         let app = window.app_handle().clone();
                         tauri::async_runtime::spawn(async move {
                             updater::check_on_focus(app).await;

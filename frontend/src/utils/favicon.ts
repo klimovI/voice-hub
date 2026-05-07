@@ -1,22 +1,28 @@
-// Browser tab attention cue: swap favicon to alert variant for ~4s.
-// No-op if the SVG link isn't found.
+// Browser tab attention cue: swap favicon to alert variant until window gains
+// focus. No-op when window is already focused (user is looking).
 
 const ALERT_SRC = '/favicon-alert.svg';
 const NORMAL_SRC = '/favicon.svg';
-const DURATION_MS = 4000;
 
-let timer: number | null = null;
+let active = false;
 
 function getLink(): HTMLLinkElement | null {
   return document.querySelector("link[rel='icon'][type='image/svg+xml']");
 }
 
-export function flashFavicon(): void {
+function setIcon(src: string): void {
   const l = getLink();
-  if (l) l.href = ALERT_SRC;
-  if (timer !== null) clearTimeout(timer);
-  timer = window.setTimeout(() => {
-    timer = null;
-    if (l) l.href = NORMAL_SRC;
-  }, DURATION_MS);
+  if (l) l.href = src;
+}
+
+window.addEventListener('focus', () => {
+  if (!active) return;
+  setIcon(NORMAL_SRC);
+  active = false;
+});
+
+export function flashFavicon(): void {
+  if (document.hasFocus()) return;
+  setIcon(ALERT_SRC);
+  active = true;
 }
