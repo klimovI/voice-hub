@@ -2,6 +2,8 @@
 package middleware
 
 import (
+	"context"
+	"crypto/hmac"
 	"log"
 	"net/http"
 	"net/netip"
@@ -46,7 +48,7 @@ func AccessLog(trusted []netip.Prefix, next http.Handler) http.Handler {
 // (login page, favicons, Vite bundles) pass through without a cookie.
 // Unauthenticated requests to gated paths are redirected to /login.html.
 // User sessions whose ConnPass generation has drifted are also rejected.
-func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, next http.Handler) http.Handler {
+func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, adminVer string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// connect.html is Tauri-only; hide it from browser consumers.
 		if r.URL.Path == "/connect.html" {
@@ -63,7 +65,7 @@ func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, next http.Hand
 			next.ServeHTTP(w, r)
 			return
 		}
-		if auth.Authenticated(secret, connPass, r) {
+		if auth.Authenticated(secret, connPass, adminVer, r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -73,9 +75,9 @@ func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, next http.Hand
 
 // RequireAuthAPI gates API routes behind a valid session.
 // Returns 401 for unauthenticated requests (no redirect).
-func RequireAuthAPI(secret []byte, connPass *auth.ConnPassStore, next http.Handler) http.Handler {
+func RequireAuthAPI(secret []byte, connPass *auth.ConnPassStore, adminVer string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if auth.Authenticated(secret, connPass, r) {
+		if auth.Authenticated(secret, connPass, adminVer, r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -83,16 +85,41 @@ func RequireAuthAPI(secret []byte, connPass *auth.ConnPassStore, next http.Handl
 	})
 }
 
-// RequireAdmin gates a handler behind a valid admin-role session.
-// ConnPass is not threaded here because admin sessions are independent of it.
-func RequireAdmin(secret []byte, next http.Handler) http.Handler {
+// RequireAdmin gates a handler behind a valid admin-role session whose
+// embedded AdminVersion matches adminVer. Mismatch -> 403, so rotating
+// APP_ADMIN_PASSWORD via redeploy invalidates every old admin cookie.
+func RequireAdmin(secret []byte, adminVer string, next http.Handler) http.Handler {
+	want := []byte(adminVer)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.SessionFromRequest(secret, r)
 		if !ok || sess.Role != auth.RoleAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		if !hmac.Equal([]byte(sess.AdminVersion), want) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// TrackWS registers each /ws connection in registry under the session role
+// and wraps the request with a cancellable child context. The admin
+// "Disconnect users" endpoint cancels role==user contexts via the registry.
+// Must run inside RequireAuthAPI so a valid session is guaranteed.
+func TrackWS(secret []byte, registry *auth.WSRegistry, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.SessionFromRequest(secret, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		id := registry.Add(sess.Role, cancel)
+		defer registry.Remove(id)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

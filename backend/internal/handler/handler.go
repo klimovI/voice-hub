@@ -105,7 +105,7 @@ func Version(version string) http.HandlerFunc {
 // then the connection password, and issues a signed session cookie on success.
 // trusted is the proxy CIDR list — it controls which RemoteAddr values are
 // allowed to set X-Forwarded-For for rate-limit keying.
-func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter, trusted []netip.Prefix) http.HandlerFunc {
+func Login(adminPassword, adminVer string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter, trusted []netip.Prefix) http.HandlerFunc {
 	wantAdmin := []byte(adminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -132,7 +132,7 @@ func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPa
 		// Admin first; constant-time compare to avoid timing leak on length.
 		if subtle.ConstantTimeCompare([]byte(pass), wantAdmin) == 1 {
 			limiter.Success(ip)
-			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleAdmin, 0)
+			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleAdmin, 0, adminVer)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -140,7 +140,7 @@ func Login(adminPassword string, cookieSecure bool, sessionSecret []byte, connPa
 		// Then connection password.
 		if connPass.Verify(pass) {
 			limiter.Success(ip)
-			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleUser, connPass.Generation())
+			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleUser, connPass.Generation(), "")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -254,6 +254,21 @@ func ConnPassRevoke(connPass *auth.ConnPassStore) http.HandlerFunc {
 			http.Error(w, "revoke failed", http.StatusInternalServerError)
 			return
 		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// DisconnectUsers cancels every active /ws connection with role==user.
+// Admin connections and the connection password are untouched, so a user
+// whose cookie is still valid can reconnect — pair with ConnPassRevoke to
+// lock new logins.
+func DisconnectUsers(registry *auth.WSRegistry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		registry.DisconnectUsers()
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

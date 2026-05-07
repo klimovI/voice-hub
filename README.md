@@ -40,7 +40,7 @@ docker compose -f docker-compose.dev.yml up -d --build
 ### Разработка фронта (бэк в докере, фронт локально с HMR)
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d app   # бэк на :8080
+docker compose -f docker-compose.dev.yml up -d app --build   # бэк на :8080
 cd frontend && npm install && npm run dev            # vite на :5173
 ```
 

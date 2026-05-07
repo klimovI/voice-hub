@@ -11,6 +11,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"voice-hub/backend/internal/auth"
 )
 
 // loopbackTrusted matches what config.DefaultTrustedProxies returns; mirrored
@@ -97,6 +100,109 @@ func TestClientIP(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// End-to-end check that the disconnect-users path actually cancels live
+// /ws-style handlers: hit RequireAuthAPI -> TrackWS -> a blocking handler
+// with both a user and an admin cookie, then call WSRegistry.DisconnectUsers
+// and assert the user handler unblocks while the admin handler stays running.
+// Catches regressions where TrackWS forgets to thread the child context, the
+// registry is wired with the wrong role, or RequireAuthAPI rejects a freshly
+// minted cookie.
+func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	const adminVer = "av-current"
+	connPass, err := auth.LoadConnPassStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("connpass store: %v", err)
+	}
+	registry := auth.NewWSRegistry()
+
+	type result struct{ entered, exited chan struct{} }
+	user := result{entered: make(chan struct{}, 1), exited: make(chan struct{}, 1)}
+	admin := result{entered: make(chan struct{}, 1), exited: make(chan struct{}, 1)}
+
+	pickResult := func(r *http.Request) result {
+		sess, _ := auth.SessionFromRequest(secret, r)
+		if sess.Role == auth.RoleAdmin {
+			return admin
+		}
+		return user
+	}
+
+	blocking := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		res := pickResult(r)
+		res.entered <- struct{}{}
+		<-r.Context().Done()
+		res.exited <- struct{}{}
+	})
+	chain := RequireAuthAPI(secret, connPass, adminVer, TrackWS(secret, registry, blocking))
+	srv := httptest.NewServer(chain)
+	t.Cleanup(srv.Close)
+
+	cookieFor := func(role auth.Role, av string) *http.Cookie {
+		return &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, role, 0, av, time.Hour)}
+	}
+
+	mkReq := func(c *http.Cookie) *http.Request {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+		req.AddCookie(c)
+		return req
+	}
+
+	go func() { _, _ = http.DefaultClient.Do(mkReq(cookieFor(auth.RoleUser, ""))) }()
+	go func() { _, _ = http.DefaultClient.Do(mkReq(cookieFor(auth.RoleAdmin, adminVer))) }()
+
+	waitFor := func(ch chan struct{}, label string) {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s", label)
+		}
+	}
+	waitFor(user.entered, "user handler entry")
+	waitFor(admin.entered, "admin handler entry")
+
+	if got := registry.DisconnectUsers(); got != 1 {
+		t.Fatalf("DisconnectUsers returned %d, want 1", got)
+	}
+	waitFor(user.exited, "user handler exit after disconnect")
+
+	select {
+	case <-admin.exited:
+		t.Fatal("admin handler exited after DisconnectUsers — must stay connected")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Drain the admin handler so the test server can shut down cleanly.
+	srv.CloseClientConnections()
+	waitFor(admin.exited, "admin handler exit on server close")
+}
+
+// A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD) must be
+// rejected by the broad RequireAuthAPI gate, not only by RequireAdmin —
+// otherwise it could still reach /api/config, /api/room/peers, /ws.
+func TestRequireAuthAPIRejectsStaleAdminCookie(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	connPass, err := auth.LoadConnPassStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("connpass store: %v", err)
+	}
+	srv := httptest.NewServer(RequireAuthAPI(secret, connPass, "av-current",
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
+	t.Cleanup(srv.Close)
+
+	stale := &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, auth.RoleAdmin, 0, "av-old", time.Hour)}
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.AddCookie(stale)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("stale admin cookie: got %d, want 401", resp.StatusCode)
 	}
 }
 

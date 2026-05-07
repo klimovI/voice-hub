@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"net/http"
 	"time"
 )
@@ -25,21 +26,28 @@ func SessionFromRequest(secret []byte, r *http.Request) (Session, bool) {
 
 // Authenticated reports whether r carries a valid, non-stale session.
 // User sessions are rejected when their recorded ConnPass generation no longer
-// matches the store (i.e. after a rotate or revoke).
-func Authenticated(secret []byte, connPass *ConnPassStore, r *http.Request) bool {
+// matches the store. Admin sessions are rejected when their recorded
+// AdminVersion no longer matches adminVer — so rotating APP_ADMIN_PASSWORD
+// invalidates stale admin cookies on every gated route, not just the
+// admin-only ones.
+func Authenticated(secret []byte, connPass *ConnPassStore, adminVer string, r *http.Request) bool {
 	sess, ok := SessionFromRequest(secret, r)
 	if !ok {
 		return false
 	}
-	if sess.Role == RoleUser && sess.Generation != connPass.Generation() {
-		return false
+	switch sess.Role {
+	case RoleUser:
+		return sess.Generation == connPass.Generation()
+	case RoleAdmin:
+		return hmac.Equal([]byte(sess.AdminVersion), []byte(adminVer))
 	}
-	return true
+	return false
 }
 
-// SetSessionCookie writes a signed session cookie to w.
-func SetSessionCookie(w http.ResponseWriter, secure bool, secret []byte, role Role, spGen uint64) {
-	value := Encode(secret, role, spGen, SessionTTL)
+// SetSessionCookie writes a signed session cookie to w. adminVer is the
+// admin-password fingerprint for admin sessions, empty for user sessions.
+func SetSessionCookie(w http.ResponseWriter, secure bool, secret []byte, role Role, spGen uint64, adminVer string) {
+	value := Encode(secret, role, spGen, adminVer, SessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    value,

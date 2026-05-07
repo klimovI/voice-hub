@@ -106,7 +106,7 @@ export function AdminKeyButton() {
   }, []);
 
   const handleRevoke = useCallback(async () => {
-    if (!window.confirm('Отозвать доступ? Все пользователи будут разлогинены.')) return;
+    if (!window.confirm('Удалить пароль подключения?')) return;
     setBusy(true);
     setError(null);
     try {
@@ -115,7 +115,7 @@ export function AdminKeyButton() {
         credentials: 'same-origin',
       });
       if (!res.ok) {
-        setError('Не удалось отозвать');
+        setError('Не удалось удалить');
         return;
       }
       await refreshStatus();
@@ -125,6 +125,25 @@ export function AdminKeyButton() {
       setBusy(false);
     }
   }, [refreshStatus]);
+
+  const handleDisconnectUsers = useCallback(async () => {
+    if (!window.confirm('Отключить пользователей?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(ENDPOINT + '/disconnect-users', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        setError('Не удалось отключить');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const copy = useCallback(async (label: string, text: string) => {
     try {
@@ -189,9 +208,17 @@ export function AdminKeyButton() {
                       disabled={busy}
                       className="btn w-full justify-center text-danger border-[rgba(248,113,113,0.3)] hover:bg-[rgba(248,113,113,0.08)]"
                     >
-                      Отозвать доступ
+                      Удалить пароль
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={handleDisconnectUsers}
+                    disabled={busy}
+                    className="btn w-full justify-center text-danger border-[rgba(248,113,113,0.3)] hover:bg-[rgba(248,113,113,0.08)]"
+                  >
+                    Отключить пользователей
+                  </button>
                   <button type="button" onClick={handleClose} className="btn w-full justify-center">
                     Закрыть
                   </button>

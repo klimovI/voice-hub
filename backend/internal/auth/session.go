@@ -21,15 +21,25 @@ const (
 )
 
 type Session struct {
-	Role       Role
-	Generation uint64 // ConnPass generation at issue time; user sessions are invalidated when this drifts.
-	Expires    time.Time
+	Role         Role
+	Generation   uint64 // ConnPass generation at issue time; user sessions invalidate when this drifts.
+	AdminVersion string // Admin-password fingerprint at issue time; empty for user sessions and legacy cookies.
+	Expires      time.Time
 }
 
-// Encode serializes a session as "<exp>:<role>:<gen>.<sig>".
-func Encode(secret []byte, role Role, gen uint64, ttl time.Duration) string {
+// AdminPasswordVersion returns a base64url HMAC fingerprint of password
+// keyed by secret. Plaintext password is never stored in the cookie.
+func AdminPasswordVersion(secret []byte, password string) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("admin-password:v1:"))
+	mac.Write([]byte(password))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// Encode serializes a session as "<exp>:<role>:<gen>:<adminVer>.<sig>".
+func Encode(secret []byte, role Role, gen uint64, adminVer string, ttl time.Duration) string {
 	exp := time.Now().Add(ttl).Unix()
-	payload := strconv.FormatInt(exp, 10) + ":" + string(role) + ":" + strconv.FormatUint(gen, 10)
+	payload := strconv.FormatInt(exp, 10) + ":" + string(role) + ":" + strconv.FormatUint(gen, 10) + ":" + adminVer
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
@@ -48,8 +58,11 @@ func Decode(secret []byte, value string) (Session, error) {
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return Session{}, errors.New("bad signature")
 	}
-	parts := strings.SplitN(payload, ":", 3)
-	if len(parts) != 3 {
+	// 3-part: legacy pre-AdminVersion cookies parse with AdminVersion="".
+	// Legacy admin cookies are rejected by Authenticated/RequireAdmin via the
+	// version check; legacy user cookies stay valid until ConnPass rotates.
+	parts := strings.SplitN(payload, ":", 4)
+	if len(parts) != 3 && len(parts) != 4 {
 		return Session{}, errors.New("malformed payload")
 	}
 	expUnix, err := strconv.ParseInt(parts[0], 10, 64)
@@ -64,9 +77,13 @@ func Decode(secret []byte, value string) (Session, error) {
 	if err != nil {
 		return Session{}, errors.New("bad generation")
 	}
+	var adminVer string
+	if len(parts) == 4 {
+		adminVer = parts[3]
+	}
 	expires := time.Unix(expUnix, 0)
 	if time.Now().After(expires) {
 		return Session{}, errors.New("expired")
 	}
-	return Session{Role: role, Generation: gen, Expires: expires}, nil
+	return Session{Role: role, Generation: gen, AdminVersion: adminVer, Expires: expires}, nil
 }

@@ -67,6 +67,11 @@ func main() {
 		log.Fatalf("connpass store: %v", err)
 	}
 
+	// Sealed into admin cookies; rotating APP_ADMIN_PASSWORD requires restart,
+	// so any old admin cookie's AdminVersion will mismatch this and be rejected.
+	adminVer := auth.AdminPasswordVersion(sessionSecret, cfg.AdminPassword)
+	wsRegistry := auth.NewWSRegistry()
+
 	limiter := auth.NewAuthLimiter(10, 15*time.Minute)
 
 	// Literal IP, not AppHostname: hostname may proxy through CDN that
@@ -101,17 +106,19 @@ func main() {
 	log.Printf("frontend version: %s", version)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, http.FileServer(http.Dir(cfg.WebDir))))
+	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("/healthz", handler.Health())
 	mux.HandleFunc("/api/version", handler.Version(version))
-	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
+	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, adminVer, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
 	mux.HandleFunc("/api/logout", handler.Logout(cfg.CookieSecure))
-	mux.Handle("/ws", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, http.HandlerFunc(room.ServeWS)))
-	mux.Handle("/api/room/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.RoomPeersOf(room)))
-	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
-	mux.Handle("/api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassStatus(connPass)))
-	mux.Handle("/api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassRotate(cfg.AppHostname, connPass)))
-	mux.Handle("/api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, handler.ConnPassRevoke(connPass)))
+	mux.Handle("/ws", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
+		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(room.ServeWS))))
+	mux.Handle("/api/room/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.RoomPeersOf(room)))
+	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
+	mux.Handle("/api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
+	mux.Handle("/api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
+	mux.Handle("/api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
+	mux.Handle("/api/admin/connection-password/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
