@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "allow-shortcut",
+    "allow-attention",
     "allow-updater-app",
     "allow-connection",
     "opener:allow-open-url",
