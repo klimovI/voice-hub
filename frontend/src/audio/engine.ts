@@ -2,7 +2,7 @@
 // Lives in audio/ so non-hook callers can import without pulling a hook module.
 
 import type { EngineKind } from '../types';
-import { getDenoiser } from './denoisers/registry';
+import { DENOISERS, getDenoiser } from './denoisers/registry';
 import type { DenoiserId } from './denoisers/types';
 
 export type ActiveEngineKind = Exclude<EngineKind, 'off'>;
@@ -15,6 +15,18 @@ export const CAPTURE_ENGINE_IDS = Object.keys(CAPTURE_ENGINE_LABELS) as Exclude<
   EngineKind,
   'off' | DenoiserId
 >[];
+
+export type EngineOption = {
+  value: ActiveEngineKind;
+  label: string;
+};
+
+export const ENGINE_OPTIONS: EngineOption[] = [
+  ...CAPTURE_ENGINE_IDS.map((id) => ({ value: id, label: CAPTURE_ENGINE_LABELS[id] })),
+  ...Object.values(DENOISERS).map((d) => ({ value: d.id, label: d.label })),
+];
+
+export const ENGINE_IDS = ENGINE_OPTIONS.map((opt) => opt.value);
 
 export function isCaptureEngine(engine: EngineKind): boolean {
   return engine in CAPTURE_ENGINE_LABELS;

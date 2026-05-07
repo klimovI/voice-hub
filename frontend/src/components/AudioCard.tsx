@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
-import { DENOISER_IDS } from '../audio/denoisers/registry';
-import { CAPTURE_ENGINE_IDS, getEngineLabel, type ActiveEngineKind } from '../audio/engine';
-
-const ACTIVE_ENGINE_IDS: ActiveEngineKind[] = [...CAPTURE_ENGINE_IDS, ...DENOISER_IDS];
-const VARIANT_OPTIONS: { value: ActiveEngineKind; label: string }[] = ACTIVE_ENGINE_IDS.map((id) => ({
-  value: id,
-  label: getEngineLabel(id) ?? id,
-}));
+import { ENGINE_OPTIONS, type ActiveEngineKind } from '../audio/engine';
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -181,7 +174,7 @@ export function AudioCard({
                   bg-bg-input border border-line text-body cursor-pointer
                   hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
               >
-                {VARIANT_OPTIONS.map((opt) => (
+                {ENGINE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
