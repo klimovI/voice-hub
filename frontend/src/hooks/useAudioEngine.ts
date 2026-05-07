@@ -33,24 +33,17 @@ export interface AudioEngineRef {
   remoteAudioCtx: AudioContext | null;
   // central setInterval-driven speaking detector for local + all remotes
   speakingLoop: SpeakingLoop;
-  // stable send-volume ref for the ScriptProcessor callback
-  sendVolume: number;
 }
 
 export function useAudioEngine() {
-  const store = useStore();
-  const setStatus = store.setStatus;
+  const setStatus = useStore((s) => s.setStatus);
   const refs = useRef<AudioEngineRef>({
     rawLocalStream: null,
     micGraph: null,
     remoteAudio: new Map(),
     remoteAudioCtx: null,
     speakingLoop: createSpeakingLoop(),
-    sendVolume: store.sendVolume,
   });
-
-  // Keep refs in sync with store without triggering re-renders.
-  refs.current.sendVolume = store.sendVolume;
 
   // ---- Mic graph ----
 
@@ -93,7 +86,7 @@ export function useAudioEngine() {
       const graph = await buildMicGraph(
         r.rawLocalStream,
         engine,
-        () => refs.current.sendVolume,
+        () => useStore.getState().sendVolume,
         (msg, isError) => setStatus(msg, isError),
         prebuiltContext,
       );
@@ -212,8 +205,7 @@ export function useAudioEngine() {
   const updateSendGain = useCallback(() => {
     const r = refs.current;
     if (!r.micGraph) return;
-    // Read store directly — refs.current.sendVolume is sync'd during render,
-    // so within the same handler turn it still holds the pre-update value.
+    // Read store directly so same-turn slider updates apply immediately.
     applySendGain(r.micGraph, () => useStore.getState().sendVolume);
   }, []);
 

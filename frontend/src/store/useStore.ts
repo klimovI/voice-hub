@@ -26,6 +26,34 @@ export type ChatMessage = PersistedChatMessage;
 export type JoinState = 'idle' | 'joining' | 'joined';
 export type StatusState = 'idle' | 'ok' | 'err';
 
+function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
+  if (a.isSelf) return -1;
+  if (b.isSelf) return 1;
+  // Stable by clientId (per-install) so renames don't reorder. Fallback to
+  // peer id for peers without a clientId.
+  return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
+}
+
+function selectSortedParticipants(
+  state: AppState,
+  predicate: (participant: ParticipantUI) => boolean,
+): ParticipantUI[] {
+  return Array.from(state.participants.values()).filter(predicate).sort(compareParticipants);
+}
+
+export const selectVoiceParticipants = (state: AppState): ParticipantUI[] =>
+  selectSortedParticipants(state, (participant) => !participant.chatOnly);
+
+export const selectChatOnlyParticipants = (state: AppState): ParticipantUI[] =>
+  selectSortedParticipants(state, (participant) => Boolean(participant.chatOnly));
+
+export const selectSelfPeerId = (state: AppState): string | null => {
+  for (const [id, participant] of state.participants) {
+    if (participant.isSelf) return id;
+  }
+  return null;
+};
+
 export interface AppState {
   joinState: JoinState;
   setJoinState: (s: JoinState) => void;

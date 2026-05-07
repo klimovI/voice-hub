@@ -94,7 +94,7 @@ export function useSessionManager({
   sfu,
   onTauriToggleMute,
 }: UseSessionManagerDeps): UseSessionManagerReturn {
-  const store = useStore();
+  const getStore = useStore.getState;
 
   // Imperative refs — internal only, not exposed to callers.
   const micGraphRef = useRef<MicGraph | null>(null);
@@ -143,13 +143,13 @@ export function useSessionManager({
       }
       const pid = peerIdRef.current;
       if (pid) {
-        store.updateParticipant(pid, {
+        getStore().updateParticipant(pid, {
           selfMuted: !enabled,
           speaking: !enabled ? false : undefined,
         });
       }
     },
-    [store],
+    [getStore],
   );
 
   // Single attach point for the local-mic speaking-detect RAF loop.
@@ -166,12 +166,12 @@ export function useSessionManager({
           if (!pid) return;
           const current = useStore.getState().participants.get(pid);
           if (current && current.speaking !== speaking) {
-            store.updateParticipant(pid, { speaking });
+            getStore().updateParticipant(pid, { speaking });
           }
         },
       );
     },
-    [audio, store],
+    [audio, getStore],
   );
 
   const switchEngine = useCallback(
@@ -204,10 +204,10 @@ export function useSessionManager({
       sfu.getClient()?.setDisplayName(name);
       const pid = peerIdRef.current;
       if (pid) {
-        store.updateParticipant(pid, { display: name });
+        getStore().updateParticipant(pid, { display: name });
       }
     },
-    [sfu, store],
+    [sfu, getStore],
   );
 
   const sendSetState = useCallback(
@@ -262,7 +262,7 @@ export function useSessionManager({
       delays: RECONNECT_DELAYS_MS,
       isLeaving: () => userLeavingRef.current,
       onExhausted: () => {
-        store.setStatus('Не удалось переподключиться. Перезайдите вручную.', true, true);
+        getStore().setStatus('Не удалось переподключиться. Перезайдите вручную.', true, true);
       },
       onAttempt: async () => {
         const graph = micGraphRef.current;
@@ -273,7 +273,7 @@ export function useSessionManager({
         }
         sfu.disconnect();
         audio.cleanupAllRemote();
-        store.clearParticipants();
+        getStore().clearParticipants();
         peerIdRef.current = null;
         // connectSfuRef always points at the latest connectSfu closure.
         await connectSfuRef.current(graph, lastDisplayNameRef.current);
@@ -292,11 +292,11 @@ export function useSessionManager({
         onState: (s) => {
           if (s === 'connected') {
             reconnectSchedulerRef.current.reset();
-            store.setStatus('Подключено', false, true);
+            getStore().setStatus('Подключено', false, true);
           } else if (s === 'failed' || s === 'closed') {
             if (useStore.getState().joinState === 'joined' && !userLeavingRef.current) {
               const nextAttempt = reconnectSchedulerRef.current.attemptIndex + 1;
-              store.setStatus(
+              getStore().setStatus(
                 `Соединение оборвалось, переподключаюсь (попытка ${nextAttempt})…`,
                 true,
                 true,
@@ -310,8 +310,8 @@ export function useSessionManager({
           // Welcome is authoritative for the roster — drop any stale entries
           // from the prior connection (e.g. lurker self with old peerId) so
           // we don't end up with two `isSelf` entries.
-          store.clearParticipants();
-          store.upsertParticipant({
+          getStore().clearParticipants();
+          getStore().upsertParticipant({
             id,
             display,
             isSelf: true,
@@ -320,7 +320,7 @@ export function useSessionManager({
           });
           for (const p of peers ?? []) {
             const stored = p.clientId ? loadPeerVolume(p.clientId) : null;
-            store.upsertParticipant({
+            getStore().upsertParticipant({
               id: p.id,
               display: p.displayName ?? `peer-${p.id}`,
               clientId: p.clientId,
@@ -343,7 +343,7 @@ export function useSessionManager({
           chatOnly,
         }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
-          store.upsertParticipant({
+          getStore().upsertParticipant({
             id,
             display: peerDisplay ?? `peer-${id}`,
             clientId,
@@ -355,7 +355,7 @@ export function useSessionManager({
         },
         onPeerLeft: ({ id }) => {
           audio.detachRemoteStream(id);
-          store.removeParticipant(id);
+          getStore().removeParticipant(id);
         },
         onPeerInfo: ({ id, displayName: peerDisplay, clientId }) => {
           const patch: { display?: string; clientId?: string } = {};
@@ -366,16 +366,16 @@ export function useSessionManager({
           // overwriting with the same value is safe.
           if (clientId) patch.clientId = clientId;
           if (patch.display !== undefined || patch.clientId !== undefined) {
-            store.updateParticipant(id, patch);
+            getStore().updateParticipant(id, patch);
           }
         },
         onPeerState: ({ id, selfMuted, deafened }) => {
-          store.updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
+          getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
         onChat: handleChatReceive,
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== 'audio') return;
-          store.upsertParticipant({ id: peerId, hasStream: true });
+          getStore().upsertParticipant({ id: peerId, hasStream: true });
           audio.attachRemoteStream(peerId, stream);
         },
         onError: () => {
@@ -400,7 +400,7 @@ export function useSessionManager({
         client.sendSetState(s.selfMuted, s.deafened);
       }
     },
-    [store, audio, sfu, handleChatReceive],
+    [audio, sfu, handleChatReceive, getStore],
   );
 
   // Keep connectSfuRef in sync so the scheduler always calls the latest closure.
@@ -429,20 +429,20 @@ export function useSessionManager({
       }
     }
     useStore.setState({ participants: nextMap });
-    store.setJoinState('idle');
-    store.setSelfMuted(false);
-    store.setDeafened(false);
-    store.setStatus('Отключено');
-  }, [sfu, audio, store]);
+    getStore().setJoinState('idle');
+    getStore().setSelfMuted(false);
+    getStore().setDeafened(false);
+    getStore().setStatus('Отключено');
+  }, [sfu, audio, getStore]);
 
   // ---- Join ----
 
   const handleJoin = useCallback(
     async (name: string) => {
-      if (store.joinState === 'joined') return;
+      if (getStore().joinState === 'joined') return;
       const cfg = configRef.current;
       if (!cfg) {
-        store.setStatus('Конфигурация не загружена', true);
+        getStore().setStatus('Конфигурация не загружена', true);
         return;
       }
 
@@ -456,13 +456,13 @@ export function useSessionManager({
       reconnectSchedulerRef.current.reset();
       lastDisplayNameRef.current = display;
 
-      store.setJoinState('joining');
-      store.loadChatRoom(roomId);
-      store.setStatus('Запрашиваю микрофон…');
+      getStore().setJoinState('joining');
+      getStore().loadChatRoom(roomId);
+      getStore().setStatus('Запрашиваю микрофон…');
 
       // Hot-swap path: join with engine=off if WASM not ready yet, rebuild in
       // background so users enter the room without waiting for the vendor fetch.
-      const targetEngine = store.engine;
+      const targetEngine = getStore().engine;
       const denoiserReady = isEngineReady(targetEngine);
       const initialEngine: EngineKind = denoiserReady ? targetEngine : 'off';
       if (!denoiserReady) {
@@ -472,19 +472,19 @@ export function useSessionManager({
       try {
         const graph = await audio.prepareLocalAudio(initialEngine, (stage) => {
           if (stage === 'mic-ready' && initialEngine !== 'off') {
-            store.setStatus('Загружаю шумоподавление…');
+            getStore().setStatus('Загружаю шумоподавление…');
           }
         });
         micGraphRef.current = graph;
 
-        store.setStatus('Подключаюсь…');
+        getStore().setStatus('Подключаюсь…');
         await connectSfu(graph, display);
 
-        store.setJoinState('joined');
+        getStore().setJoinState('joined');
         if (!denoiserReady) {
-          store.setStatus('Подключено. Шумоподавление загружается…', false, true);
+          getStore().setStatus('Подключено. Шумоподавление загружается…', false, true);
         } else {
-          store.setStatus('Подключено', false, true);
+          getStore().setStatus('Подключено', false, true);
         }
 
         if (!denoiserReady) {
@@ -498,9 +498,9 @@ export function useSessionManager({
             if (s.engine !== targetEngine) return;
             try {
               await switchEngine(targetEngine);
-              store.setStatus(`Шумоподавление: ${formatEngine(targetEngine)}`, false, true);
+              getStore().setStatus(`Шумоподавление: ${formatEngine(targetEngine)}`, false, true);
             } catch (err) {
-              store.setStatus(
+              getStore().setStatus(
                 `Не удалось включить ${formatEngine(targetEngine)}: ${err instanceof Error ? err.message : String(err)}`,
                 true,
                 true,
@@ -513,10 +513,10 @@ export function useSessionManager({
         attachSpeakingLoop(graph);
       } catch (error) {
         handleLeave();
-        store.setStatus(error instanceof Error ? error.message : String(error), true);
+        getStore().setStatus(error instanceof Error ? error.message : String(error), true);
       }
     },
-    [store, audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop, roomId],
+    [audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop, roomId, getStore],
   );
 
   useEffect(() => {
@@ -533,13 +533,13 @@ export function useSessionManager({
         configRef.current = cfg;
         // Single set() so subscribers don't render with role-set-but-not-ready.
         useStore.setState({ role: cfg.role, configReady: true });
-        store.setStatus('Готово');
+        getStore().setStatus('Готово');
         if (shouldRejoin) {
           void handleJoinRef.current?.(loadOrCreateDisplayName(makeGuestName));
         }
       })
       .catch((err: unknown) => {
-        store.setStatus(err instanceof Error ? err.message : String(err), true);
+        getStore().setStatus(err instanceof Error ? err.message : String(err), true);
       });
     // Warm up the selected engine while the user fills in their name.
     preloadEngine(useStore.getState().engine);

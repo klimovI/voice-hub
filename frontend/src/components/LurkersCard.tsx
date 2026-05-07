@@ -1,16 +1,9 @@
-import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
+import { selectChatOnlyParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
 
 export function LurkersCard() {
-  const participants = useStore((s) => s.participants);
-
-  const lurkers = Array.from(participants.values())
-    .filter((p) => p.chatOnly)
-    .sort((a, b) => {
-      if (a.isSelf) return -1;
-      if (b.isSelf) return 1;
-      return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
-    });
+  const lurkers = useStore(useShallow(selectChatOnlyParticipants));
 
   if (lurkers.length === 0) return null;
 

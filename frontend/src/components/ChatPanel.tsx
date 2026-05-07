@@ -1,5 +1,13 @@
-import { useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
-import { useStore, type ChatMessage } from '../store/useStore';
+import {
+  memo,
+  useRef,
+  useMemo,
+  useEffect,
+  useState,
+  useCallback,
+  type ReactNode,
+} from 'react';
+import { selectSelfPeerId, useStore, type ChatMessage } from '../store/useStore';
 import { CHAT_MAX_BYTES } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
 import { isTauri } from '../utils/tauri';
@@ -8,6 +16,7 @@ import { isTauri } from '../utils/tauri';
 // then strip trailing punctuation and unbalanced closers (so `(see https://en.wikipedia.org/wiki/Rust_(programming_language))`
 // keeps the inner parens but drops the outer closing one).
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+const TEXT_ENCODER = new TextEncoder();
 
 function trimUrl(raw: string): string {
   let s = raw.replace(/[.,;:!?]+$/, '');
@@ -72,7 +81,7 @@ function renderText(text: string): ReactNode {
 const MAX_DISPLAY = 200;
 
 function byteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
+  return TEXT_ENCODER.encode(s).length;
 }
 
 function formatTime(ts: number): string {
@@ -84,6 +93,15 @@ interface Props {
   roomId: string;
   onSend: (text: string, clientMsgId: string) => void;
 }
+
+type VisibleMessage = {
+  msg: ChatMessage;
+  isSelf: boolean;
+  senderName: string;
+  showName: boolean;
+  showTime: boolean;
+  renderedText: ReactNode;
+};
 
 export function ChatPanel({ roomId, onSend }: Props) {
   const messages = useStore((s) => s.chatByRoom[roomId] ?? []);
@@ -97,12 +115,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
     loadChatRoom(roomId);
   }, [roomId, loadChatRoom]);
 
-  const selfPeerId = useStore((s) => {
-    for (const [id, p] of s.participants) {
-      if (p.isSelf) return id;
-    }
-    return null;
-  });
+  const selfPeerId = useStore(selectSelfPeerId);
   // Stable per-install identity — independent of join state. Lets MessageRow
   // recognise own messages even after we leave the room (when selfPeerId is null).
   const selfClientId = useRef(loadOrCreateClientId()).current;
@@ -173,7 +186,36 @@ export function ChatPanel({ roomId, onSend }: Props) {
     [handleSend],
   );
 
-  const visible = messages.slice(-MAX_DISPLAY);
+  const visible = useMemo<VisibleMessage[]>(() => {
+    const tail = messages.slice(-MAX_DISPLAY);
+    return tail.map((msg, i) => {
+      const prev = i > 0 ? tail[i - 1] : null;
+      const sameSender =
+        prev !== null &&
+        (prev.senderClientId !== undefined && msg.senderClientId !== undefined
+          ? prev.senderClientId === msg.senderClientId
+          : prev.from === msg.from);
+      const showName = !(sameSender && prev !== null && msg.ts - prev.ts < 5 * 60_000);
+      const sameMinute =
+        prev !== null && Math.floor(prev.ts / 60_000) === Math.floor(msg.ts / 60_000);
+      const showTime = showName || !sameMinute;
+      const isSelf =
+        msg.senderClientId !== undefined
+          ? msg.senderClientId === selfClientId
+          : msg.from === selfPeerId;
+      const senderName =
+        msg.senderName ?? participants.get(msg.from)?.display ?? (isSelf ? 'Вы' : 'Неизвестный');
+
+      return {
+        msg,
+        isSelf,
+        senderName,
+        showName,
+        showTime,
+        renderedText: renderText(msg.text),
+      };
+    });
+  }, [messages, participants, selfClientId, selfPeerId]);
 
   return (
     <section className="card p-0! flex flex-col" style={{ height: 691 }}>
@@ -191,29 +233,9 @@ export function ChatPanel({ roomId, onSend }: Props) {
             Сообщений пока нет
           </div>
         )}
-        {visible.map((msg, i) => {
-          const prev = i > 0 ? visible[i - 1] : null;
-          const sameSender =
-            prev !== null &&
-            (prev.senderClientId !== undefined && msg.senderClientId !== undefined
-              ? prev.senderClientId === msg.senderClientId
-              : prev.from === msg.from);
-          const showName = !(sameSender && prev !== null && msg.ts - prev.ts < 5 * 60_000);
-          const sameMinute =
-            prev !== null && Math.floor(prev.ts / 60_000) === Math.floor(msg.ts / 60_000);
-          const showTime = showName || !sameMinute;
-          return (
-            <MessageRow
-              key={msg.id}
-              msg={msg}
-              participants={participants}
-              selfPeerId={selfPeerId}
-              selfClientId={selfClientId}
-              showName={showName}
-              showTime={showTime}
-            />
-          );
-        })}
+        {visible.map((row) => (
+          <MessageRow key={row.msg.id} row={row} />
+        ))}
       </div>
 
       <div className="px-4 pb-4 pt-3 border-t border-line shrink-0">
@@ -254,30 +276,8 @@ export function ChatPanel({ roomId, onSend }: Props) {
   );
 }
 
-type MessageRowProps = {
-  msg: ChatMessage;
-  participants: Map<string, import('../types').ParticipantUI>;
-  selfPeerId: string | null;
-  selfClientId: string;
-  showName: boolean;
-  showTime: boolean;
-};
-
-function MessageRow({
-  msg,
-  participants,
-  selfPeerId,
-  selfClientId,
-  showName,
-  showTime,
-}: MessageRowProps) {
-  const isSelf =
-    msg.senderClientId !== undefined
-      ? msg.senderClientId === selfClientId
-      : msg.from === selfPeerId;
-  const senderName =
-    msg.senderName ?? participants.get(msg.from)?.display ?? (isSelf ? 'Вы' : 'Неизвестный');
-
+const MessageRow = memo(function MessageRow({ row }: { row: VisibleMessage }) {
+  const { msg, isSelf, senderName, showName, showTime, renderedText } = row;
   return (
     <div className={`px-2 ${showName ? 'pt-2' : ''} ${msg.pending ? 'opacity-50' : ''}`}>
       {showName && (
@@ -288,9 +288,7 @@ function MessageRow({
         </div>
       )}
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 items-baseline">
-        <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">
-          {renderText(msg.text)}
-        </p>
+        <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">{renderedText}</p>
         {showTime && (
           <span className="text-[11px] text-muted-2 tabular-nums shrink-0">
             {formatTime(msg.ts)}
@@ -299,4 +297,4 @@ function MessageRow({
       </div>
     </div>
   );
-}
+});

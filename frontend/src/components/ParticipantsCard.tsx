@@ -1,4 +1,5 @@
-import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
+import { selectVoiceParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
 import { usePeersPreview, type PeerPreview } from '../hooks/usePeersPreview';
 
@@ -7,25 +8,14 @@ interface Props {
 }
 
 export function ParticipantsCard({ onRemoteGainChange }: Props) {
-  const participants = useStore((s) => s.participants);
+  const participants = useStore(useShallow(selectVoiceParticipants));
   const joinState = useStore((s) => s.joinState);
   const preview = usePeersPreview();
 
-  // Voice peers only — lurkers go into a separate card.
-  const sorted = Array.from(participants.values())
-    .filter((p) => !p.chatOnly)
-    .sort((a, b) => {
-      if (a.isSelf) return -1;
-      if (b.isSelf) return 1;
-      // Stable by clientId (per-install) so renames don't reorder. Fallback to
-      // peer id for peers without a clientId.
-      return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
-    });
+  const showPreview = participants.length === 0 && joinState !== 'joined' && preview.length > 0;
+  const showEmpty = participants.length === 0 && !showPreview;
 
-  const showPreview = sorted.length === 0 && joinState !== 'joined' && preview.length > 0;
-  const showEmpty = sorted.length === 0 && !showPreview;
-
-  const liveCount = sorted.length || preview.length;
+  const liveCount = participants.length || preview.length;
 
   return (
     <section className="card p-6">
@@ -49,7 +39,7 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
           </div>
         )}
         {showPreview && preview.map((p) => <PeerPreviewRow key={p.id} peer={p} />)}
-        {sorted.map((p) => (
+        {participants.map((p) => (
           <ParticipantRow key={p.id} participant={p} onRemoteGainChange={onRemoteGainChange} />
         ))}
       </div>
