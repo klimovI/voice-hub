@@ -1,9 +1,5 @@
 import { useStore } from '../store/useStore';
 
-type Props = {
-  onPing: () => void;
-};
-
 function Toggle({
   checked,
   onChange,
@@ -28,59 +24,62 @@ function Toggle({
   );
 }
 
-export function PingCard({ onPing }: Props) {
-  const joinState = useStore((s) => s.joinState);
-  const lastPingSentAt = useStore((s) => s.lastPingSentAt);
+export function PingCard() {
   const pingSoundEnabled = useStore((s) => s.pingSoundEnabled);
   const muteIncomingPings = useStore((s) => s.muteIncomingPings);
+  const pingTrayFlashEnabled = useStore((s) => s.pingTrayFlashEnabled);
+  const pingWindowFlashEnabled = useStore((s) => s.pingWindowFlashEnabled);
   const setPingSoundEnabled = useStore((s) => s.setPingSoundEnabled);
   const setMuteIncomingPings = useStore((s) => s.setMuteIncomingPings);
+  const setPingTrayFlashEnabled = useStore((s) => s.setPingTrayFlashEnabled);
+  const setPingWindowFlashEnabled = useStore((s) => s.setPingWindowFlashEnabled);
 
-  const hasConnection = joinState === 'joined' || joinState === 'idle';
-  const coolingDown = Date.now() - lastPingSentAt < 10000;
-  const disabled = !hasConnection || coolingDown;
-
-  const tile =
-    'w-full flex items-center p-6 transition-colors duration-150 bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
+  const pingsVisible = !muteIncomingPings;
 
   return (
     <section className="card grid gap-5 p-6">
       <h2 className="card-title">Пинг</h2>
 
-      <button
-        id="ping-button"
-        type="button"
-        disabled={disabled}
-        aria-label="Пингануть всех"
-        onClick={onPing}
-        className={`${tile} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-      >
-        <span className="msym shrink-0" style={{ fontSize: 32 }}>
-          notifications
-        </span>
-        <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-          Пингануть
-        </span>
-      </button>
-
       <div className="grid gap-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="section-label">Звук пинга</span>
+          <span className="section-label">Показывать пинги</span>
           <Toggle
-            checked={pingSoundEnabled}
-            onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
-            ariaLabel="Звук пинга"
+            checked={pingsVisible}
+            onChange={() => setMuteIncomingPings(!muteIncomingPings)}
+            ariaLabel="Показывать пинги"
           />
         </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <span className="section-label">Не показывать пинги</span>
-          <Toggle
-            checked={muteIncomingPings}
-            onChange={() => setMuteIncomingPings(!muteIncomingPings)}
-            ariaLabel="Не показывать пинги"
-          />
-        </div>
+        {pingsVisible && (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <span className="section-label">Звук</span>
+              <Toggle
+                checked={pingSoundEnabled}
+                onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
+                ariaLabel="Звук пинга"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="section-label">Мигание иконки</span>
+              <Toggle
+                checked={pingTrayFlashEnabled}
+                onChange={() => setPingTrayFlashEnabled(!pingTrayFlashEnabled)}
+                ariaLabel="Мигание иконки"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="section-label">Мигание окна</span>
+              <Toggle
+                checked={pingWindowFlashEnabled}
+                onChange={() => setPingWindowFlashEnabled(!pingWindowFlashEnabled)}
+                ariaLabel="Мигание окна"
+              />
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

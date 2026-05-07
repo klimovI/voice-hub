@@ -114,11 +114,15 @@ export interface AppState {
   setPingSoundEnabled: (v: boolean) => void;
   muteIncomingPings: boolean;
   setMuteIncomingPings: (v: boolean) => void;
+  pingTrayFlashEnabled: boolean;
+  setPingTrayFlashEnabled: (v: boolean) => void;
+  pingWindowFlashEnabled: boolean;
+  setPingWindowFlashEnabled: (v: boolean) => void;
   incomingPing: { fromName: string; at: number } | null;
   setIncomingPing: (p: { fromName: string; at: number }) => void;
   clearIncomingPing: () => void;
-  lastPingSentAt: number;
-  markPingSent: () => void;
+  lastPingSentByTarget: Map<string, number>;
+  markPingSent: (targetId: string) => void;
 
   // Chat — per-room message history. roomId matches the SFU room / host.
   chatByRoom: Record<string, ChatMessage[]>;
@@ -211,6 +215,16 @@ export const useStore = create<AppState>((set, get) => ({
     saveBoolean(KEYS.muteIncomingPings, v);
     set({ muteIncomingPings: v });
   },
+  pingTrayFlashEnabled: loadBoolean(KEYS.pingTrayFlashEnabled, true),
+  setPingTrayFlashEnabled: (v) => {
+    saveBoolean(KEYS.pingTrayFlashEnabled, v);
+    set({ pingTrayFlashEnabled: v });
+  },
+  pingWindowFlashEnabled: loadBoolean(KEYS.pingWindowFlashEnabled, true),
+  setPingWindowFlashEnabled: (v) => {
+    saveBoolean(KEYS.pingWindowFlashEnabled, v);
+    set({ pingWindowFlashEnabled: v });
+  },
   incomingPing: null,
   setIncomingPing: (p) =>
     set((s) => {
@@ -218,8 +232,13 @@ export const useStore = create<AppState>((set, get) => ({
       return { incomingPing: p };
     }),
   clearIncomingPing: () => set({ incomingPing: null }),
-  lastPingSentAt: 0,
-  markPingSent: () => set({ lastPingSentAt: Date.now() }),
+  lastPingSentByTarget: new Map(),
+  markPingSent: (targetId) =>
+    set((s) => {
+      const m = new Map(s.lastPingSentByTarget);
+      m.set(targetId, Date.now());
+      return { lastPingSentByTarget: m };
+    }),
 
   participants: new Map(),
   upsertParticipant: (partial) => {

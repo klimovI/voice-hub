@@ -5,10 +5,13 @@ import type { ParticipantUI } from '../types';
 interface Props {
   participant: ParticipantUI;
   onRemoteGainChange: () => void;
+  onPing?: (targetId: string) => void;
 }
 
-export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
+export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Props) {
   const updateParticipant = useStore((s) => s.updateParticipant);
+  const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
+  const pingCoolingDown = Date.now() - lastPingSentAt < 10000;
 
   const isLurker = Boolean(participant.chatOnly);
   const isMuted = participant.isSelf ? participant.selfMuted : participant.localMuted;
@@ -101,12 +104,35 @@ export function ParticipantRow({ participant, onRemoteGainChange }: Props) {
       className={`grid gap-3 px-4 ${participant.isSelf ? 'h-[72px] items-center' : 'py-3'} transition-[border-color,background] duration-75 ${rowClass}`}
     >
       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 items-center">
-        <div
-          className={`grid place-items-center ${isLurker ? 'bg-bg-3 text-muted' : 'bg-accent text-accent-ink'} font-extrabold text-[20px] uppercase shrink-0 ${avatarRing}`}
-          style={{ width: 40, height: 40 }}
-        >
-          {initial}
-        </div>
+        {isLurker && !participant.isSelf && onPing != null ? (
+          <button
+            type="button"
+            disabled={pingCoolingDown}
+            onClick={() => onPing(participant.id)}
+            aria-label={`Пингануть ${participant.display}`}
+            title={pingCoolingDown ? 'Подождите 10 с' : `Пингануть ${participant.display}`}
+            className={`group relative grid place-items-center bg-bg-3 text-muted font-extrabold text-[20px] uppercase shrink-0 border-2 border-transparent transition-[border-color] duration-150 ${pingCoolingDown ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent cursor-pointer'}`}
+            style={{ width: 40, height: 40 }}
+          >
+            <span className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${pingCoolingDown ? '' : 'group-hover:opacity-0'}`}>
+              {initial}
+            </span>
+            {!pingCoolingDown && (
+              <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 text-accent">
+                <span className="msym" style={{ fontSize: 20 }}>
+                  notifications
+                </span>
+              </span>
+            )}
+          </button>
+        ) : (
+          <div
+            className={`grid place-items-center ${isLurker ? 'bg-bg-3 text-muted' : 'bg-accent text-accent-ink'} font-extrabold text-[20px] uppercase shrink-0 ${avatarRing}`}
+            style={{ width: 40, height: 40 }}
+          >
+            {initial}
+          </div>
+        )}
         <div className="min-w-0 flex flex-col justify-between" style={{ height: 40 }}>
           <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight leading-tight">
             {participant.display}

@@ -50,40 +50,29 @@ export function playPing(): void {
     return;
   }
 
-  // C6 (1047 Hz) → E6 (1319 Hz): major-third two-note chime, Discord-style.
-  // PING_PEAK is intentionally 2.5× PEAK so the chime cuts through conversation.
-  const PING_PEAK = 0.38;
-  const NOTE1_DUR = 0.13;
-  const NOTE2_DUR = 0.17;
-  const GAP = 0.01;
+  // Soft bell tap: two stacked sines (587 Hz + 880 Hz, fifth interval) with
+  // exponential decay. Pleasant, salient, no buzz.
+  const PEAK_LOW = 0.28;
+  const PEAK_HIGH = 0.18;
+  const DURATION = 0.42;
   const t0 = ctx.currentTime;
-  const t1 = t0 + NOTE1_DUR + GAP;
-  const end = t1 + NOTE2_DUR;
+  const end = t0 + DURATION;
 
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = 'triangle';
+  function tone(freq: number, peak: number): void {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peak, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(end + 0.02);
+    osc.onended = () => void ctx.close().catch(() => undefined);
+  }
 
-  // Note 1: C6
-  osc.frequency.setValueAtTime(1047, t0);
-  // Note 2: E6, stepped cleanly at the boundary
-  osc.frequency.setValueAtTime(1319, t1);
-
-  // Note 1 envelope: fast attack, smooth release
-  gain.gain.setValueAtTime(0, t0);
-  gain.gain.linearRampToValueAtTime(PING_PEAK, t0 + 0.01);
-  gain.gain.setValueAtTime(PING_PEAK * 0.75, t0 + 0.04);
-  gain.gain.linearRampToValueAtTime(0, t0 + NOTE1_DUR);
-
-  // Note 2 envelope: same shape, slightly longer tail
-  gain.gain.setValueAtTime(0, t1);
-  gain.gain.linearRampToValueAtTime(PING_PEAK, t1 + 0.01);
-  gain.gain.setValueAtTime(PING_PEAK * 0.75, t1 + 0.05);
-  gain.gain.linearRampToValueAtTime(0, end);
-
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.onended = () => void ctx.close().catch(() => undefined);
-  osc.start(t0);
-  osc.stop(end + 0.02);
+  tone(587, PEAK_LOW);
+  tone(880, PEAK_HIGH);
 }

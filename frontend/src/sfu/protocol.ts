@@ -175,7 +175,7 @@ export type ClientMessage =
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
   | { event: 'set-state'; data: SetStatePayload }
   | { event: 'chat-send'; data: ChatSendPayload }
-  | { event: 'ping'; data: Record<string, never> };
+  | { event: 'ping'; data: { to: string } };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 

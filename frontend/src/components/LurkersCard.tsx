@@ -2,7 +2,11 @@ import { useShallow } from 'zustand/react/shallow';
 import { selectChatOnlyParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
 
-export function LurkersCard() {
+interface Props {
+  onPingUser?: (targetId: string) => void;
+}
+
+export function LurkersCard({ onPingUser }: Props) {
   const lurkers = useStore(useShallow(selectChatOnlyParticipants));
 
   if (lurkers.length === 0) return null;
@@ -17,7 +21,12 @@ export function LurkersCard() {
       </div>
       <div className="grid gap-2">
         {lurkers.map((p) => (
-          <ParticipantRow key={p.id} participant={p} onRemoteGainChange={() => undefined} />
+          <ParticipantRow
+            key={p.id}
+            participant={p}
+            onRemoteGainChange={() => undefined}
+            onPing={onPingUser}
+          />
         ))}
       </div>
     </section>

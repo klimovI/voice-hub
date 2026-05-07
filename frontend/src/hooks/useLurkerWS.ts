@@ -27,7 +27,7 @@ export type UseLurkerWSReturn = {
   /** Send a chat message via the lurker WS. No-op when not connected. */
   sendChat: (payload: import('../sfu/protocol').ChatSendPayload) => void;
   /** Send a ping via the lurker WS. No-op when not connected. */
-  sendPing: () => void;
+  sendPing: (targetId: string) => void;
 };
 
 /**
@@ -190,8 +190,8 @@ export function useLurkerWS({
     clientRef.current?.sendChat(payload);
   }, []);
 
-  const sendPing = useCallback((): void => {
-    clientRef.current?.sendPing();
+  const sendPing = useCallback((targetId: string): void => {
+    clientRef.current?.sendPing(targetId);
   }, []);
 
   return { sendChat, sendPing };

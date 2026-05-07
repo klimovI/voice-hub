@@ -44,6 +44,8 @@ export const KEYS = {
   // Ping feature
   pingSoundEnabled: 'voice-hub.ping-sound-enabled',
   muteIncomingPings: 'voice-hub.mute-incoming-pings',
+  pingTrayFlashEnabled: 'voice-hub.ping-tray-flash-enabled',
+  pingWindowFlashEnabled: 'voice-hub.ping-window-flash-enabled',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].

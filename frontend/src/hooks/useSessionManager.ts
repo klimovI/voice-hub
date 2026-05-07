@@ -23,7 +23,7 @@ import {
 } from '../utils/storage';
 import type { ChatPayload, PingPayload } from '../sfu/protocol';
 import { playPing } from '../audio/feedback-sounds';
-import { flashTrayAlert } from '../utils/tray';
+import { flashAttention } from '../utils/tray';
 import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
@@ -80,8 +80,8 @@ export type UseSessionManagerReturn = {
    * Caller must have already appended the optimistic entry to the store.
    */
   sendChat: (text: string, clientMsgId: string) => void;
-  /** Send a ping to all peers in the room. No-op when not joined. */
-  sendPing: () => void;
+  /** Send a ping to a specific peer. No-op when not joined. */
+  sendPing: (targetId: string) => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
   /**
@@ -249,8 +249,8 @@ export function useSessionManager({
     [sfu],
   );
 
-  const sendPing = useCallback((): void => {
-    sfu.getClient()?.sendPing();
+  const sendPing = useCallback((targetId: string): void => {
+    sfu.getClient()?.sendPing(targetId);
   }, [sfu]);
 
   const handleChatReceive = useCallback(
@@ -279,7 +279,7 @@ export function useSessionManager({
       useStore.getState().clearIncomingPing();
     }, 4000);
     if (s.pingSoundEnabled) playPing();
-    void flashTrayAlert();
+    void flashAttention({ tray: s.pingTrayFlashEnabled, window: s.pingWindowFlashEnabled });
   }, []);
 
   // ---- Reconnect scheduler ----

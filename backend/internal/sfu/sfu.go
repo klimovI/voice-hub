@@ -80,7 +80,7 @@ type peer struct {
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
 
-	lastPingAt time.Time
+	lastPingTo map[string]time.Time
 
 	// out is the per-peer outbound queue, drained by writeLoop. Broadcast
 	// loops enqueue here non-blocking and never wait on a slow socket; if
@@ -310,6 +310,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		clientID:    hello.ClientID,
 		pc:          pc,
 		ws:          ws,
+		lastPingTo:  make(map[string]time.Time),
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -397,6 +398,7 @@ func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws 
 		clientID:    hello.ClientID,
 		chatOnly:    true,
 		ws:          ws,
+		lastPingTo:  make(map[string]time.Time),
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -425,7 +427,7 @@ func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws 
 
 func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 	if msg.Event == protocol.MsgTypePing {
-		r.handlePing(p)
+		r.handlePing(p, msg)
 		return
 	}
 
@@ -703,27 +705,30 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 	}
 }
 
-func (r *Room) handlePing(p *peer) {
-	if time.Since(p.lastPingAt) < 10*time.Second {
+func (r *Room) handlePing(p *peer, msg protocol.Envelope) {
+	var pc protocol.PingClient
+	if err := json.Unmarshal(msg.Data, &pc); err != nil || pc.To == "" {
 		return
 	}
-	p.lastPingAt = time.Now()
+	if pc.To == p.id {
+		return
+	}
+
+	r.mu.Lock()
+	target := r.peers[pc.To]
+	r.mu.Unlock()
+
+	if target == nil || !target.chatOnly {
+		return
+	}
+	if time.Since(p.lastPingTo[pc.To]) < 10*time.Second {
+		return
+	}
+	p.lastPingTo[pc.To] = time.Now()
 
 	payload, _ := json.Marshal(protocol.PingServer{From: p.id, FromName: p.displayName})
 	env, _ := json.Marshal(protocol.Envelope{Event: protocol.MsgTypePing, Data: payload})
-
-	r.mu.Lock()
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != p.id && op.chatOnly {
-			others = append(others, op)
-		}
-	}
-	r.mu.Unlock()
-
-	for _, op := range others {
-		_ = op.writeRaw(env)
-	}
+	_ = target.writeRaw(env)
 }
 
 func newChatID(t time.Time) string {

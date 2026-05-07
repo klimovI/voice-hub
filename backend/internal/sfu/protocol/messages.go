@@ -134,9 +134,10 @@ type PeerStatePayload struct {
 // MsgTypePing is the event name for the ping signaling message (both C→S and S→C).
 const MsgTypePing = "ping"
 
-// PingClient is the payload of the C→S "ping" message. No fields; sender is
-// derived from the peer session.
-type PingClient struct{}
+// PingClient is the payload of the C→S "ping" message.
+type PingClient struct {
+	To string `json:"to"`
+}
 
 // PingServer is the payload of the S→C "ping" broadcast sent to all peers
 // except the sender.

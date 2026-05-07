@@ -37,7 +37,7 @@ export type SFUClient = {
   setDisplayName(name: string): void;
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
-  sendPing(): void;
+  sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
 };
@@ -205,8 +205,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     send('chat-send', payload);
   }
 
-  function sendPing(): void {
-    send('ping', {});
+  function sendPing(targetId: string): void {
+    send('ping', { to: targetId });
   }
 
   function getPeerConnection(): RTCPeerConnection | null {
@@ -278,7 +278,7 @@ export type ChatOnlyClient = {
   connect(opts: ChatOnlyConnectOptions): Promise<void>;
   disconnect(): void;
   sendChat(payload: ChatSendPayload): void;
-  sendPing(): void;
+  sendPing(targetId: string): void;
   getId(): string | null;
 };
 
@@ -403,8 +403,8 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     send('chat-send', payload);
   }
 
-  function sendPing(): void {
-    send('ping', {});
+  function sendPing(targetId: string): void {
+    send('ping', { to: targetId });
   }
 
   function getId(): string | null {

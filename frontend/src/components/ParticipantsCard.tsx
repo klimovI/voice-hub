@@ -5,9 +5,10 @@ import { usePeersPreview, type PeerPreview } from '../hooks/usePeersPreview';
 
 interface Props {
   onRemoteGainChange: () => void;
+  onPingUser?: (targetId: string) => void;
 }
 
-export function ParticipantsCard({ onRemoteGainChange }: Props) {
+export function ParticipantsCard({ onRemoteGainChange, onPingUser }: Props) {
   const participants = useStore(useShallow(selectVoiceParticipants));
   const joinState = useStore((s) => s.joinState);
   const preview = usePeersPreview();
@@ -40,7 +41,12 @@ export function ParticipantsCard({ onRemoteGainChange }: Props) {
         )}
         {showPreview && preview.map((p) => <PeerPreviewRow key={p.id} peer={p} />)}
         {participants.map((p) => (
-          <ParticipantRow key={p.id} participant={p} onRemoteGainChange={onRemoteGainChange} />
+          <ParticipantRow
+            key={p.id}
+            participant={p}
+            onRemoteGainChange={onRemoteGainChange}
+            onPing={onPingUser}
+          />
         ))}
       </div>
     </section>

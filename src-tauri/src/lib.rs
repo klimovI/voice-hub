@@ -56,7 +56,7 @@ pub fn run() {
             connection::change_server,
             updater::check_for_update,
             updater::apply_update,
-            commands::flash_tray_alert,
+            commands::flash_attention,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
