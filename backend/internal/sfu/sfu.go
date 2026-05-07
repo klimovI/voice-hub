@@ -579,7 +579,9 @@ func (r *Room) removePeer(id string) {
 		_ = op.writeRaw(leftEnv)
 	}
 
-	r.signalPeerConnections()
+	if !p.chatOnly {
+		r.signalPeerConnections()
+	}
 }
 
 // Close stops accepting new peers and tears down all active sessions.

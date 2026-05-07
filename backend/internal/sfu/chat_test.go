@@ -469,14 +469,14 @@ func TestVoiceAndLurkerCrossChat(t *testing.T) {
 }
 
 // TestLurkerLeave_PeerLeftBroadcast verifies that when a lurker disconnects,
-// remaining peers receive a peer-left broadcast and signalPeerConnections does
-// not nil-deref on the remaining lurker's nil PC.
+// remaining peers receive a peer-left broadcast. Lurker removal should not
+// trigger SFU resync work because lurkers have no PeerConnection or tracks.
 func TestLurkerLeave_PeerLeftBroadcast(t *testing.T) {
 	t.Parallel()
 
 	// Two lurkers: one will leave, one will receive peer-left.
-	// Using lurkers only avoids needing a real pion PeerConnection while still
-	// exercising signalPeerConnections → syncOnePeer with a nil-PC peer.
+	// Using lurkers only avoids needing a real pion PeerConnection for this
+	// roster-only path.
 	room := &Room{
 		peers:  make(map[string]*peer),
 		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
