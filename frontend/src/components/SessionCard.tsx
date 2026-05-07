@@ -5,7 +5,6 @@ interface Props {
   onLeave: () => void;
   onToggleSelfMute: () => void;
   onToggleDeafen: () => void;
-  onPing: () => void;
   displayName: string;
   onDisplayNameChange: (value: string) => void;
 }
@@ -15,7 +14,6 @@ export function SessionCard({
   onLeave,
   onToggleSelfMute,
   onToggleDeafen,
-  onPing,
   displayName,
   onDisplayNameChange,
 }: Props) {
@@ -23,7 +21,6 @@ export function SessionCard({
   const selfMuted = useStore((s) => s.selfMuted);
   const deafened = useStore((s) => s.deafened);
   const configReady = useStore((s) => s.configReady);
-  const lastPingSentAt = useStore((s) => s.lastPingSentAt);
 
   const joining = joinState === 'joining';
   const joined = joinState === 'joined';
@@ -43,7 +40,6 @@ export function SessionCard({
 
   const micOn = !selfMuted;
   const earOn = !deafened;
-  const pingCoolingDown = Date.now() - lastPingSentAt < 10000;
 
   let heroLabel: string;
   let heroIcon: string;
@@ -124,23 +120,6 @@ export function SessionCard({
               </span>
               <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
                 {earOn ? 'Звук' : 'Тихо'}
-              </span>
-            </button>
-            <button
-              id="ping-button"
-              type="button"
-              disabled={!joined || pingCoolingDown}
-              aria-label="Пингануть всех"
-              title="Пингануть всех"
-              onClick={onPing}
-              className={`flex items-center p-4 transition-colors duration-150 ${
-                !joined || pingCoolingDown
-                  ? 'bg-bg-0 border border-line text-muted-2 cursor-not-allowed'
-                  : tileOn
-              }`}
-            >
-              <span className="msym shrink-0" style={{ fontSize: 24 }}>
-                notifications
               </span>
             </button>
           </div>

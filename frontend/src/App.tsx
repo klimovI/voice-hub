@@ -21,6 +21,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
 import { PingToast } from './components/PingToast';
+import { PingCard } from './components/PingCard';
 import { useAppVersion } from './hooks/useAppVersion';
 import { useLurkerWS } from './hooks/useLurkerWS';
 
@@ -221,6 +222,7 @@ export function App() {
   const lurker = useLurkerWS({
     displayName,
     onChat: session.handleChatReceive,
+    onPing: session.handlePingReceive,
     voiceActive,
   });
 
@@ -238,9 +240,13 @@ export function App() {
   const handlePing = useCallback(() => {
     const s = useStore.getState(); // snapshot read, not subscription
     if (Date.now() - s.lastPingSentAt < 10000) return;
-    session.sendPing();
+    if (voiceActive) {
+      session.sendPing();
+    } else {
+      lurker.sendPing();
+    }
     s.markPingSent();
-  }, [session]);
+  }, [voiceActive, session, lurker]);
 
   return (
     <>
@@ -264,7 +270,6 @@ export function App() {
               onLeave={session.leave}
               onToggleSelfMute={handleToggleSelfMute}
               onToggleDeafen={handleToggleDeafen}
-              onPing={handlePing}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
             />
@@ -282,6 +287,7 @@ export function App() {
               onOutputVolumeChange={handleOutputVolumeChange}
               onReset={handleAudioReset}
             />
+            <PingCard onPing={handlePing} />
             <HotkeyCard onStatusMessage={handleStatusMessage} />
           </div>
         </div>

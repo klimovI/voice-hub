@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { createChatClient, type ChatOnlyClient } from '../sfu/client';
 import { buildWsUrl } from '../config';
 import { loadOrCreateClientId, loadPeerVolume } from '../utils/storage';
-import type { ChatPayload } from '../sfu/protocol';
+import type { ChatPayload, PingPayload } from '../sfu/protocol';
 import { useStore } from '../store/useStore';
 import { retryPendingChats } from '../utils/chat-retry';
 
@@ -14,6 +14,8 @@ export type UseLurkerWSDeps = {
   displayName: string;
   /** Fired on every received chat message — same handler as voice WS. */
   onChat: (data: ChatPayload) => void;
+  /** Fired on every received ping — same handler as voice WS. */
+  onPing: (data: PingPayload) => void;
   /**
    * When true the lurker connection must NOT run — the voice WS is active.
    * Caller derives this from joinState === 'joined'.
@@ -24,6 +26,8 @@ export type UseLurkerWSDeps = {
 export type UseLurkerWSReturn = {
   /** Send a chat message via the lurker WS. No-op when not connected. */
   sendChat: (payload: import('../sfu/protocol').ChatSendPayload) => void;
+  /** Send a ping via the lurker WS. No-op when not connected. */
+  sendPing: () => void;
 };
 
 /**
@@ -36,6 +40,7 @@ export type UseLurkerWSReturn = {
 export function useLurkerWS({
   displayName,
   onChat,
+  onPing,
   voiceActive,
 }: UseLurkerWSDeps): UseLurkerWSReturn {
   const clientRef = useRef<ChatOnlyClient | null>(null);
@@ -47,6 +52,11 @@ export function useLurkerWS({
   useEffect(() => {
     onChatRef.current = onChat;
   }, [onChat]);
+
+  const onPingRef = useRef(onPing);
+  useEffect(() => {
+    onPingRef.current = onPing;
+  }, [onPing]);
 
   const displayNameRef = useRef(displayName);
   useEffect(() => {
@@ -118,6 +128,9 @@ export function useLurkerWS({
       onChat: (data) => {
         onChatRef.current(data);
       },
+      onPing: (data) => {
+        onPingRef.current(data);
+      },
       onClose: () => {
         // Server-initiated close (not from our disconnect()). Schedule a
         // reconnect without clearing the roster — the participant list stays
@@ -177,5 +190,9 @@ export function useLurkerWS({
     clientRef.current?.sendChat(payload);
   }, []);
 
-  return { sendChat };
+  const sendPing = useCallback((): void => {
+    clientRef.current?.sendPing();
+  }, []);
+
+  return { sendChat, sendPing };
 }

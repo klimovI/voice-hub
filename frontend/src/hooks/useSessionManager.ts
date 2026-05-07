@@ -21,8 +21,9 @@ import {
   loadOrCreateClientId,
   loadPeerVolume,
 } from '../utils/storage';
-import type { ChatPayload } from '../sfu/protocol';
+import type { ChatPayload, PingPayload } from '../sfu/protocol';
 import { playPing } from '../audio/feedback-sounds';
+import { flashTrayAlert } from '../utils/tray';
 import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
@@ -88,6 +89,11 @@ export type UseSessionManagerReturn = {
    * Both the voice WS and the lurker WS call this so dedup/persist run once.
    */
   handleChatReceive: (data: ChatPayload) => void;
+  /**
+   * Stable callback — handles an incoming ping from any transport (voice or lurker WS).
+   * Respects muteIncomingPings, schedules 4s clear, plays sound, flashes tray.
+   */
+  handlePingReceive: (data: PingPayload) => void;
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
@@ -263,6 +269,19 @@ export function useSessionManager({
     [roomId, schedulePersist],
   );
 
+  const handlePingReceive = useCallback(({ fromName }: PingPayload): void => {
+    const s = useStore.getState(); // snapshot read, not subscription
+    if (s.muteIncomingPings) return;
+    s.setIncomingPing({ fromName, at: Date.now() });
+    if (pingClearRef.current !== null) clearTimeout(pingClearRef.current);
+    pingClearRef.current = setTimeout(() => {
+      pingClearRef.current = null;
+      useStore.getState().clearIncomingPing();
+    }, 4000);
+    if (s.pingSoundEnabled) playPing();
+    void flashTrayAlert();
+  }, []);
+
   // ---- Reconnect scheduler ----
   // Created once; options that need freshness use refs (isLeaving, onAttempt).
 
@@ -382,17 +401,7 @@ export function useSessionManager({
           getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
         },
         onChat: handleChatReceive,
-        onPing: ({ fromName }) => {
-          const s = useStore.getState(); // snapshot read, not subscription
-          if (s.muteIncomingPings) return;
-          s.setIncomingPing({ fromName, at: Date.now() });
-          if (pingClearRef.current !== null) clearTimeout(pingClearRef.current);
-          pingClearRef.current = setTimeout(() => {
-            pingClearRef.current = null;
-            useStore.getState().clearIncomingPing();
-          }, 4000);
-          if (s.pingSoundEnabled) playPing();
-        },
+        onPing: handlePingReceive,
         onTrack: ({ track, stream, peerId }) => {
           if (!peerId || track.kind !== 'audio') return;
           getStore().upsertParticipant({ id: peerId, hasStream: true });
@@ -420,7 +429,7 @@ export function useSessionManager({
         client.sendSetState(s.selfMuted, s.deafened);
       }
     },
-    [audio, sfu, handleChatReceive, getStore],
+    [audio, sfu, handleChatReceive, handlePingReceive, getStore],
   );
 
   // Keep connectSfuRef in sync so the scheduler always calls the latest closure.
@@ -603,5 +612,6 @@ export function useSessionManager({
     sendPing,
     getRoomId,
     handleChatReceive,
+    handlePingReceive,
   };
 }

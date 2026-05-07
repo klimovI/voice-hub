@@ -3,12 +3,15 @@ mod connection;
 mod listener;
 mod shortcut;
 mod tray;
+mod tray_flash;
 mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+use crate::tray_flash::TrayFlashState;
 
 use crate::listener::{ListenerState, SharedState};
 
@@ -53,6 +56,7 @@ pub fn run() {
             connection::change_server,
             updater::check_for_update,
             updater::apply_update,
+            commands::flash_tray_alert,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -116,6 +120,15 @@ pub fn run() {
             listener::start(handle.clone(), state);
 
             updater::init(&handle)?;
+
+            // Build the alert icon from the normal window icon. The icon is
+            // guaranteed to exist — same invariant as tray::init enforces.
+            let base_icon = app
+                .default_window_icon()
+                .cloned()
+                .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"))
+                .to_owned();
+            app.manage(Arc::new(TrayFlashState::new(base_icon)));
 
             Ok(())
         })

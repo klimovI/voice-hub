@@ -715,7 +715,7 @@ func (r *Room) handlePing(p *peer) {
 	r.mu.Lock()
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
-		if op.id != p.id {
+		if op.id != p.id && op.chatOnly {
 			others = append(others, op)
 		}
 	}

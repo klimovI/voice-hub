@@ -263,6 +263,7 @@ export type ChatOnlyHandlers = {
   onPeerJoined: (data: PeerInfo) => void;
   onPeerLeft: (data: PeerLeftPayload) => void;
   onChat: (data: ChatPayload) => void;
+  onPing: (data: PingPayload) => void;
   onClose: () => void;
   onError: (err: unknown) => void;
 };
@@ -277,6 +278,7 @@ export type ChatOnlyClient = {
   connect(opts: ChatOnlyConnectOptions): Promise<void>;
   disconnect(): void;
   sendChat(payload: ChatSendPayload): void;
+  sendPing(): void;
   getId(): string | null;
 };
 
@@ -286,6 +288,7 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     onPeerJoined: handlers.onPeerJoined ?? noop,
     onPeerLeft: handlers.onPeerLeft ?? noop,
     onChat: handlers.onChat ?? noop,
+    onPing: handlers.onPing ?? noop,
     onClose: handlers.onClose ?? noop,
     onError: handlers.onError ?? noop,
   };
@@ -354,6 +357,9 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
           case 'chat':
             on.onChat(msg.data);
             break;
+          case 'ping':
+            on.onPing(msg.data);
+            break;
           default:
             break;
         }
@@ -397,9 +403,13 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     send('chat-send', payload);
   }
 
+  function sendPing(): void {
+    send('ping', {});
+  }
+
   function getId(): string | null {
     return myId;
   }
 
-  return { connect, disconnect, sendChat, getId };
+  return { connect, disconnect, sendChat, sendPing, getId };
 }
