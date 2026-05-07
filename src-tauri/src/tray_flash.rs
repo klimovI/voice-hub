@@ -3,21 +3,39 @@ use std::sync::{Arc, Mutex};
 use tauri::async_runtime::JoinHandle;
 use tauri::image::Image;
 use tauri::{AppHandle, Manager, UserAttentionType};
+use log::{error, info};
 
 use crate::tray::TRAY_ID;
 
 fn alert_variant(src: &Image<'_>) -> Image<'static> {
-    let pixels: Vec<u8> = src
-        .rgba()
-        .chunks_exact(4)
-        .flat_map(|p| {
-            if p[3] == 0 {
-                [0, 0, 0, 0]
-            } else {
-                [255, 30, 30, p[3]]
+    let w = src.width() as i32;
+    let h = src.height() as i32;
+    let mut pixels: Vec<u8> = src.rgba().to_vec();
+
+    let smaller = w.min(h) as f32;
+    let radius = (smaller * 0.45 / 2.0).round();
+    let margin = (smaller * 0.04).max(1.0);
+    let cx = w as f32 - radius - margin;
+    let cy = h as f32 - radius - margin;
+
+    for y in 0..h {
+        for x in 0..w {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist < radius + 1.0 {
+                let edge = (radius - dist).clamp(0.0, 1.0);
+                let alpha = (255.0 * edge) as u16;
+                let inv = 255 - alpha;
+                let idx = ((y * w + x) * 4) as usize;
+                pixels[idx]     = ((237u16 * alpha + pixels[idx]     as u16 * inv) / 255) as u8;
+                pixels[idx + 1] = ((66u16  * alpha + pixels[idx + 1] as u16 * inv) / 255) as u8;
+                pixels[idx + 2] = ((69u16  * alpha + pixels[idx + 2] as u16 * inv) / 255) as u8;
+                pixels[idx + 3] = pixels[idx + 3].max(alpha as u8);
             }
-        })
-        .collect();
+        }
+    }
+
     Image::new_owned(pixels, src.width(), src.height())
 }
 
@@ -41,7 +59,7 @@ impl TrayFlashState {
 }
 
 pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), String> {
-    eprintln!("tray_flash: invoked tray={tray} window={window}");
+    info!("tray_flash: invoked tray={tray} window={window}");
 
     if !tray && !window {
         return Ok(());
@@ -60,8 +78,8 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
 
         if let Some(tray_handle) = app.tray_by_id(TRAY_ID) {
             match tray_handle.set_icon(Some(inner.alert.clone())) {
-                Ok(()) => eprintln!("tray_flash: alert icon applied"),
-                Err(e) => eprintln!("tray_flash: set_icon failed: {e}"),
+                Ok(()) => info!("tray_flash: alert icon applied"),
+                Err(e) => error!("tray_flash: set_icon failed: {e}"),
             }
         }
 
@@ -72,8 +90,8 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
             let Ok(mut g) = state2.0.lock() else { return };
             if let Some(tray_handle) = app2.tray_by_id(TRAY_ID) {
                 match tray_handle.set_icon(Some(g.normal.clone())) {
-                    Ok(()) => eprintln!("tray_flash: icon reverted"),
-                    Err(e) => eprintln!("tray_flash: revert set_icon failed: {e}"),
+                    Ok(()) => info!("tray_flash: icon reverted"),
+                    Err(e) => error!("tray_flash: revert set_icon failed: {e}"),
                 }
             }
             g.task = None;

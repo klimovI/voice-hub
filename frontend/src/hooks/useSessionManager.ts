@@ -279,7 +279,7 @@ export function useSessionManager({
       useStore.getState().clearIncomingPing();
     }, 4000);
     if (s.pingSoundEnabled) playPing();
-    void flashAttention({ tray: s.pingTrayFlashEnabled, window: s.pingWindowFlashEnabled });
+    void flashAttention({ tray: true, window: s.pingWindowFlashEnabled });
   }, []);
 
   // ---- Reconnect scheduler ----

@@ -27,11 +27,9 @@ function Toggle({
 export function PingCard() {
   const pingSoundEnabled = useStore((s) => s.pingSoundEnabled);
   const muteIncomingPings = useStore((s) => s.muteIncomingPings);
-  const pingTrayFlashEnabled = useStore((s) => s.pingTrayFlashEnabled);
   const pingWindowFlashEnabled = useStore((s) => s.pingWindowFlashEnabled);
   const setPingSoundEnabled = useStore((s) => s.setPingSoundEnabled);
   const setMuteIncomingPings = useStore((s) => s.setMuteIncomingPings);
-  const setPingTrayFlashEnabled = useStore((s) => s.setPingTrayFlashEnabled);
   const setPingWindowFlashEnabled = useStore((s) => s.setPingWindowFlashEnabled);
 
   const pingsVisible = !muteIncomingPings;
@@ -58,15 +56,6 @@ export function PingCard() {
                 checked={pingSoundEnabled}
                 onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
                 ariaLabel="Звук пинга"
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="section-label">Мигание иконки</span>
-              <Toggle
-                checked={pingTrayFlashEnabled}
-                onChange={() => setPingTrayFlashEnabled(!pingTrayFlashEnabled)}
-                ariaLabel="Мигание иконки"
               />
             </div>
 

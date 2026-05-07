@@ -114,8 +114,6 @@ export interface AppState {
   setPingSoundEnabled: (v: boolean) => void;
   muteIncomingPings: boolean;
   setMuteIncomingPings: (v: boolean) => void;
-  pingTrayFlashEnabled: boolean;
-  setPingTrayFlashEnabled: (v: boolean) => void;
   pingWindowFlashEnabled: boolean;
   setPingWindowFlashEnabled: (v: boolean) => void;
   incomingPing: { fromName: string; at: number } | null;
@@ -214,11 +212,6 @@ export const useStore = create<AppState>((set, get) => ({
   setMuteIncomingPings: (v) => {
     saveBoolean(KEYS.muteIncomingPings, v);
     set({ muteIncomingPings: v });
-  },
-  pingTrayFlashEnabled: loadBoolean(KEYS.pingTrayFlashEnabled, true),
-  setPingTrayFlashEnabled: (v) => {
-    saveBoolean(KEYS.pingTrayFlashEnabled, v);
-    set({ pingTrayFlashEnabled: v });
   },
   pingWindowFlashEnabled: loadBoolean(KEYS.pingWindowFlashEnabled, true),
   setPingWindowFlashEnabled: (v) => {
