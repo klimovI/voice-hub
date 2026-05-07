@@ -10,12 +10,35 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::image::Image;
 
 use crate::tray_flash::TrayFlashState;
 
 use crate::listener::{ListenerState, SharedState};
 
 pub struct QuitFlag(pub AtomicBool);
+
+fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info()?;
+    let buf_size = reader
+        .output_buffer_size()
+        .unwrap_or_else(|| reader.info().raw_bytes());
+    let mut buf = vec![0u8; buf_size];
+    let info = reader.next_frame(&mut buf)?;
+    let raw = &buf[..info.buffer_size()];
+
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => raw.to_vec(),
+        png::ColorType::Rgb => raw
+            .chunks_exact(3)
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect(),
+        _ => raw.to_vec(),
+    };
+
+    Ok(Image::new_owned(rgba, info.width, info.height))
+}
 
 pub fn run() {
     // Pick the initial URL from the saved host (if any). With no host, load
@@ -136,14 +159,17 @@ pub fn run() {
 
             updater::init(&handle)?;
 
-            // Build the alert icon from the normal window icon. The icon is
-            // guaranteed to exist — same invariant as tray::init enforces.
             let base_icon = app
                 .default_window_icon()
                 .cloned()
                 .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"))
                 .to_owned();
-            app.manage(Arc::new(TrayFlashState::new(base_icon)));
+
+            static ALERT_PNG: &[u8] = include_bytes!("../icons/tray-alert.png");
+            let alert_icon = decode_png_rgba(ALERT_PNG)
+                .unwrap_or_else(|e| unreachable!("bundled tray-alert.png failed to decode: {e}"));
+
+            app.manage(Arc::new(TrayFlashState::new(base_icon, alert_icon)));
 
             Ok(())
         })

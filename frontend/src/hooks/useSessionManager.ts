@@ -24,6 +24,7 @@ import {
 import type { ChatPayload, PingPayload } from '../sfu/protocol';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
+import { flashFavicon } from '../utils/favicon';
 import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
@@ -279,6 +280,7 @@ export function useSessionManager({
       useStore.getState().clearIncomingPing();
     }, 4000);
     if (s.pingSoundEnabled) playPing();
+    flashFavicon();
     void flashAttention({ tray: true, window: s.pingWindowFlashEnabled });
   }, []);
 

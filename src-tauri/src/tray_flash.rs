@@ -7,38 +7,6 @@ use log::{error, info};
 
 use crate::tray::TRAY_ID;
 
-fn alert_variant(src: &Image<'_>) -> Image<'static> {
-    let w = src.width() as i32;
-    let h = src.height() as i32;
-    let mut pixels: Vec<u8> = src.rgba().to_vec();
-
-    let smaller = w.min(h) as f32;
-    let radius = (smaller * 0.45 / 2.0).round();
-    let margin = (smaller * 0.04).max(1.0);
-    let cx = w as f32 - radius - margin;
-    let cy = h as f32 - radius - margin;
-
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist < radius + 1.0 {
-                let edge = (radius - dist).clamp(0.0, 1.0);
-                let alpha = (255.0 * edge) as u16;
-                let inv = 255 - alpha;
-                let idx = ((y * w + x) * 4) as usize;
-                pixels[idx]     = ((237u16 * alpha + pixels[idx]     as u16 * inv) / 255) as u8;
-                pixels[idx + 1] = ((66u16  * alpha + pixels[idx + 1] as u16 * inv) / 255) as u8;
-                pixels[idx + 2] = ((69u16  * alpha + pixels[idx + 2] as u16 * inv) / 255) as u8;
-                pixels[idx + 3] = pixels[idx + 3].max(alpha as u8);
-            }
-        }
-    }
-
-    Image::new_owned(pixels, src.width(), src.height())
-}
-
 struct Inner {
     normal: Image<'static>,
     alert: Image<'static>,
@@ -48,10 +16,9 @@ struct Inner {
 pub struct TrayFlashState(Mutex<Inner>);
 
 impl TrayFlashState {
-    pub fn new(base: Image<'static>) -> Self {
-        let alert = alert_variant(&base);
+    pub fn new(normal: Image<'static>, alert: Image<'static>) -> Self {
         Self(Mutex::new(Inner {
-            normal: base,
+            normal,
             alert,
             task: None,
         }))

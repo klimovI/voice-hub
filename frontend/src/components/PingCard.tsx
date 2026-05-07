@@ -1,4 +1,5 @@
 import { useStore } from '../store/useStore';
+import { isTauri } from '../utils/tauri';
 
 function Toggle({
   checked,
@@ -59,14 +60,16 @@ export function PingCard() {
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3">
-              <span className="section-label">Мигание окна</span>
-              <Toggle
-                checked={pingWindowFlashEnabled}
-                onChange={() => setPingWindowFlashEnabled(!pingWindowFlashEnabled)}
-                ariaLabel="Мигание окна"
-              />
-            </div>
+            {isTauri() && (
+              <div className="flex items-center justify-between gap-3">
+                <span className="section-label">Мигание окна</span>
+                <Toggle
+                  checked={pingWindowFlashEnabled}
+                  onChange={() => setPingWindowFlashEnabled(!pingWindowFlashEnabled)}
+                  ariaLabel="Мигание окна"
+                />
+              </div>
+            )}
           </>
         )}
       </div>

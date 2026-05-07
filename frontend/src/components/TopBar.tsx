@@ -10,9 +10,7 @@ export function TopBar() {
         max-[640px]:flex-wrap max-[640px]:h-auto max-[640px]:py-3"
     >
       <div className="flex items-center gap-2.5 min-w-0">
-        <span className="msym msym-fill text-accent md:hidden" style={{ fontSize: 20 }}>
-          graphic_eq
-        </span>
+        <img src="/favicon.svg" alt="" className="md:hidden w-6 h-6 shrink-0" />
         <div className="text-[17px] font-extrabold uppercase tracking-[0.2em] text-accent">
           Voice&nbsp;Hub
         </div>
