@@ -47,7 +47,8 @@ export function setupParticipantAudio(
     sourceNode = ctx.createMediaStreamSource(stream);
     sourceNode.connect(gainNode);
     sourceNode.connect(analyser);
-  } catch {
+  } catch (err) {
+    console.warn(`[remote-audio] createMediaStreamSource failed stream=${stream.id}:`, err);
     sourceNode = null;
   }
 

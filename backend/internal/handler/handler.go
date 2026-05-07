@@ -85,7 +85,9 @@ func Health() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(HealthResponse{Status: "ok"})
+		if err := json.NewEncoder(w).Encode(HealthResponse{Status: "ok"}); err != nil {
+			log.Printf("health: encode: %v", err)
+		}
 	}
 }
 
@@ -97,7 +99,9 @@ func Version(version string) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(VersionResponse{Version: version})
+		if err := json.NewEncoder(w).Encode(VersionResponse{Version: version}); err != nil {
+			log.Printf("version: encode: %v", err)
+		}
 	}
 }
 
@@ -177,7 +181,9 @@ func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(RoomPeersResponse{Peers: room.Peers()})
+		if err := json.NewEncoder(w).Encode(RoomPeersResponse{Peers: room.Peers()}); err != nil {
+			log.Printf("room peers: encode: %v", err)
+		}
 	}
 }
 
@@ -203,7 +209,9 @@ func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) htt
 			Role: string(sess.Role),
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("config: encode: %v", err)
+		}
 	}
 }
 
@@ -214,7 +222,9 @@ func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(connPass.Status())
+		if err := json.NewEncoder(w).Encode(connPass.Status()); err != nil {
+			log.Printf("connpass status: encode: %v", err)
+		}
 	}
 }
 
@@ -239,7 +249,9 @@ func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.Handl
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("connpass rotate: encode: %v", err)
+		}
 	}
 }
 

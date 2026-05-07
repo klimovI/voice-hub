@@ -584,15 +584,19 @@ export function useSessionManager({
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    void import('@tauri-apps/api/event').then(({ listen }) =>
-      listen('toggle-mute', () => {
-        if (useStore.getState().joinState !== 'joined') return;
-        onTauriToggleMuteRef.current();
-      }).then((off) => {
-        if (cancelled) off();
-        else unlisten = off;
-      }),
-    );
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen('toggle-mute', () => {
+          if (useStore.getState().joinState !== 'joined') return;
+          onTauriToggleMuteRef.current();
+        }).then((off) => {
+          if (cancelled) off();
+          else unlisten = off;
+        }),
+      )
+      .catch((err: unknown) => {
+        console.error('[hotkey-bridge] toggle-mute listen failed:', err);
+      });
     return () => {
       cancelled = true;
       unlisten?.();

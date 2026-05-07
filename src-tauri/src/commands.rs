@@ -37,17 +37,23 @@ pub fn clear_shortcut(app: AppHandle, state: State<'_, SharedState>) -> Result<(
 
 #[tauri::command]
 pub fn start_capture(state: State<'_, SharedState>) {
-    if let Ok(mut s) = state.lock() {
-        s.mode = Mode::Capturing;
-        s.pressed.clear();
+    match state.lock() {
+        Ok(mut s) => {
+            s.mode = Mode::Capturing;
+            s.pressed.clear();
+        }
+        Err(err) => log::error!("start_capture: state mutex poisoned: {err}"),
     }
 }
 
 #[tauri::command]
 pub fn cancel_capture(state: State<'_, SharedState>) {
-    if let Ok(mut s) = state.lock() {
-        s.mode = Mode::Normal;
-        s.pressed.clear();
+    match state.lock() {
+        Ok(mut s) => {
+            s.mode = Mode::Normal;
+            s.pressed.clear();
+        }
+        Err(err) => log::error!("cancel_capture: state mutex poisoned: {err}"),
     }
 }
 

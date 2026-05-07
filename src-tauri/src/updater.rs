@@ -93,17 +93,21 @@ async fn check(app: AppHandle, force: bool) {
     };
 
     if !force {
-        if let Ok(s) = shared.lock() {
-            if let Some(prev) = s.last_checked {
-                if prev.elapsed() < FOCUS_THROTTLE {
-                    return;
+        match shared.lock() {
+            Ok(s) => {
+                if let Some(prev) = s.last_checked {
+                    if prev.elapsed() < FOCUS_THROTTLE {
+                        return;
+                    }
                 }
             }
+            Err(err) => log::error!("updater: state mutex poisoned (focus throttle): {err}"),
         }
     }
 
-    if let Ok(mut s) = shared.lock() {
-        s.last_checked = Some(Instant::now());
+    match shared.lock() {
+        Ok(mut s) => s.last_checked = Some(Instant::now()),
+        Err(err) => log::error!("updater: state mutex poisoned (last_checked): {err}"),
     }
 
     let updater = match app.updater() {
@@ -124,24 +128,32 @@ async fn check(app: AppHandle, force: bool) {
     };
 
     let version = update.version.clone();
-    if let Ok(mut s) = shared.lock() {
-        let already_known = s
-            .pending
-            .as_ref()
-            .map(|u| u.version == version)
-            .unwrap_or(false);
-        s.pending = Some(update);
-        if already_known {
+    match shared.lock() {
+        Ok(mut s) => {
+            let already_known = s
+                .pending
+                .as_ref()
+                .map(|u| u.version == version)
+                .unwrap_or(false);
+            s.pending = Some(update);
+            if already_known {
+                return;
+            }
+        }
+        Err(err) => {
+            log::error!("updater: state mutex poisoned (pending): {err}");
             return;
         }
     }
 
-    let _ = app.emit(
+    if let Err(err) = app.emit(
         "update-available",
         UpdateAvailablePayload {
             version: version.clone(),
         },
-    );
+    ) {
+        log::warn!("updater: emit update-available failed: {err}");
+    }
     if let Err(err) = tray::set_update_available(&app, &version) {
         log::error!("updater: tray rebuild failed: {err}");
     }
@@ -241,13 +253,19 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
     let result = run_install(
         update,
         move |downloaded, total| {
-            let _ = app_progress.emit(
+            if let Err(err) = app_progress.emit(
                 "update-progress",
                 UpdateProgressPayload { downloaded, total },
-            );
+            ) {
+                log::warn!("updater: emit update-progress failed: {err}");
+            }
         },
         move || {
-            let _ = app_installing.emit("update-installing", UpdateInstallingPayload {});
+            if let Err(err) =
+                app_installing.emit("update-installing", UpdateInstallingPayload {})
+            {
+                log::warn!("updater: emit update-installing failed: {err}");
+            }
         },
     )
     .await;
@@ -255,16 +273,19 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
     if let Err(ref err) = result {
         log::error!("updater: install failed: {err}");
         if let Some(state) = app.try_state::<SharedUpdater>() {
-            if let Ok(mut s) = state.lock() {
-                s.installing = false;
+            match state.lock() {
+                Ok(mut s) => s.installing = false,
+                Err(err) => log::error!("updater: state mutex poisoned (install reset): {err}"),
             }
         }
-        let _ = app.emit(
+        if let Err(emit_err) = app.emit(
             "update-error",
             UpdateErrorPayload {
                 message: err.clone(),
             },
-        );
+        ) {
+            log::warn!("updater: emit update-error failed: {emit_err}");
+        }
         // Re-discover the update so tray + banner can offer a retry.
         let h = app.clone();
         tauri::async_runtime::spawn(async move {

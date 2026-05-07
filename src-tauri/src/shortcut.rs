@@ -40,16 +40,28 @@ pub enum LoadResult {
 
 /// Load persisted binding choice. See `LoadResult` for the three states.
 pub fn load(app: &tauri::AppHandle) -> LoadResult {
-    let Ok(path) = config_path(app) else {
-        return LoadResult::Missing;
+    let path = match config_path(app) {
+        Ok(p) => p,
+        Err(err) => {
+            log::warn!("shortcut: resolve config path failed: {err}");
+            return LoadResult::Missing;
+        }
     };
-    let Ok(raw) = fs::read(&path) else {
-        return LoadResult::Missing;
+    let raw = match fs::read(&path) {
+        Ok(r) => r,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return LoadResult::Missing,
+        Err(err) => {
+            log::warn!("shortcut: read {} failed: {err}", path.display());
+            return LoadResult::Missing;
+        }
     };
     match serde_json::from_slice::<Option<InputBinding>>(&raw) {
         Ok(Some(b)) => LoadResult::Bound(b),
         Ok(None) => LoadResult::Cleared,
-        Err(_) => LoadResult::Missing,
+        Err(err) => {
+            log::warn!("shortcut: parse {} failed: {err}", path.display());
+            LoadResult::Missing
+        }
     }
 }
 

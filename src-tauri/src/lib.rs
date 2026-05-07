@@ -36,9 +36,15 @@ pub fn run() {
         )
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
+                if let Err(err) = w.unminimize() {
+                    log::warn!("single-instance: unminimize failed: {err}");
+                }
+                if let Err(err) = w.show() {
+                    log::warn!("single-instance: show failed: {err}");
+                }
+                if let Err(err) = w.set_focus() {
+                    log::warn!("single-instance: set_focus failed: {err}");
+                }
             }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -65,13 +71,18 @@ pub fn run() {
             match event {
                 WindowEvent::Focused(focused) => {
                     if let Some(state) = window.try_state::<SharedState>() {
-                        if let Ok(mut s) = state.lock() {
-                            s.window_focused = *focused;
-                            // Drop any keys we believe are held: Windows
-                            // suppresses rdev keyboard events under focus, so
-                            // a release that happened across a focus
-                            // transition can leave a stale key in `pressed`.
-                            s.pressed.clear();
+                        match state.lock() {
+                            Ok(mut s) => {
+                                s.window_focused = *focused;
+                                // Drop any keys we believe are held: Windows
+                                // suppresses rdev keyboard events under focus, so
+                                // a release that happened across a focus
+                                // transition can leave a stale key in `pressed`.
+                                s.pressed.clear();
+                            }
+                            Err(err) => {
+                                log::error!("focus event: state mutex poisoned: {err}");
+                            }
                         }
                     }
                     if *focused {
@@ -85,7 +96,9 @@ pub fn run() {
                     let flag = window.state::<QuitFlag>();
                     if !flag.0.load(Ordering::SeqCst) {
                         api.prevent_close();
-                        let _ = window.hide();
+                        if let Err(err) = window.hide() {
+                            log::warn!("close request: window.hide failed: {err}");
+                        }
                     }
                 }
                 _ => {}
@@ -108,7 +121,9 @@ pub fn run() {
             let initial = match shortcut::load(&handle) {
                 shortcut::LoadResult::Missing => {
                     let default = shortcut::InputBinding::default_combo();
-                    let _ = shortcut::save(&handle, Some(&default));
+                    if let Err(err) = shortcut::save(&handle, Some(&default)) {
+                        log::warn!("seed default shortcut failed: {err}");
+                    }
                     Some(default)
                 }
                 shortcut::LoadResult::Cleared => None,

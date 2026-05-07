@@ -102,9 +102,15 @@ pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()>
 
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        if let Err(err) = window.unminimize() {
+            log::warn!("show_main: unminimize failed: {err}");
+        }
+        if let Err(err) = window.show() {
+            log::warn!("show_main: show failed: {err}");
+        }
+        if let Err(err) = window.set_focus() {
+            log::warn!("show_main: set_focus failed: {err}");
+        }
     }
 }
 

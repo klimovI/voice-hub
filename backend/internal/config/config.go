@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"net/netip"
 	"os"
 	"strconv"
@@ -64,6 +65,7 @@ func envBool(key string, fallback bool) bool {
 
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
+		log.Printf("config: bad %s=%q (%v), using default %v", key, value, err, fallback)
 		return fallback
 	}
 
@@ -78,6 +80,7 @@ func envInt(key string, fallback int) int {
 
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
+		log.Printf("config: bad %s=%q (%v), using default %d", key, value, err, fallback)
 		return fallback
 	}
 

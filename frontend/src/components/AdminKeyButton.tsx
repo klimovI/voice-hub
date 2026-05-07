@@ -53,15 +53,21 @@ export function AdminKeyButton() {
       .then((s: ConnPassStatus | null) => {
         if (!cancelled && s) setStatus(s);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        console.warn('[admin-key] seed status fetch failed:', err);
+      });
     return () => {
       cancelled = true;
     };
   }, [isAdmin]);
 
   const refreshStatus = useCallback(async () => {
-    const res = await fetch(ENDPOINT, { credentials: 'same-origin' });
-    if (res.ok) setStatus(await res.json());
+    try {
+      const res = await fetch(ENDPOINT, { credentials: 'same-origin' });
+      if (res.ok) setStatus(await res.json());
+    } catch (err) {
+      console.warn('[admin-key] refresh status failed:', err);
+    }
   }, []);
 
   const handleOpen = useCallback(() => {

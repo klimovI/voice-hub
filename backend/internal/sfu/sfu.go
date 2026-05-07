@@ -283,7 +283,9 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var hello protocol.HelloPayload
-	_ = json.Unmarshal(helloMsg.Data, &hello)
+	if err := json.Unmarshal(helloMsg.Data, &hello); err != nil {
+		log.Printf("sfu: hello payload unmarshal: %v", err)
+	}
 
 	if hello.ChatOnly {
 		r.serveWSlurker(ctx, cancel, ws, hello)
@@ -326,9 +328,12 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		}
 		b, err := json.Marshal(c.ToJSON())
 		if err != nil {
+			log.Printf("sfu: marshal ICE candidate (%s): %v", p.id, err)
 			return
 		}
-		_ = p.write(protocol.Envelope{Event: "candidate", Data: b})
+		if err := p.write(protocol.Envelope{Event: "candidate", Data: b}); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("sfu: send candidate (%s): %v", p.id, err)
+		}
 	})
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -841,6 +846,13 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 	if p.pc == nil {
 		return false
 	}
+	// Peer context already cancelled (e.g. PC failed, outq full, ws closed):
+	// removePeer will fire from ServeWS's defer shortly. Skipping here avoids
+	// log spam from CreateOffer/AddTrack on a doomed PC during the brief
+	// window before defer runs.
+	if p.ctx.Err() != nil {
+		return false
+	}
 	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		r.removePeer(p.id)
 		return true
@@ -869,6 +881,7 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		have[id] = true
 		if !want[id] {
 			if err := p.pc.RemoveTrack(sender); err != nil {
+				log.Printf("sfu: syncOnePeer (%s) RemoveTrack: %v", p.id, err)
 				return true
 			}
 		}
@@ -890,22 +903,29 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 			continue
 		}
 		if _, err := p.pc.AddTrack(t); err != nil {
+			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
 		}
 	}
 
 	offer, err := p.pc.CreateOffer(nil)
 	if err != nil {
+		log.Printf("sfu: syncOnePeer (%s) CreateOffer: %v", p.id, err)
 		return true
 	}
 	if err := p.pc.SetLocalDescription(offer); err != nil {
+		log.Printf("sfu: syncOnePeer (%s) SetLocalDescription: %v", p.id, err)
 		return true
 	}
 	sd, err := json.Marshal(offer)
 	if err != nil {
+		log.Printf("sfu: syncOnePeer (%s) marshal offer: %v", p.id, err)
 		return true
 	}
 	if err := p.write(protocol.Envelope{Event: "offer", Data: sd}); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("sfu: syncOnePeer (%s) send offer: %v", p.id, err)
+		}
 		return true
 	}
 	return false

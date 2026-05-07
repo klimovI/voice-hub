@@ -27,12 +27,21 @@ fn keyring_entry() -> Result<Entry, String> {
 
 /// Read the saved host. None if no host stored or keychain unavailable.
 pub fn load_host() -> Option<String> {
-    let entry = keyring_entry().ok()?;
-    let host = entry.get_password().ok()?;
-    if host.is_empty() {
-        None
-    } else {
-        Some(host)
+    let entry = match keyring_entry() {
+        Ok(e) => e,
+        Err(err) => {
+            log::warn!("keyring init failed: {err}");
+            return None;
+        }
+    };
+    match entry.get_password() {
+        Ok(host) if host.is_empty() => None,
+        Ok(host) => Some(host),
+        Err(keyring::Error::NoEntry) => None,
+        Err(err) => {
+            log::warn!("keyring read failed: {err}");
+            None
+        }
     }
 }
 
@@ -43,8 +52,15 @@ fn save_host(host: &str) -> Result<(), String> {
 }
 
 fn delete_host() {
-    if let Ok(entry) = keyring_entry() {
-        let _ = entry.delete_credential();
+    match keyring_entry() {
+        Ok(entry) => {
+            if let Err(err) = entry.delete_credential() {
+                if !matches!(err, keyring::Error::NoEntry) {
+                    log::warn!("keyring delete failed: {err}");
+                }
+            }
+        }
+        Err(err) => log::warn!("keyring init for delete failed: {err}"),
     }
 }
 
@@ -116,7 +132,9 @@ pub fn set_host(app: AppHandle, host: String) -> Result<(), String> {
 #[tauri::command]
 pub fn disconnect(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.clear_all_browsing_data();
+        if let Err(err) = window.clear_all_browsing_data() {
+            log::warn!("disconnect: clear browsing data failed: {err}");
+        }
     }
     delete_host();
     navigate_to(&app, local_url(CONNECT_PATH))
@@ -128,7 +146,9 @@ pub fn disconnect(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn change_server(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.clear_all_browsing_data();
+        if let Err(err) = window.clear_all_browsing_data() {
+            log::warn!("change_server: clear browsing data failed: {err}");
+        }
     }
     navigate_to(&app, local_url(CONNECT_PATH))
 }
@@ -138,8 +158,12 @@ fn navigate_to(app: &AppHandle, url: Url) -> Result<(), String> {
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     window.navigate(url).map_err(|e| format!("navigate: {e}"))?;
-    let _ = window.show();
-    let _ = window.set_focus();
+    if let Err(err) = window.show() {
+        log::warn!("navigate_to: window.show failed: {err}");
+    }
+    if let Err(err) = window.set_focus() {
+        log::warn!("navigate_to: window.set_focus failed: {err}");
+    }
     Ok(())
 }
 

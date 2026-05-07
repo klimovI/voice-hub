@@ -124,7 +124,9 @@ fn fire_toggle(state: &mut ListenerState, app: &AppHandle) {
         }
     }
     state.last_fire = Some(now);
-    let _ = app.emit("toggle-mute", ());
+    if let Err(err) = app.emit("toggle-mute", ()) {
+        log::warn!("listener: emit toggle-mute failed: {err}");
+    }
 }
 
 fn is_modifier_only_binding(b: Option<&InputBinding>) -> bool {
@@ -203,7 +205,9 @@ pub fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: Inp
     state.pressed.clear();
     state.mode = Mode::Normal;
     state.last_fire = Some(Instant::now()); // suppress retrigger from same press
-    let _ = app.emit("input-captured", binding);
+    if let Err(err) = app.emit("input-captured", binding) {
+        log::warn!("listener: emit input-captured failed: {err}");
+    }
 }
 
 // ---- Modifier helpers ----

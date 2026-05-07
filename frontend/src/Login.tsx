@@ -11,8 +11,12 @@ export function Login() {
   // reach the in-app TopBar button, so expose a way out from the login screen.
   // Same Tauri command as the TopBar / tray entry.
   async function handleChangeServer() {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('change_server');
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('change_server');
+    } catch (err) {
+      console.error('[login] change_server failed:', err);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
