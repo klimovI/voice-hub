@@ -16,7 +16,18 @@ export function PingToast() {
       role="status"
       aria-live="polite"
     >
-      📍 {ping.fromName} пингует
+      <span
+        className="msym msym-fill"
+        style={{
+          fontSize: 18,
+          animation: 'vh-bell-shake 0.6s ease-in-out',
+          transformOrigin: '50% 20%',
+        }}
+        aria-hidden="true"
+      >
+        notifications_active
+      </span>
+      <span>{ping.fromName} пингует</span>
     </div>
   );
 }
