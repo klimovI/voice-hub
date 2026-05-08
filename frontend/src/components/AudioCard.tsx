@@ -160,7 +160,7 @@ export function AudioCard({
         </div>
 
         {engine !== 'off' && (
-          <div className="grid gap-2">
+          <div className="grid gap-2 border-l border-line pl-4 ml-1">
             <label htmlFor="engine-variant" className="section-label">
               Алгоритм
             </label>

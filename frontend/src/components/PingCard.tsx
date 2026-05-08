@@ -50,7 +50,7 @@ export function PingCard() {
         </div>
 
         {pingsVisible && (
-          <>
+          <div className="grid gap-3 border-l border-line pl-4 ml-1">
             <div className="flex items-center justify-between gap-3">
               <span className="section-label">Звук</span>
               <Toggle
@@ -70,7 +70,7 @@ export function PingCard() {
                 />
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </section>

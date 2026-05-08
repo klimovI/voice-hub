@@ -213,7 +213,7 @@ export const useStore = create<AppState>((set, get) => ({
     saveBoolean(KEYS.muteIncomingPings, v);
     set({ muteIncomingPings: v });
   },
-  pingWindowFlashEnabled: loadBoolean(KEYS.pingWindowFlashEnabled, true),
+  pingWindowFlashEnabled: loadBoolean(KEYS.pingWindowFlashEnabled, false),
   setPingWindowFlashEnabled: (v) => {
     saveBoolean(KEYS.pingWindowFlashEnabled, v);
     set({ pingWindowFlashEnabled: v });
