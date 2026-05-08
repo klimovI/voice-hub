@@ -80,7 +80,11 @@ type peer struct {
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
 
-	lastPingTo map[string]time.Time
+	// lastPingReceivedAt is the timestamp of the last ping this peer received,
+	// from any sender. Guarded by Room.mu. Used to rate-limit incoming pings
+	// per target (one alert / 10 s) so a target doesn't get spammed by many
+	// senders simultaneously.
+	lastPingReceivedAt time.Time
 
 	// out is the per-peer outbound queue, drained by writeLoop. Broadcast
 	// loops enqueue here non-blocking and never wait on a slow socket; if
@@ -100,6 +104,12 @@ type peer struct {
 // the peer instead of blocking room-wide broadcasts. ~1024 × ~200B per
 // message ≈ 200 KB max buffer per stuck peer — acceptable.
 const peerOutBufLen = 1024
+
+// pingCooldown rate-limits incoming pings per target. After a ping reaches a
+// target, further pings to that same target from any sender within this window
+// are silently dropped, so a target doesn't get spammed when several peers
+// ping them at once.
+const pingCooldown = 10 * time.Second
 
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
@@ -312,7 +322,6 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		clientID:    hello.ClientID,
 		pc:          pc,
 		ws:          ws,
-		lastPingTo:  make(map[string]time.Time),
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -403,7 +412,6 @@ func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws 
 		clientID:    hello.ClientID,
 		chatOnly:    true,
 		ws:          ws,
-		lastPingTo:  make(map[string]time.Time),
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -721,15 +729,16 @@ func (r *Room) handlePing(p *peer, msg protocol.Envelope) {
 
 	r.mu.Lock()
 	target := r.peers[pc.To]
-	r.mu.Unlock()
-
 	if target == nil {
+		r.mu.Unlock()
 		return
 	}
-	if time.Since(p.lastPingTo[pc.To]) < 10*time.Second {
+	if time.Since(target.lastPingReceivedAt) < pingCooldown {
+		r.mu.Unlock()
 		return
 	}
-	p.lastPingTo[pc.To] = time.Now()
+	target.lastPingReceivedAt = time.Now()
+	r.mu.Unlock()
 
 	payload, _ := json.Marshal(protocol.PingServer{From: p.id, FromName: p.displayName})
 	env, _ := json.Marshal(protocol.Envelope{Event: protocol.MsgTypePing, Data: payload})
