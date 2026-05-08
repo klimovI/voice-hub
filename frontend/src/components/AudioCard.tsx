@@ -158,7 +158,7 @@ export function AudioCard({
               value={micDeviceId ?? ''}
               onChange={(e) => onMicDeviceSelect(e.target.value || null)}
               className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
-                bg-bg-input border border-line text-body cursor-pointer
+                bg-bg-input border border-line text-muted cursor-pointer
                 hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
             >
               <option value="">Системный по умолчанию</option>
@@ -200,7 +200,7 @@ export function AudioCard({
                 value={engine}
                 onChange={(e) => onEngineSelect(e.target.value as ActiveEngineKind)}
                 className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
-                  bg-bg-input border border-line text-body cursor-pointer
+                  bg-bg-input border border-line text-muted cursor-pointer
                   hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
               >
                 {ENGINE_OPTIONS.map((opt) => (
