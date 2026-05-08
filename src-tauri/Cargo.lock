@@ -4977,6 +4977,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "url",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
