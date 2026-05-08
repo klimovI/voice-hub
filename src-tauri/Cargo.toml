@@ -26,6 +26,3 @@ rdev = "0.5"
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 url = "2"
 png = "0.18"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

@@ -4,8 +4,6 @@ mod listener;
 mod shortcut;
 mod tray;
 mod tray_flash;
-#[cfg(target_os = "windows")]
-mod taskbar_icon;
 mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};

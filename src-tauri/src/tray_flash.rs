@@ -76,11 +76,6 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
                 }
                 Err(e) => error!("tray_flash: window set_icon failed: {e}"),
             }
-            #[cfg(target_os = "windows")]
-            match w.hwnd() {
-                Ok(hwnd) => crate::taskbar_icon::set_alert(hwnd.0),
-                Err(e) => warn!("tray_flash: hwnd() failed: {e}"),
-            }
             if let Err(e) = w.request_user_attention(Some(UserAttentionType::Informational)) {
                 warn!("tray_flash: request_user_attention failed: {e}");
             }
@@ -116,11 +111,6 @@ pub fn revert_if_active(app: &AppHandle) -> Result<(), String> {
             match w.set_icon(inner.normal.clone()) {
                 Ok(()) => info!("tray_flash: window icon reverted on focus"),
                 Err(e) => error!("tray_flash: window revert set_icon failed: {e}"),
-            }
-            #[cfg(target_os = "windows")]
-            match w.hwnd() {
-                Ok(hwnd) => crate::taskbar_icon::clear(hwnd.0),
-                Err(e) => warn!("tray_flash: hwnd() failed on revert: {e}"),
             }
         }
         inner.window_icon_active = false;
