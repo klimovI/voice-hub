@@ -190,13 +190,11 @@ export function AudioCard({
         </div>
 
         {engine !== 'off' && (
-          <div className="grid gap-2 border-l border-line pl-4 ml-1">
-            <label htmlFor="engine-variant" className="section-label">
-              Алгоритм
-            </label>
+          <div className="border-l border-line pl-4 ml-1">
             <div className="relative">
               <select
                 id="engine-variant"
+                aria-label="Алгоритм шумоподавления"
                 value={engine}
                 onChange={(e) => onEngineSelect(e.target.value as ActiveEngineKind)}
                 className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] uppercase tracking-[0.1em]
