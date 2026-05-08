@@ -211,6 +211,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
               value={participant.localVolume}
               onChange={handleVolumeChange}
               className="vh-range vh-range-sm"
+              style={{ '--fill-pct': `${participant.localVolume / 3}%` } as React.CSSProperties}
             />
           </label>
         </div>

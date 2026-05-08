@@ -111,10 +111,40 @@ export function AudioCard({
           id="audio-reset"
           type="button"
           onClick={onReset}
-          className="btn btn-secondary btn-mini"
+          className="btn btn-secondary btn-mini text-muted hover:border-danger! hover:text-danger! active:translate-y-0! active:bg-danger! active:border-danger! active:text-accent-ink!"
         >
           Сбросить
         </button>
+      </div>
+
+      <div className="grid gap-2">
+        <SliderHead label="Громкость микрофона" value={`${sendVolume}%`} />
+        <input
+          id="send-volume"
+          type="range"
+          min="0"
+          max="300"
+          step="5"
+          value={sendVolume}
+          onChange={(e) => onSendVolumeChange(Number(e.target.value))}
+          className="vh-range"
+          style={{ '--fill-pct': `${sendVolume / 3}%` } as React.CSSProperties}
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <SliderHead label="Общая громкость" value={`${outputVolume}%`} />
+        <input
+          id="output-volume"
+          type="range"
+          min="0"
+          max="300"
+          step="5"
+          value={outputVolume}
+          onChange={(e) => onOutputVolumeChange(Number(e.target.value))}
+          className="vh-range"
+          style={{ '--fill-pct': `${outputVolume / 3}%` } as React.CSSProperties}
+        />
       </div>
 
       {showMicPicker && (
@@ -189,34 +219,6 @@ export function AudioCard({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="grid gap-2">
-        <SliderHead label="Громкость микрофона" value={`${sendVolume}%`} />
-        <input
-          id="send-volume"
-          type="range"
-          min="0"
-          max="300"
-          step="5"
-          value={sendVolume}
-          onChange={(e) => onSendVolumeChange(Number(e.target.value))}
-          className="vh-range"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <SliderHead label="Общая громкость" value={`${outputVolume}%`} />
-        <input
-          id="output-volume"
-          type="range"
-          min="0"
-          max="300"
-          step="5"
-          value={outputVolume}
-          onChange={(e) => onOutputVolumeChange(Number(e.target.value))}
-          className="vh-range"
-        />
       </div>
 
     </section>

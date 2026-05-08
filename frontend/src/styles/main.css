@@ -173,7 +173,16 @@
   .vh-range::-webkit-slider-runnable-track {
     width: 100%;
     height: 4px;
-    background: var(--color-line);
+    background: linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-accent) 70%, var(--color-line)) 0%,
+      var(--color-line) var(--fill-pct, 0%),
+      var(--color-line) 100%
+    );
+    transition: filter 0.12s ease;
+  }
+  .vh-range:hover::-webkit-slider-runnable-track {
+    filter: brightness(1.2);
   }
   .vh-range::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -188,13 +197,22 @@
     transition: transform 0.12s ease;
   }
   .vh-range::-webkit-slider-thumb:hover {
-    transform: scaleX(1.3);
+    transform: scale(0.9);
   }
   .vh-range::-moz-range-track {
     width: 100%;
     height: 4px;
-    background: var(--color-line);
+    background: linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-accent) 70%, var(--color-line)) 0%,
+      var(--color-line) var(--fill-pct, 0%),
+      var(--color-line) 100%
+    );
     border: 0;
+    transition: filter 0.12s ease;
+  }
+  .vh-range:hover::-moz-range-track {
+    filter: brightness(1.2);
   }
   .vh-range::-moz-range-thumb {
     width: 18px;
@@ -203,6 +221,10 @@
     border: 0;
     border-radius: 0;
     cursor: pointer;
+    transition: transform 0.12s ease;
+  }
+  .vh-range::-moz-range-thumb:hover {
+    transform: scale(0.9);
   }
   .vh-range:disabled {
     opacity: 0.4;
@@ -232,12 +254,22 @@
   /* Square toggle — sharp, 48x24, green when on, dark square dot slides. */
   .vh-toggle {
     @apply relative inline-block w-12 h-6 shrink-0 cursor-pointer
-      bg-bg-0 border border-line transition-colors duration-150;
+      bg-bg-0 border border-line transition-[color,background-color,border-color,filter] duration-150;
+  }
+  .vh-toggle:hover {
+    border-color: var(--color-accent);
+  }
+  .vh-toggle[aria-checked='true']:hover,
+  .vh-toggle[data-checked='true']:hover {
+    filter: brightness(1.2);
   }
   .vh-toggle-dot {
     @apply absolute left-[3px] w-4 h-4 bg-muted-2
       transition-[transform,background] duration-150;
     top: calc(50% - 8px);
+  }
+  .vh-toggle .vh-toggle-dot:hover {
+    transform: translateX(3px);
   }
   .vh-toggle[aria-checked='true'],
   .vh-toggle[data-checked='true'] {
@@ -248,6 +280,10 @@
   .vh-toggle[data-checked='true'] .vh-toggle-dot {
     transform: translateX(24px);
     background-color: var(--color-bg-0);
+  }
+  .vh-toggle[aria-checked='true'] .vh-toggle-dot:hover,
+  .vh-toggle[data-checked='true'] .vh-toggle-dot:hover {
+    transform: translateX(21px);
   }
   .vh-toggle:focus-visible {
     outline: none;

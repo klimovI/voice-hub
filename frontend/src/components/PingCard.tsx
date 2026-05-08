@@ -35,9 +35,24 @@ export function PingCard() {
 
   const pingsVisible = !muteIncomingPings;
 
+  const handleReset = () => {
+    setMuteIncomingPings(false);
+    setPingSoundEnabled(true);
+    setPingWindowFlashEnabled(false);
+  };
+
   return (
     <section className="card grid gap-5 p-6">
-      <h2 className="card-title">Пинг</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="card-title">Пинг</h2>
+        <button
+          type="button"
+          onClick={handleReset}
+          className="btn btn-secondary btn-mini text-muted hover:border-danger! hover:text-danger! active:translate-y-0! active:bg-danger! active:border-danger! active:text-accent-ink!"
+        >
+          Сбросить
+        </button>
+      </div>
 
       <div className="grid gap-3">
         <div className="flex items-center justify-between gap-3">

@@ -23,7 +23,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
           type="button"
           onClick={api.reset}
           disabled={api.capturing}
-          className="btn btn-secondary btn-mini shrink-0"
+          className="btn btn-secondary btn-mini shrink-0 text-muted hover:border-danger! hover:text-danger! active:translate-y-0! active:bg-danger! active:border-danger! active:text-accent-ink!"
         >
           Сбросить
         </button>
@@ -38,38 +38,27 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
             value={display}
             onClick={api.start}
             onBlur={api.cancel}
-            className="input-field cursor-pointer uppercase tracking-[0.1em] pr-10 mt-0!"
+            className="input-field cursor-pointer uppercase tracking-[0.1em] pr-10 mt-0! text-muted!"
           />
-          {!api.capturing && api.binding && (
+          {(api.capturing || api.binding) && (
             <button
               id="shortcut-clear"
               type="button"
-              aria-label="Удалить привязку"
-              title="Удалить"
+              aria-label={api.capturing ? 'Отмена' : 'Удалить привязку'}
+              title={api.capturing ? 'Отмена' : 'Удалить'}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={api.clear}
-              className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center w-7 h-7
-                text-muted-2 hover:text-danger transition-colors"
+              onClick={api.capturing ? api.cancel : api.clear}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center w-7 h-7 transition-colors hover:bg-danger/15 ${
+                api.capturing ? 'text-danger' : 'text-muted-2 hover:text-danger'
+              }`}
             >
-              <span className="msym" style={{ fontSize: 18 }}>
+              <span className="msym" style={{ fontSize: 20 }}>
                 close
               </span>
             </button>
           )}
         </div>
       </div>
-      {api.capturing && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            id="shortcut-cancel"
-            type="button"
-            onClick={api.cancel}
-            className="btn btn-secondary btn-mini"
-          >
-            Отмена
-          </button>
-        </div>
-      )}
     </section>
   );
 }
