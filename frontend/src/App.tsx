@@ -16,7 +16,6 @@ import { SessionCard } from './components/SessionCard';
 import { AudioCard } from './components/AudioCard';
 import { HotkeyCard } from './components/HotkeyCard';
 import { ParticipantsCard } from './components/ParticipantsCard';
-import { LurkersCard } from './components/LurkersCard';
 import { ChatPanel } from './components/ChatPanel';
 import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
@@ -270,14 +269,16 @@ export function App() {
             <SessionCard
               onJoin={session.join}
               onLeave={session.leave}
-              onRoomSelect={(slug) => void session.switchRoom(slug)}
               onToggleSelfMute={handleToggleSelfMute}
               onToggleDeafen={handleToggleDeafen}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
             />
-            <ParticipantsCard onRemoteGainChange={audio.applyAllRemoteGains} onPingUser={handlePingUser} />
-            <LurkersCard onPingUser={handlePingUser} />
+            <ParticipantsCard
+              onRemoteGainChange={audio.applyAllRemoteGains}
+              onPingUser={handlePingUser}
+              onRoomSelect={(slug) => void session.switchRoom(slug)}
+            />
           </div>
           <div className="grid gap-4 content-start">
             <ChatPanel roomId={roomSlug} onSend={handleChatSend} />
