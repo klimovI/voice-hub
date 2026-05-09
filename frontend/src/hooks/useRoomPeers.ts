@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { ROOM_SLUGS, type RoomSlug } from '../rooms';
 
-export type PeerSummary = { id: string; displayName: string };
+export type PeerSummary = { id: string; displayName: string; chatOnly: boolean };
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -18,12 +18,11 @@ async function fetchRoomPeers(slug: string): Promise<PeerSummary[] | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as PeersResponse;
-    return (data.peers ?? [])
-      .filter((p) => !p.chatOnly)
-      .map((p) => ({
-        id: p.id,
-        displayName: p.displayName?.trim() || `peer-${p.id}`,
-      }));
+    return (data.peers ?? []).map((p) => ({
+      id: p.id,
+      displayName: p.displayName?.trim() || `peer-${p.id}`,
+      chatOnly: !!p.chatOnly,
+    }));
   } catch {
     return null;
   }

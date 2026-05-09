@@ -9,5 +9,5 @@ export function formatEngine(engine: string): string {
 }
 
 export function makeGuestName(): string {
-  return `guest-${Math.random().toString(36).slice(2, 7)}`;
+  return `~${Math.random().toString(36).slice(2, 7)}`;
 }

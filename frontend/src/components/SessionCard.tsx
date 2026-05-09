@@ -75,8 +75,17 @@ export function SessionCard({
           {ROOM_SLUGS.map((slug: RoomSlug) => {
             const active = slug === roomSlug;
             const peers = roomPeers[slug];
-            const count = peers.length;
-            const nameLine = count > 0 ? peers.map((p) => p.displayName).join(', ') : null;
+            const total = peers.length;
+            const voice = peers.filter((p) => !p.chatOnly).length;
+            const text = total - voice;
+            const nameLine =
+              total > 0
+                ? peers
+                    .slice()
+                    .sort((a, b) => a.id.localeCompare(b.id))
+                    .map((p) => p.displayName)
+                    .join(', ')
+                : null;
 
             // joining: block all clicks (too racy)
             // joined + current: no-op click, cursor-default
@@ -110,10 +119,18 @@ export function SessionCard({
                 </span>
                 <span
                   className={`text-[12px] tabular-nums tracking-[0.1em] px-2 py-0.5 border shrink-0 ${
-                    count > 0 ? 'border-accent text-accent' : 'border-line text-muted-2'
+                    voice > 0 ? 'border-accent' : 'border-line'
                   }`}
+                  title={voice > 0 && text > 0 ? `${voice} в голосе, ${text} в чате` : undefined}
                 >
-                  {count}
+                  {voice > 0 ? (
+                    <>
+                      <span className="text-accent">{voice}</span>
+                      {text > 0 && <span className="text-muted-2">/{text}</span>}
+                    </>
+                  ) : (
+                    <span className="text-muted-2">{total}</span>
+                  )}
                 </span>
                 {nameLine && (
                   <span className="flex-1 min-w-0 text-left text-muted-2 text-[11px] tracking-[0.05em] truncate">
