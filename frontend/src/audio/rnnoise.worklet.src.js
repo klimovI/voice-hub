@@ -13,12 +13,10 @@
 const QUANTUM = 128;
 const FRAME = 480;
 const RING_CAPACITY = 1920;
+const Q15 = 32768;
+const INV_Q15 = 1 / 32768;
 
 class RnnoiseProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
-    return [{ name: 'mix', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'k-rate' }];
-  }
-
   constructor() {
     super();
     this.ready = false;
@@ -67,7 +65,7 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
     }
   }
 
-  process(inputs, outputs, parameters) {
+  process(inputs, outputs) {
     const input = inputs[0] && inputs[0][0];
     const output = outputs[0] && outputs[0][0];
     if (!output) return true;
@@ -77,11 +75,6 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       else output.fill(0);
       return true;
     }
-
-    const mixParam = parameters.mix;
-    const strength = mixParam.length > 0 ? mixParam[0] : 1;
-    const wet = strength;
-    const dry = 1 - strength;
 
     const frame = this.frame;
     const inBuf = this.inBuf;
@@ -94,16 +87,14 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
     this.writeHead = (this.writeHead + QUANTUM) % RING_CAPACITY;
     this.buffered += QUANTUM;
 
-    // 2. Denoise complete frames in place. inBuf slot becomes the dry source,
-    // outBuf same slot receives wet/dry mix. 1920 % 480 === 0 so frame slot
-    // never wraps either.
+    // 2. Denoise complete frames in place. RNNoise expects Q15-range floats,
+    // so scale up before processFrame and back down on the way out.
+    // 1920 % 480 === 0 so frame slot never wraps.
     while (this.buffered >= FRAME) {
       const slot = this.denoisedUpTo;
-      for (let i = 0; i < FRAME; i++) frame[i] = inBuf[slot + i] * 32768;
+      for (let i = 0; i < FRAME; i++) frame[i] = inBuf[slot + i] * Q15;
       this.state.processFrame(frame);
-      for (let i = 0; i < FRAME; i++) {
-        outBuf[slot + i] = (frame[i] / 32768) * wet + inBuf[slot + i] * dry;
-      }
+      for (let i = 0; i < FRAME; i++) outBuf[slot + i] = frame[i] * INV_Q15;
       this.denoisedUpTo = (slot + FRAME) % RING_CAPACITY;
       this.buffered -= FRAME;
       this.pending += FRAME;

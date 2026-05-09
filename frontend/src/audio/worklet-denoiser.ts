@@ -6,8 +6,8 @@
 // init timeout. Engines differ only in:
 //   - what they fetch at preload (worklet JS, optional WASM/model bytes,
 //     or a runtime-built blob URL),
-//   - whether they post an init payload after construction (DFN3 ships
-//     wasm + model bytes via port; RNNoise needs nothing).
+//   - whether they post an init payload after construction (heavier
+//     engines ship wasm + model bytes via port; RNNoise needs nothing).
 //
 // `preloadAssets` is the single seam: it returns the resolved module URL
 // plus an optional init payload. The factory caches both, retries on
@@ -43,7 +43,7 @@ export type WorkletDenoiserConfig = {
   sampleRate?: number;
   // How long to wait for the worklet's {ready} reply before giving up.
   // Heavier engines (large WASM compile, model graph init) need a wider
-  // budget — DFN3 uses 10s, RNNoise the 3s default.
+  // budget; RNNoise uses the 3s default.
   initTimeoutMs?: number;
   preloadAssets: () => Promise<WorkletDenoiserAssets>;
 };
@@ -120,7 +120,6 @@ export function createWorkletDenoiser(cfg: WorkletDenoiserConfig): Denoiser {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         channelCount: 1,
-        parameterData: { mix: 1 },
       });
     } catch (err) {
       console.error(`${tag} node construction failed:`, err);

@@ -15,8 +15,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bundle:rnnoise": "node scripts/bundle-rnnoise.mjs",
-    "bundle:dfn3": "node scripts/bundle-dfn3.mjs"
+    "bundle:rnnoise": "node scripts/bundle-rnnoise.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
