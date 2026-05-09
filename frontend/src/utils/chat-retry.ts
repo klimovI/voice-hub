@@ -17,7 +17,7 @@ export function retryPendingChats(
   ourClientId: string,
 ): void {
   if (!send) return;
-  const roomId = window.location.host;
+  const roomId = useStore.getState().roomSlug ?? '';
   const msgs = useStore.getState().chatByRoom[roomId] ?? [];
   const cutoff = Date.now() - RETRY_WINDOW_MS;
   for (const m of msgs) {

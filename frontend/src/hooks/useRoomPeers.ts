@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
+import { ROOM_SLUGS, type RoomSlug } from '../rooms';
 
-export interface PeerPreview {
-  id: string;
-  displayName: string;
-}
+export type PeerSummary = { id: string; displayName: string };
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 2000;
 
-interface PeersResponse {
+type PeersResponse = {
   peers?: { id: string; displayName?: string; chatOnly?: boolean }[];
-}
+};
 
-async function fetchPeers(slug: string): Promise<PeerPreview[] | null> {
+async function fetchRoomPeers(slug: string): Promise<PeerSummary[] | null> {
   try {
     const res = await fetch(`/api/room/${slug}/peers`, {
       credentials: 'same-origin',
@@ -20,8 +18,6 @@ async function fetchPeers(slug: string): Promise<PeerPreview[] | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as PeersResponse;
-    // Preview is the voice roster. Lurkers are rendered separately by
-    // LurkersCard (off the live participants store), so filter them out here.
     return (data.peers ?? [])
       .filter((p) => !p.chatOnly)
       .map((p) => ({
@@ -33,20 +29,20 @@ async function fetchPeers(slug: string): Promise<PeerPreview[] | null> {
   }
 }
 
-// Polls the room roster while the user is not yet joined, so the pre-connect
-// screen can show who is already in the room. Stops polling once joined —
-// live `participants` from the SFU events take over.
-export function usePeersPreview(): PeerPreview[] {
+export function useRoomPeers(): Record<RoomSlug, PeerSummary[]> {
+  const [peers, setPeers] = useState<Record<RoomSlug, PeerSummary[]>>({
+    room1: [],
+    room2: [],
+    room3: [],
+  });
+
   const joinState = useStore((s) => s.joinState);
-  const roomSlug = useStore((s) => s.roomSlug);
-  const [peers, setPeers] = useState<PeerPreview[]>([]);
+  // Re-trigger an immediate refetch whenever the live roster changes (WS-driven
+  // peer-joined/peer-left events). Gives the current room instant updates;
+  // other rooms still rely on the poll cadence.
+  const participantsSize = useStore((s) => s.participants.size);
 
   useEffect(() => {
-    if (joinState === 'joined') {
-      setPeers([]);
-      return;
-    }
-
     let cancelled = false;
     let timer: number | null = null;
 
@@ -56,9 +52,16 @@ export function usePeersPreview(): PeerPreview[] {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
         return;
       }
-      const result = await fetchPeers(roomSlug);
+      const results = await Promise.all(ROOM_SLUGS.map((slug) => fetchRoomPeers(slug)));
       if (cancelled) return;
-      if (result) setPeers(result);
+      setPeers((prev) => {
+        const next: Record<RoomSlug, PeerSummary[]> = { ...prev };
+        ROOM_SLUGS.forEach((slug, i) => {
+          const v = results[i];
+          if (v !== null) next[slug] = v;
+        });
+        return next;
+      });
       timer = window.setTimeout(tick, POLL_INTERVAL_MS);
     };
 
@@ -68,7 +71,7 @@ export function usePeersPreview(): PeerPreview[] {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [joinState, roomSlug]);
+  }, [joinState, participantsSize]);
 
   return peers;
 }

@@ -79,15 +79,29 @@ func main() {
 	stunURL := "stun:" + cfg.PublicIP + ":3478"
 	turnURL := "turn:" + cfg.PublicIP + ":3478?transport=udp"
 
-	room, err := sfu.NewRoom(sfu.Config{
-		ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},
-		NAT1To1IPs:  []string{cfg.PublicIP},
-		UDPPortMin:  cfg.UDPPortMin,
-		UDPPortMax:  cfg.UDPPortMax,
-		AppHostname: cfg.AppHostname,
-	})
-	if err != nil {
-		log.Fatalf("sfu init: %v", err)
+	roomSlugs := []string{"room1", "room2", "room3"}
+	rooms := make(map[string]*sfu.Room, len(roomSlugs))
+	for _, slug := range roomSlugs {
+		rm, err := sfu.NewRoom(sfu.Config{
+			ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},
+			NAT1To1IPs:  []string{cfg.PublicIP},
+			UDPPortMin:  cfg.UDPPortMin,
+			UDPPortMax:  cfg.UDPPortMax,
+			AppHostname: cfg.AppHostname,
+		})
+		if err != nil {
+			log.Fatalf("sfu init %q: %v", slug, err)
+		}
+		rooms[slug] = rm
+	}
+
+	resolveRoom := func(w http.ResponseWriter, req *http.Request) (*sfu.Room, bool) {
+		rm, ok := rooms[req.PathValue("roomID")]
+		if !ok {
+			http.NotFound(w, req)
+			return nil, false
+		}
+		return rm, true
 	}
 
 	turnServer, err := turnsrv.Start(turnsrv.Config{
@@ -111,9 +125,21 @@ func main() {
 	mux.HandleFunc("/api/version", handler.Version(version))
 	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, adminVer, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
 	mux.HandleFunc("/api/logout", handler.Logout(cfg.CookieSecure))
-	mux.Handle("/ws", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
-		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(room.ServeWS))))
-	mux.Handle("/api/room/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.RoomPeersOf(room)))
+	mux.Handle("/ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
+		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			rm, ok := resolveRoom(w, req)
+			if !ok {
+				return
+			}
+			rm.ServeWS(w, req)
+		}))))
+	mux.Handle("/api/room/{roomID}/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		rm, ok := resolveRoom(w, req)
+		if !ok {
+			return
+		}
+		handler.RoomPeersOf(rm).ServeHTTP(w, req)
+	})))
 	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
 	mux.Handle("/api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
 	mux.Handle("/api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
@@ -177,7 +203,9 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: http: %v", err)
 	}
-	room.Close()
+	for _, rm := range rooms {
+		rm.Close()
+	}
 	if err := turnServer.Close(); err != nil {
 		log.Printf("shutdown: turn: %v", err)
 	}

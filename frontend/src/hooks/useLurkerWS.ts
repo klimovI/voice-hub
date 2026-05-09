@@ -43,6 +43,12 @@ export function useLurkerWS({
   onPing,
   voiceActive,
 }: UseLurkerWSDeps): UseLurkerWSReturn {
+  const roomSlug = useStore((s) => s.roomSlug);
+  const roomSlugRef = useRef(roomSlug);
+  useEffect(() => {
+    roomSlugRef.current = roomSlug;
+  }, [roomSlug]);
+
   const clientRef = useRef<ChatOnlyClient | null>(null);
   const clientIdRef = useRef(loadOrCreateClientId());
   const reconnectTimerRef = useRef<number | null>(null);
@@ -147,7 +153,7 @@ export function useLurkerWS({
     clientRef.current = client;
     void client
       .connect({
-        wsUrl: buildWsUrl(),
+        wsUrl: buildWsUrl(roomSlugRef.current),
         displayName: displayNameRef.current,
         clientId: clientIdRef.current,
       })
@@ -184,7 +190,7 @@ export function useLurkerWS({
       wantOpenRef.current = false;
       close();
     };
-  }, [voiceActive, open, close]);
+  }, [voiceActive, roomSlug, open, close]);
 
   const sendChat = useCallback((payload: import('../sfu/protocol').ChatSendPayload): void => {
     clientRef.current?.sendChat(payload);

@@ -4,6 +4,7 @@
 
 import type { EngineKind } from '../types';
 import { ENGINE_IDS } from '../audio/engine';
+import { isRoomSlug, DEFAULT_ROOM_SLUG, type RoomSlug } from '../rooms';
 
 // Legacy key, no longer written. We migrate it away on startup so users who
 // reloaded while deafened don't get stuck with output muted forever (the
@@ -45,6 +46,8 @@ export const KEYS = {
   pingSoundEnabled: 'voice-hub.ping-sound-enabled',
   muteIncomingPings: 'voice-hub.mute-incoming-pings',
   pingWindowFlashEnabled: 'voice-hub.ping-window-flash-enabled',
+  // Selected room slug
+  roomSlug: 'voice-hub.room-slug',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].
@@ -207,6 +210,15 @@ export function loadEngine(): EngineKind {
 
 export function saveEngine(e: EngineKind): void {
   localStorage.setItem(KEYS.engine, e);
+}
+
+export function loadRoomSlug(): RoomSlug {
+  const raw = localStorage.getItem(KEYS.roomSlug);
+  return isRoomSlug(raw) ? raw : DEFAULT_ROOM_SLUG;
+}
+
+export function saveRoomSlug(s: RoomSlug): void {
+  localStorage.setItem(KEYS.roomSlug, s);
 }
 
 // Selected microphone deviceId. null = use system default.

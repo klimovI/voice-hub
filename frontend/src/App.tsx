@@ -218,6 +218,7 @@ export function App() {
 
   const joinState = useStore((s) => s.joinState);
   const voiceActive = joinState === 'joined' || joinState === 'joining';
+  const roomSlug = useStore((s) => s.roomSlug);
 
   const lurker = useLurkerWS({
     displayName,
@@ -269,6 +270,7 @@ export function App() {
             <SessionCard
               onJoin={session.join}
               onLeave={session.leave}
+              onRoomSelect={(slug) => void session.switchRoom(slug)}
               onToggleSelfMute={handleToggleSelfMute}
               onToggleDeafen={handleToggleDeafen}
               displayName={displayName}
@@ -278,7 +280,7 @@ export function App() {
             <LurkersCard onPingUser={handlePingUser} />
           </div>
           <div className="grid gap-4 content-start">
-            <ChatPanel roomId={session.getRoomId()} onSend={handleChatSend} />
+            <ChatPanel roomId={roomSlug} onSend={handleChatSend} />
           </div>
           <div className="grid gap-4 content-start">
             <AudioCard

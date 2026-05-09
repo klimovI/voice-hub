@@ -11,15 +11,18 @@ import {
   loadEngine,
   loadMicDeviceId,
   loadNumber,
+  loadRoomSlug,
   saveBoolean,
   saveSendVolume,
   saveOutputVolume,
   saveEngine,
   saveMicDeviceId,
+  saveRoomSlug,
   loadChatHistory,
   saveChatHistory,
   type PersistedChatMessage,
 } from '../utils/storage';
+import type { RoomSlug } from '../rooms';
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -93,6 +96,9 @@ export interface AppState {
   // Selected microphone deviceId. null = system default (no deviceId constraint).
   micDeviceId: string | null;
   setMicDeviceId: (id: string | null) => void;
+
+  roomSlug: RoomSlug;
+  setRoomSlug: (s: RoomSlug) => void;
 
   shortcut: InputBinding | null;
   setShortcut: (s: InputBinding | null) => void;
@@ -186,6 +192,12 @@ export const useStore = create<AppState>((set, get) => ({
   setMicDeviceId: (id) => {
     saveMicDeviceId(id);
     set({ micDeviceId: id });
+  },
+
+  roomSlug: loadRoomSlug(),
+  setRoomSlug: (s) => {
+    saveRoomSlug(s);
+    set({ roomSlug: s });
   },
 
   shortcut: loadBinding(),

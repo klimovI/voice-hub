@@ -1,8 +1,11 @@
 import { useStore } from '../store/useStore';
+import { ROOM_SLUGS, ROOM_LABELS, type RoomSlug } from '../rooms';
+import { useRoomPeers } from '../hooks/useRoomPeers';
 
 interface Props {
   onJoin: (displayName: string) => void;
   onLeave: () => void;
+  onRoomSelect: (slug: RoomSlug) => void;
   onToggleSelfMute: () => void;
   onToggleDeafen: () => void;
   displayName: string;
@@ -12,6 +15,7 @@ interface Props {
 export function SessionCard({
   onJoin,
   onLeave,
+  onRoomSelect,
   onToggleSelfMute,
   onToggleDeafen,
   displayName,
@@ -21,6 +25,9 @@ export function SessionCard({
   const selfMuted = useStore((s) => s.selfMuted);
   const deafened = useStore((s) => s.deafened);
   const configReady = useStore((s) => s.configReady);
+  const roomSlug = useStore((s) => s.roomSlug);
+
+  const roomPeers = useRoomPeers();
 
   const joining = joinState === 'joining';
   const joined = joinState === 'joined';
@@ -64,6 +71,60 @@ export function SessionCard({
       <h2 className="card-title">Комната</h2>
 
       <div className="grid gap-3">
+        <div className="grid gap-1.5">
+          {ROOM_SLUGS.map((slug: RoomSlug) => {
+            const active = slug === roomSlug;
+            const peers = roomPeers[slug];
+            const count = peers.length;
+            const nameLine = count > 0 ? peers.map((p) => p.displayName).join(', ') : null;
+
+            // joining: block all clicks (too racy)
+            // joined + current: no-op click, cursor-default
+            // joined + other: switchable target
+            // idle: free selection
+            const isJoining = joinState === 'joining';
+            const isJoined = joinState === 'joined';
+            const switchable = isJoined && !active;
+            const clickable = !isJoining && (!isJoined || switchable);
+
+            let title: string | undefined;
+            if (isJoining) title = 'Подождите…';
+            else if (switchable) title = 'Перейти в эту комнату';
+
+            return (
+              <button
+                key={slug}
+                type="button"
+                onClick={clickable ? () => onRoomSelect(slug) : undefined}
+                title={title}
+                className={`flex items-center gap-3 px-3 py-2.5 transition-colors duration-150 ${
+                  active
+                    ? tileOn
+                    : switchable
+                      ? 'bg-bg-0 border border-line text-muted hover:border-line-strong hover:border-accent/50'
+                      : 'bg-bg-0 border border-line text-muted hover:border-line-strong'
+                } ${isJoining ? 'opacity-50 cursor-not-allowed' : active && isJoined ? 'cursor-default' : 'cursor-pointer'}`}
+              >
+                <span className="text-[13px] font-bold uppercase tracking-[0.15em] shrink-0">
+                  {ROOM_LABELS[slug]}
+                </span>
+                <span
+                  className={`text-[12px] tabular-nums tracking-[0.1em] px-2 py-0.5 border shrink-0 ${
+                    count > 0 ? 'border-accent text-accent' : 'border-line text-muted-2'
+                  }`}
+                >
+                  {count}
+                </span>
+                {nameLine && (
+                  <span className="flex-1 min-w-0 text-left text-muted-2 text-[11px] tracking-[0.05em] truncate">
+                    {nameLine}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid gap-2">
           <label htmlFor="display-name" className="section-label">
             Имя

@@ -20,7 +20,7 @@ export async function loadAppConfig(): Promise<AppConfig> {
   return { iceServers: raw.iceServers as RTCIceServer[], role: raw.role as Role };
 }
 
-export function buildWsUrl(): string {
+export function buildWsUrl(roomSlug: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/ws`;
+  return `${proto}//${window.location.host}/ws/${roomSlug}`;
 }

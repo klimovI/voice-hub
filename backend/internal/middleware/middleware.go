@@ -32,7 +32,7 @@ func (s *statusRecorder) WriteHeader(code int) {
 // is the same identity the rate limiter keys on.
 func AccessLog(trusted []netip.Prefix, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/ws" {
+		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/ws/") {
 			next.ServeHTTP(w, r)
 			return
 		}

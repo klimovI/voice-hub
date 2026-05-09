@@ -31,6 +31,7 @@ import { loadAppConfig, buildWsUrl } from '../config';
 import { isTauri } from '../utils/tauri';
 import { createReconnectScheduler } from '../utils/reconnect';
 import type { EngineKind, ParticipantUI } from '../types';
+import type { RoomSlug } from '../rooms';
 import type { MicGraph } from '../audio/mic-graph';
 
 export type UseSessionManagerDeps = {
@@ -48,6 +49,8 @@ export type UseSessionManagerDeps = {
 export type UseSessionManagerReturn = {
   join: (name: string) => Promise<void>;
   leave: () => void;
+  /** Switch to a different room. No-op if already in that room or mid-join. */
+  switchRoom: (slug: RoomSlug) => Promise<void>;
   /** Read the peer id on demand. Returns null when not joined. No ref escape. */
   getPeerId: () => string | null;
   /**
@@ -227,10 +230,20 @@ export function useSessionManager({
     [sfu],
   );
 
-  // Stable room ID: the server host. All users on the same host share one history bucket.
-  const roomId = window.location.host;
+  // Tracks the currently selected room slug. Picker is disabled while joined,
+  // so this only changes between sessions — chat history key won't shift mid-call.
+  // Kept in sync with the store via subscription below so idle lurker chats land
+  // in the right bucket.
+  const roomSlugRef = useRef<string>(useStore.getState().roomSlug);
+  useEffect(() => {
+    return useStore.subscribe((state, prev) => {
+      if (state.roomSlug !== prev.roomSlug) {
+        roomSlugRef.current = state.roomSlug;
+      }
+    });
+  }, []);
 
-  const getRoomId = useCallback(() => roomId, [roomId]);
+  const getRoomId = useCallback(() => roomSlugRef.current, []);
 
   const pingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -239,9 +252,9 @@ export function useSessionManager({
     if (persistDebounceRef.current !== null) clearTimeout(persistDebounceRef.current);
     persistDebounceRef.current = setTimeout(() => {
       persistDebounceRef.current = null;
-      useStore.getState().persistChat(roomId);
+      useStore.getState().persistChat(roomSlugRef.current);
     }, 250);
-  }, [roomId]);
+  }, []);
 
   const sendChat = useCallback(
     (text: string, clientMsgId: string): void => {
@@ -259,7 +272,7 @@ export function useSessionManager({
       const sender = useStore.getState().participants.get(data.from);
       // Prefer server-snapshotted name (survives lurker / post-leave lookup).
       // Fall back to participants map entry for older server versions.
-      useStore.getState().chatReceive(roomId, {
+      useStore.getState().chatReceive(roomSlugRef.current, {
         ...data,
         pending: false,
         senderName: data.senderName ?? sender?.display,
@@ -267,7 +280,7 @@ export function useSessionManager({
       });
       schedulePersist();
     },
-    [roomId, schedulePersist],
+    [schedulePersist],
   );
 
   const handlePingReceive = useCallback(({ fromName }: PingPayload): void => {
@@ -415,7 +428,7 @@ export function useSessionManager({
       });
 
       await client.connect({
-        wsUrl: buildWsUrl(),
+        wsUrl: buildWsUrl(roomSlugRef.current),
         iceServers: cfg.iceServers,
         localStream: graph.processedLocalStream,
         displayName: display,
@@ -483,12 +496,17 @@ export function useSessionManager({
       const display = name.trim() || loadOrCreateDisplayName(makeGuestName);
       saveDisplayName(display);
 
+      // Capture the slug at join time — chat history bucket stays stable even
+      // if the user picks a different room between sessions (shouldn't be
+      // possible while joined, but defend anyway).
+      roomSlugRef.current = useStore.getState().roomSlug; // snapshot read, not subscription
+
       userLeavingRef.current = false;
       reconnectSchedulerRef.current.reset();
       lastDisplayNameRef.current = display;
 
       getStore().setJoinState('joining');
-      getStore().loadChatRoom(roomId);
+      getStore().loadChatRoom(roomSlugRef.current);
       getStore().setStatus('Запрашиваю микрофон…');
 
       // Hot-swap path: join with engine=off if WASM not ready yet, rebuild in
@@ -547,7 +565,7 @@ export function useSessionManager({
         getStore().setStatus(error instanceof Error ? error.message : String(error), true);
       }
     },
-    [audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop, roomId, getStore],
+    [audio, connectSfu, handleLeave, switchEngine, attachSpeakingLoop, getStore],
   );
 
   useEffect(() => {
@@ -605,9 +623,28 @@ export function useSessionManager({
     };
   }, []);
 
+  const switchRoom = useCallback(
+    async (slug: RoomSlug): Promise<void> => {
+      const s = useStore.getState(); // snapshot read, not subscription
+      if (slug === s.roomSlug) return;
+      if (s.joinState === 'joining') return;
+      if (s.joinState === 'idle') {
+        s.setRoomSlug(slug);
+        return;
+      }
+      // joined — leave current room, move to new one, rejoin
+      const display = lastDisplayNameRef.current || loadOrCreateDisplayName(makeGuestName);
+      handleLeave();
+      useStore.getState().setRoomSlug(slug);
+      await handleJoin(display);
+    },
+    [handleLeave, handleJoin],
+  );
+
   return {
     join: handleJoin,
     leave: handleLeave,
+    switchRoom,
     getPeerId,
     setMicEnabled,
     switchEngine,
