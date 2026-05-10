@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { savePeerVolume } from '../utils/storage';
+import { PEER_LABEL_MAX, savePeerLabel, savePeerVolume } from '../utils/storage';
 import type { ParticipantUI } from '../types';
 
 interface Props {
@@ -13,6 +13,33 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
   const updateParticipant = useStore((s) => s.updateParticipant);
   const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
   const [, forceTick] = useState(0);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState('');
+  // Set true by Esc to make the upcoming onBlur skip its commit.
+  const skipLabelCommitRef = useRef(false);
+  const canLabel = !participant.isSelf && Boolean(participant.clientId);
+
+  function beginEditLabel() {
+    if (!canLabel) return;
+    setLabelDraft(participant.localLabel ?? '');
+    setEditingLabel(true);
+  }
+
+  function commitLabel() {
+    if (skipLabelCommitRef.current) {
+      skipLabelCommitRef.current = false;
+      return;
+    }
+    const next = labelDraft.trim().slice(0, PEER_LABEL_MAX);
+    if (participant.clientId) savePeerLabel(participant.clientId, next);
+    updateParticipant(participant.id, { localLabel: next || undefined });
+    setEditingLabel(false);
+  }
+
+  function cancelLabel() {
+    skipLabelCommitRef.current = true;
+    setEditingLabel(false);
+  }
   const pingCoolingDown = Date.now() - lastPingSentAt < 10000;
   useEffect(() => {
     if (!pingCoolingDown) return;
@@ -142,9 +169,54 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
           </div>
         )}
         <div className="min-w-0 flex flex-col justify-between" style={{ height: 40 }}>
-          <div className="text-[18px] font-bold text-body whitespace-nowrap overflow-hidden text-ellipsis tracking-tight leading-tight">
-            {participant.display}
-            {participant.isSelf && <span className="text-muted-2 font-normal ml-1.5">[вы]</span>}
+          <div className="group/label text-[18px] font-bold text-body tracking-tight leading-tight flex items-center gap-1.5 min-w-0">
+            <span className="truncate">{participant.display}</span>
+            {participant.isSelf ? (
+              <span className="text-muted-2 font-normal shrink-0">[вы]</span>
+            ) : editingLabel ? (
+              <input
+                type="text"
+                autoFocus
+                value={labelDraft}
+                maxLength={PEER_LABEL_MAX}
+                placeholder="метка"
+                size={Math.max(4, labelDraft.length + 1)}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelLabel();
+                  }
+                }}
+                onBlur={commitLabel}
+                className="shrink-0 bg-bg-2 border border-accent text-body text-[18px] font-bold px-1.5 py-0 outline-none tracking-tight"
+              />
+            ) : participant.localLabel ? (
+              <button
+                type="button"
+                onClick={beginEditLabel}
+                title="Изменить метку"
+                aria-label="Изменить метку"
+                className="text-muted-2 font-normal shrink-0 hover:text-accent cursor-pointer"
+              >
+                [{participant.localLabel}]
+              </button>
+            ) : canLabel ? (
+              <button
+                type="button"
+                onClick={beginEditLabel}
+                title="Добавить метку"
+                aria-label="Добавить метку"
+                className="shrink-0 text-muted-2 hover:text-accent cursor-pointer opacity-0 group-hover/label:opacity-100 transition-opacity grid place-items-center"
+              >
+                <span className="msym" style={{ fontSize: 16 }}>
+                  label
+                </span>
+              </button>
+            ) : null}
           </div>
           <div
             className={`text-[11px] uppercase tracking-[0.18em] inline-flex items-center gap-1.5 leading-none ${metaTextClass}`}

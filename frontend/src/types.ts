@@ -30,4 +30,5 @@ export type ParticipantUI = {
   remoteMuted?: boolean;
   remoteDeafened?: boolean;
   chatOnly?: boolean;
+  localLabel?: string;
 };

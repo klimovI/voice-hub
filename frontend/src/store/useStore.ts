@@ -20,6 +20,7 @@ import {
   saveRoomSlug,
   loadChatHistory,
   saveChatHistory,
+  loadPeerLabel,
   type PersistedChatMessage,
 } from '../utils/storage';
 import type { RoomSlug } from '../rooms';
@@ -262,6 +263,18 @@ export const useStore = create<AppState>((set, get) => ({
             localVolume: partial.localVolume ?? 100,
             hasStream: partial.hasStream ?? false,
           };
+      // Hydrate persisted custom label the moment we learn the peer's
+      // stable clientId — covers both fresh entries and the case where
+      // clientId arrives in a later patch.
+      if (
+        merged.clientId &&
+        !merged.isSelf &&
+        merged.localLabel === undefined &&
+        partial.localLabel === undefined
+      ) {
+        const stored = loadPeerLabel(merged.clientId);
+        if (stored) merged.localLabel = stored;
+      }
       const m = new Map(s.participants);
       // Mirror server-side eviction: a peer arriving with a clientId already
       // held by another entry replaces that entry (e.g. voice → lurker

@@ -117,6 +117,11 @@ export function saveChatHistory(roomId: string, messages: PersistedChatMessage[]
 // setting survives both their reconnects and ours.
 const PEER_VOLUME_PREFIX = 'voice-hub.peer-volume.';
 
+// Per-peer custom label keyed by stable clientId. Local-only annotation —
+// rendered as `[label]` after the peer's display name. Not synced anywhere.
+const PEER_LABEL_PREFIX = 'voice-hub.peer-label.';
+export const PEER_LABEL_MAX = 32;
+
 // ---------------------------------------------------------------------------
 // Primitive loaders (key-agnostic, used by typed helpers below)
 // ---------------------------------------------------------------------------
@@ -187,6 +192,21 @@ export function loadPeerVolume(clientId: string): number | null {
 export function savePeerVolume(clientId: string, volume: number): void {
   if (!clientId) return;
   localStorage.setItem(PEER_VOLUME_PREFIX + clientId, String(volume));
+}
+
+export function loadPeerLabel(clientId: string): string {
+  if (!clientId) return '';
+  return localStorage.getItem(PEER_LABEL_PREFIX + clientId) ?? '';
+}
+
+export function savePeerLabel(clientId: string, label: string): void {
+  if (!clientId) return;
+  const trimmed = label.trim().slice(0, PEER_LABEL_MAX);
+  if (!trimmed) {
+    localStorage.removeItem(PEER_LABEL_PREFIX + clientId);
+    return;
+  }
+  localStorage.setItem(PEER_LABEL_PREFIX + clientId, trimmed);
 }
 
 export function saveSendVolume(v: number): void {
