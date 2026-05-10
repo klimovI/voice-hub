@@ -48,7 +48,10 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
               total > 0
                 ? peers
                     .slice()
-                    .sort((a, b) => a.id.localeCompare(b.id))
+                    .sort((a, b) => {
+                      if (a.chatOnly !== b.chatOnly) return a.chatOnly ? 1 : -1;
+                      return a.id.localeCompare(b.id);
+                    })
                     .map((p) => p.displayName)
                     .join(', ')
                 : null;
