@@ -4,9 +4,9 @@
 
 # voice-hub
 
-[![Latest release](https://img.shields.io/github/v/release/klimovI/voice-hub?label=release&color=blue)](https://github.com/klimovI/voice-hub/releases/latest)
-[![Release Desktop](https://github.com/klimovI/voice-hub/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/klimovI/voice-hub/actions/workflows/release-desktop.yml)
-[![License](https://img.shields.io/github/license/klimovI/voice-hub)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/vibes-group/voice-hub?label=release&color=blue)](https://github.com/vibes-group/voice-hub/releases/latest)
+[![Release Desktop](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml)
+[![License](https://img.shields.io/github/license/vibes-group/voice-hub)](LICENSE)
 
 Self-hosted голосовая комната для маленьких компаний. Заточена под игры: фокус на чистом звуке и низкой задержке.
 
@@ -17,7 +17,7 @@ Self-hosted голосовая комната для маленьких комп
 
 ## Скачать (Windows)
 
-⬇ **[Последний релиз](https://github.com/klimovI/voice-hub/releases/latest)** → `Voice.Hub_<version>_x64-setup.exe`.
+⬇ **[Последний релиз](https://github.com/vibes-group/voice-hub/releases/latest)** → `Voice.Hub_<version>_x64-setup.exe`.
 
 NSIS-установщик: ярлыки в "Пуске", запись в "Programs and Features", автоустановка WebView2 если отсутствует. Auto-update встроен.
 
