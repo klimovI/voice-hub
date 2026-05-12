@@ -1,15 +1,9 @@
-// Connection / server-host management.
+// Host stored in OS keychain; password never persisted (exchanged for a
+// session cookie by the webview's login form).
 //
-// One field of state: the user's server hostname. Stored in OS keychain so
-// it doesn't sit on disk in plaintext. The connection password is NEVER
-// stored — it's typed into the webview's same-origin login form, exchanged
-// for a session cookie, and forgotten.
-//
-// Flow:
-//   First run / no host  → webview loads connect.html.
-//   `set_host` → saves to keychain → webview navigates to https://{host}/.
-//   Tray "Change server" → navigate back to connect.html (host kept, used to pre-fill).
-//   Tray "Disconnect"    → clear cookies + host, navigate to connect.html.
+// We do NOT call `clear_all_browsing_data` on disconnect/change_server: on
+// WebView2 it wipes localStorage for every origin, killing displayName,
+// clientId and per-peer prefs. Cookie expires server-side.
 
 use keyring::Entry;
 use serde::Serialize;
@@ -128,28 +122,14 @@ pub fn set_host(app: AppHandle, host: String) -> Result<(), String> {
     navigate_to(&app, url)
 }
 
-/// Clear cookies + saved host, return to the connect screen.
 #[tauri::command]
 pub fn disconnect(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        if let Err(err) = window.clear_all_browsing_data() {
-            log::warn!("disconnect: clear browsing data failed: {err}");
-        }
-    }
     delete_host();
     navigate_to(&app, local_url(CONNECT_PATH))
 }
 
-/// Return to the connect screen. Clears the cookie of the previous server so a
-/// stale session can't auto-log-in if the user comes back, but keeps the saved
-/// host so the input field can be pre-filled with the last value.
 #[tauri::command]
 pub fn change_server(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        if let Err(err) = window.clear_all_browsing_data() {
-            log::warn!("change_server: clear browsing data failed: {err}");
-        }
-    }
     navigate_to(&app, local_url(CONNECT_PATH))
 }
 

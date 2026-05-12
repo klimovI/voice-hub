@@ -6,7 +6,7 @@ import { preloadEngine } from './audio/engine';
 import { useSFU } from './hooks/useSFU';
 import { useSessionManager } from './hooks/useSessionManager';
 import { useGlobalShortcut } from './hooks/useShortcut';
-import { loadOrCreateDisplayName } from './utils/storage';
+import { loadOrCreateDisplayName, saveDisplayName } from './utils/storage';
 import { makeGuestName, formatEngine } from './utils/clamp';
 import { playMuteSound, playUnmuteSound } from './audio/feedback-sounds';
 import type { EngineKind } from './types';
@@ -208,6 +208,7 @@ export function App() {
   const handleDisplayNameChange = useCallback(
     (value: string) => {
       setDisplayName(value);
+      saveDisplayName(value);
       if (useStore.getState().joinState === 'joined' && value.trim()) {
         session.setRemoteDisplayName(value.trim());
       }
