@@ -51,15 +51,34 @@ jobs:
           cache-from: type=gha,scope=voice-hub-app
           cache-to: type=gha,scope=voice-hub-app,mode=max
 
-  deploy:
+  write-env:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: vibes-group/infra
+          ref: master
+
+      - uses: ./.github/actions/write-env
+        with:
+          app: voice-hub
+          deploy-host:    ${{ secrets.DEPLOY_HOST }}
+          deploy-ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host-key:       ${{ secrets.DEPLOY_HOST_KEY }}
+          env: |
+            IMAGE_TAG=${{ needs.build.outputs.image_tag }}
+            APP_HOSTNAME=${{ secrets.VOICE_HUB_HOST }}
+            PUBLIC_IP=${{ secrets.DEPLOY_HOST }}
+            APP_ADMIN_PASSWORD=${{ secrets.APP_ADMIN_PASSWORD }}
+
+  deploy:
+    needs: [build, write-env]
     uses: vibes-group/infra/.github/workflows/deploy.yml@master
     with:
       app: voice-hub
       image_tag: ${{ needs.build.outputs.image_tag }}
     secrets:
-      DEPLOY_HOST:        ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_SSH_KEY:     ${{ secrets.DEPLOY_SSH_KEY }}
-      DEPLOY_HOST_KEY:    ${{ secrets.DEPLOY_HOST_KEY }}
-      APP_HOSTNAME:       ${{ secrets.VOICE_HUB_HOST }}
-      APP_ADMIN_PASSWORD: ${{ secrets.APP_ADMIN_PASSWORD }}
+      DEPLOY_HOST:     ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_SSH_KEY:  ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
