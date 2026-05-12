@@ -1,0 +1,65 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/voice-hub-app
+          tags: |
+            type=sha,format=long,prefix=
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=voice-hub-app
+          cache-to: type=gha,scope=voice-hub-app,mode=max
+
+  deploy:
+    needs: build
+    uses: vibes-group/infra/.github/workflows/deploy.yml@master
+    with:
+      app: voice-hub
+      image_tag: ${{ needs.build.outputs.image_tag }}
+    secrets:
+      DEPLOY_HOST:        ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_SSH_KEY:     ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_HOST_KEY:    ${{ secrets.DEPLOY_HOST_KEY }}
+      APP_HOSTNAME:       ${{ secrets.VOICE_HUB_HOST }}
+      APP_ADMIN_PASSWORD: ${{ secrets.APP_ADMIN_PASSWORD }}

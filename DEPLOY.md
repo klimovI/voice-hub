@@ -1,54 +1,36 @@
 # Deploy
 
-> ⚠️ Репо публичный. В коммитах — только плейсхолдеры (`<origin-ip>`, `<your-host>`). Секреты — в GitHub Secrets и `/opt/voice-hub/.env`.
+Деплой и инфра вынесены в [`vibes-group/infra`](https://github.com/vibes-group/infra). Здесь — только voice-hub-специфика.
 
-VPS + GitHub Actions. CI собирает образ, пушит в `ghcr.io`, по SSH деплоит на сервер. На сервере — только compose-стек (Caddy + app).
-
-## Архитектура
+## Поток
 
 ```
-internet ──HTTPS/WSS─────▶ Caddy (Let's Encrypt) ──▶ app (8080)
-internet ──UDP 3478, 10101-10200, 49160-49199 ───▶ app
+push в master
+  → .github/workflows/build.yml: build+push ghcr.io/vibes-group/voice-hub-app:<sha>
+  → uses vibes-group/infra/.github/workflows/deploy.yml@master
+  → infra: scp compose+.env на сервер, docker compose pull && up -d, health poll
 ```
 
-Caddy сам выписывает и обновляет TLS-сертификат у Let's Encrypt. CDN не используется — RKN блокирует Cloudflare edge IP, поэтому держим origin открытым.
+Полное описание сервера, layout `/opt/vibes/`, Caddy, bootstrap — в [infra/README.md](https://github.com/vibes-group/infra#readme).
 
-UDP-only voice (как у Discord). Сети без UDP не поддерживаются.
+## Сетевые требования
 
-## Требования
-
-- VPS: 1 vCPU, 1 ГБ RAM, 15 ГБ — хватает на 3-5 audio-only.
-- Debian/Ubuntu, root по SSH-ключу.
-- Домен с A-записью на IP сервера.
-
-## Bootstrap (один раз)
-
-```bash
-scp deploy/server-bootstrap.sh root@<origin-ip>:/tmp/
-ssh root@<origin-ip> 'bash /tmp/server-bootstrap.sh'
+```
+internet ──HTTPS/WSS─────▶ Caddy ──▶ voice-hub-app:8080
+internet ──UDP 3478, 10101-10200, 49160-49199 ───▶ voice-hub-app
 ```
 
-Скрипт ставит docker, sysctl tuning, UFW (SSH + voice UDP), создаёт `deploy` user. Идемпотентен.
+UDP-only voice (как у Discord). Сети без UDP не поддерживаются. CDN не юзаем — RKN блокирует Cloudflare edge IP, держим origin открытым.
 
-Сгенерируй deploy SSH key (отдельный от личного), pubkey в `~deploy/.ssh/authorized_keys` на сервере, privkey пойдёт в GitHub Secret `DEPLOY_SSH_KEY`.
+## Secrets (этого репо)
 
-## DNS
-
-- A `<your-host>` → `<origin-ip>`. Без CDN-проксирования (на Cloudflare — grey cloud).
-
-## GitHub Actions secrets
-
-| Secret | Значение |
-|---|---|
-| `DEPLOY_HOST` | literal IPv4 origin сервера. SSH target **и** `PUBLIC_IP` для pion (NAT1To1 + TURN relay address). Workflow валидирует. |
-| `DEPLOY_SSH_KEY` | приватный ключ deploy-юзера (целиком, с BEGIN/END) |
-| `DEPLOY_HOST_KEY` | host-key origin для known_hosts. Получить: `ssh-keyscan -t ed25519 <origin-ip>` |
-| `APP_HOSTNAME` | публичный домен, A-запись на `DEPLOY_HOST` |
-| `APP_ADMIN_PASSWORD` | пароль админа (`openssl rand -base64 24`) |
-| `TAURI_SIGNING_PRIVATE_KEY` | подпись desktop-релизов |
-
-После первого `build` job — на github.com/`<owner>`?tab=packages образу `voice-hub-app` поменять visibility на **Public**, иначе сервер не сделает `docker pull` без авторизации.
+| Secret | Источник | Назначение |
+|---|---|---|
+| `DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `DEPLOY_HOST_KEY` | org `vibes-group` | прокидываются в reusable workflow infra |
+| `VOICE_HUB_HOST` | org `vibes-group` | публичный домен, идёт в .env как `APP_HOSTNAME` |
+| `APP_ADMIN_PASSWORD` | repo | пароль админа (`openssl rand -base64 24`) |
+| `TAURI_SIGNING_PRIVATE_KEY` | repo | подпись desktop-релизов (auto-tag-desktop.yml, release-desktop.yml) |
 
 ## Auto-managed серверные секреты
 
-Бэкенд сам генерит и хранит в volume `app_data` (`/app/data/`, mode 600): HMAC для cookie, HMAC для TURN creds, argon2id хеш connection password. Логика — в `backend/internal/auth/`. Backup не нужен: потеря volume = перелогин + ротация connection password.
+Бэкенд сам генерит и хранит в `/app/data/` (bind `/opt/vibes/voice-hub/data/` на хосте, mode 600): HMAC для cookie, HMAC для TURN creds, argon2id хеш connection password. Логика — `backend/internal/auth/`. Backup не нужен: потеря данных = перелогин + ротация connection password.
