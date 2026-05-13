@@ -49,7 +49,6 @@ export function setupParticipantAudio(
     sourceNode.connect(analyser);
   } catch (err) {
     console.warn(`[remote-audio] createMediaStreamSource failed stream=${stream.id}:`, err);
-    sourceNode = null;
   }
 
   return {

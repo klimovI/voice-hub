@@ -35,7 +35,7 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       if (e.data && e.data.type === 'destroy') {
         try {
           this.state && this.state.destroy();
-        } catch (_) {
+        } catch {
           /* ignore */
         }
         this.state = null;

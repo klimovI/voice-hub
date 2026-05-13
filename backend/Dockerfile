@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS frontend
+FROM node:24-bookworm-slim AS frontend
 
 WORKDIR /src/frontend
 
@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN --mount=type=cache,target=/root/.npm npm run build
 
-FROM golang:1.24-bookworm AS build
+FROM golang:1.25-bookworm AS build
 
 WORKDIR /src
 
