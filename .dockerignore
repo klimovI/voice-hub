@@ -1,11 +1,13 @@
 .git
 .github
 .vscode
+.claude
 **/node_modules
 **/dist
-src-tauri/target
+src-tauri
 frontend/dist
 backend/tmp
+docs
 *.md
 .env*
 scratch
