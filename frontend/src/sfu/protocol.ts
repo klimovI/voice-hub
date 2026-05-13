@@ -233,7 +233,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         data === null ||
         typeof (data as Record<string, unknown>).id !== 'string'
       ) {
-        console.warn(`[protocol] malformed '${event}' payload:`, data);
+        console.warn("[protocol] malformed peer payload:", event, data);
         return null;
       }
       return { event, data: data as PeerInfo };

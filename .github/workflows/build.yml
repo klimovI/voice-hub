@@ -54,6 +54,8 @@ jobs:
   write-env:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -74,6 +76,7 @@ jobs:
 
   deploy:
     needs: [build, write-env]
+    permissions: {}
     uses: vibes-group/infra/.github/workflows/deploy.yml@master
     with:
       app: voice-hub

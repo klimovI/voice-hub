@@ -41,10 +41,10 @@ func Load() (Config, error) {
 		TurnRealm:      env("TURN_REALM", hostname),
 		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:     uint16(envInt("UDP_PORT_MIN", 10101)),
-		UDPPortMax:     uint16(envInt("UDP_PORT_MAX", 10200)),
-		TurnRelayMin:   uint16(envInt("TURN_RELAY_PORT_MIN", 49160)),
-		TurnRelayMax:   uint16(envInt("TURN_RELAY_PORT_MAX", 49199)),
+		UDPPortMin:     envUint16("UDP_PORT_MIN", 10101),
+		UDPPortMax:     envUint16("UDP_PORT_MAX", 10200),
+		TurnRelayMin:   envUint16("TURN_RELAY_PORT_MIN", 49160),
+		TurnRelayMax:   envUint16("TURN_RELAY_PORT_MAX", 49199),
 		TrustedProxies: trusted,
 	}, nil
 }
@@ -85,4 +85,19 @@ func envInt(key string, fallback int) int {
 	}
 
 	return parsed
+}
+
+func envUint16(key string, fallback uint16) uint16 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseUint(value, 10, 16)
+	if err != nil {
+		log.Printf("config: bad %s=%q (%v), using default %d", key, value, err, fallback)
+		return fallback
+	}
+
+	return uint16(parsed)
 }
