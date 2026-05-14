@@ -175,17 +175,25 @@ func RoomPeers(resolve RoomResolver) http.HandlerFunc {
 	}
 }
 
+// ConfigOptions contains dependencies and static values used by Config.
+type ConfigOptions struct {
+	SessionSecret    []byte
+	TurnSharedSecret string
+	StunURL          string
+	TurnURL          string
+}
+
 // Config handles GET /api/config. It generates short-lived TURN credentials and
 // returns ICE server config along with the caller's role.
-func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) http.HandlerFunc {
+func Config(opts ConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, _ := auth.SessionFromRequest(sessionSecret, r)
-		username, credential := turnsrv.GenerateCredentials(turnSharedSecret, "u", turnCredsTTL)
+		sess, _ := auth.SessionFromRequest(opts.SessionSecret, r)
+		username, credential := turnsrv.GenerateCredentials(opts.TurnSharedSecret, "u", turnCredsTTL)
 		response := AppConfigResponse{
 			ICEServers: []ICEServer{
-				{URLs: []string{stunURL}},
+				{URLs: []string{opts.StunURL}},
 				{
-					URLs:       []string{turnURL},
+					URLs:       []string{opts.TurnURL},
 					Username:   username,
 					Credential: credential,
 				},
