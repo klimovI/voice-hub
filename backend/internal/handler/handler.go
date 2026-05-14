@@ -30,6 +30,9 @@ type RoomPeerLister interface {
 // RoomResolver maps a request to a room. Resolvers must not write to the response.
 type RoomResolver func(*http.Request) (RoomPeerLister, bool)
 
+// turnCredsTTL balances security and usability: credentials are short-lived enough
+// to limit exposure if leaked, but long enough to avoid frequent re-issuance during
+// typical calls and brief reconnects.
 const turnCredsTTL = 6 * time.Hour
 
 // HealthResponse is the JSON body for GET /healthz.
@@ -186,6 +189,10 @@ func RoomPeers(resolve RoomResolver) http.HandlerFunc {
 	}
 }
 
+// turnUsernamePrefix is the stable prefix used when minting ephemeral TURN
+// usernames for credentials returned by the /api/config endpoint.
+const turnUsernamePrefix = "u"
+
 // ConfigOptions contains dependencies and static values used by Config.
 type ConfigOptions struct {
 	SessionSecret    []byte
@@ -199,7 +206,7 @@ type ConfigOptions struct {
 func Config(opts ConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, _ := auth.SessionFromRequest(opts.SessionSecret, r)
-		username, credential := turnsrv.GenerateCredentials(opts.TurnSharedSecret, "u", turnCredsTTL)
+		username, credential := turnsrv.GenerateCredentials(opts.TurnSharedSecret, turnUsernamePrefix, turnCredsTTL)
 		response := AppConfigResponse{
 			ICEServers: []ICEServer{
 				{URLs: []string{opts.StunURL}},
