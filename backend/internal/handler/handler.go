@@ -30,6 +30,9 @@ type RoomPeerLister interface {
 // RoomResolver maps a request to a room. Resolvers must not write to the response.
 type RoomResolver func(*http.Request) (RoomPeerLister, bool)
 
+// turnCredsTTL balances security and usability: credentials are short-lived enough
+// to limit exposure if leaked, but long enough to avoid frequent re-issuance during
+// typical calls and brief reconnects.
 const turnCredsTTL = 6 * time.Hour
 
 // HealthResponse is the JSON body for GET /healthz.
