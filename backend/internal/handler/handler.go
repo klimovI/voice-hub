@@ -100,15 +100,26 @@ func Version(version string) http.HandlerFunc {
 	}
 }
 
+// LoginConfig groups dependencies and options for the Login handler factory.
+type LoginConfig struct {
+	AdminPassword string
+	AdminVer      string
+	CookieSecure  bool
+	SessionSecret []byte
+	ConnPass      *auth.ConnPassStore
+	Limiter       *auth.AuthLimiter
+	Trusted       []netip.Prefix
+}
+
 // Login handles POST /api/login. It checks the admin password first (constant-time),
 // then the connection password, and issues a signed session cookie on success.
 // trusted is the proxy CIDR list — it controls which RemoteAddr values are
 // allowed to set X-Forwarded-For for rate-limit keying.
-func Login(adminPassword, adminVer string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter, trusted []netip.Prefix) http.HandlerFunc {
-	wantAdmin := []byte(adminPassword)
+func Login(cfg LoginConfig) http.HandlerFunc {
+	wantAdmin := []byte(cfg.AdminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := middleware.ClientIP(r, trusted)
-		if limiter.Blocked(ip) {
+		ip := middleware.ClientIP(r, cfg.Trusted)
+		if cfg.Limiter.Blocked(ip) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
@@ -119,28 +130,28 @@ func Login(adminPassword, adminVer string, cookieSecure bool, sessionSecret []by
 		}
 		pass := r.PostFormValue("password")
 		if pass == "" {
-			limiter.Fail(ip)
+			cfg.Limiter.Fail(ip)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		// Admin first; constant-time compare to avoid timing leak on length.
 		if subtle.ConstantTimeCompare([]byte(pass), wantAdmin) == 1 {
-			limiter.Success(ip)
-			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleAdmin, 0, adminVer)
+			cfg.Limiter.Success(ip)
+			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleAdmin, 0, cfg.AdminVer)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
 		// Then connection password.
-		if connPass.Verify(pass) {
-			limiter.Success(ip)
-			auth.SetSessionCookie(w, cookieSecure, sessionSecret, auth.RoleUser, connPass.Generation(), "")
+		if cfg.ConnPass.Verify(pass) {
+			cfg.Limiter.Success(ip)
+			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleUser, cfg.ConnPass.Generation(), "")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		limiter.Fail(ip)
+		cfg.Limiter.Fail(ip)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 }
