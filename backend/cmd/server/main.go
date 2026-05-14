@@ -121,11 +121,11 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir))))
-	mux.HandleFunc("/healthz", handler.Health())
-	mux.HandleFunc("/api/version", handler.Version(version))
-	mux.HandleFunc("/api/login", handler.Login(cfg.AdminPassword, adminVer, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
-	mux.HandleFunc("/api/logout", handler.Logout(cfg.CookieSecure))
-	mux.Handle("/ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
+	mux.HandleFunc("GET /healthz", handler.Health())
+	mux.HandleFunc("GET /api/version", handler.Version(version))
+	mux.HandleFunc("POST /api/login", handler.Login(cfg.AdminPassword, adminVer, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
+	mux.HandleFunc("POST /api/logout", handler.Logout(cfg.CookieSecure))
+	mux.Handle("GET /ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
 		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rm, ok := resolveRoom(w, req)
 			if !ok {
@@ -133,18 +133,15 @@ func main() {
 			}
 			rm.ServeWS(w, req)
 		}))))
-	mux.Handle("/api/room/{roomID}/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		rm, ok := resolveRoom(w, req)
-		if !ok {
-			return
-		}
-		handler.RoomPeersOf(rm).ServeHTTP(w, req)
+	mux.Handle("GET /api/room/{roomID}/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.RoomPeers(func(req *http.Request) (handler.RoomPeerLister, bool) {
+		rm, ok := rooms[req.PathValue("roomID")]
+		return rm, ok
 	})))
-	mux.Handle("/api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
-	mux.Handle("/api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
-	mux.Handle("/api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
-	mux.Handle("/api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
-	mux.Handle("/api/admin/connection-password/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
+	mux.Handle("GET /api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
+	mux.Handle("GET /api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
+	mux.Handle("POST /api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
+	mux.Handle("POST /api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
+	mux.Handle("POST /api/admin/connection-password/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
 
 	server := &http.Server{
 		Addr:              cfg.Addr,

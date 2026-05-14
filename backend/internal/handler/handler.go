@@ -27,6 +27,9 @@ type RoomPeerLister interface {
 	Peers() []protocol.PeerInfo
 }
 
+// RoomResolver maps a request to a room. Resolvers must not write to the response.
+type RoomResolver func(*http.Request) (RoomPeerLister, bool)
+
 const turnCredsTTL = 6 * time.Hour
 
 // HealthResponse is the JSON body for GET /healthz.
@@ -80,10 +83,6 @@ func FrontendVersion(webDir string) string {
 
 func Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(HealthResponse{Status: "ok"}); err != nil {
 			log.Printf("health: encode: %v", err)
@@ -93,10 +92,6 @@ func Health() http.HandlerFunc {
 
 func Version(version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		if err := json.NewEncoder(w).Encode(VersionResponse{Version: version}); err != nil {
@@ -112,10 +107,6 @@ func Version(version string) http.HandlerFunc {
 func Login(adminPassword, adminVer string, cookieSecure bool, sessionSecret []byte, connPass *auth.ConnPassStore, limiter *auth.AuthLimiter, trusted []netip.Prefix) http.HandlerFunc {
 	wantAdmin := []byte(adminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		ip := middleware.ClientIP(r, trusted)
 		if limiter.Blocked(ip) {
 			w.Header().Set("Retry-After", "900")
@@ -156,10 +147,6 @@ func Login(adminPassword, adminVer string, cookieSecure bool, sessionSecret []by
 
 func Logout(cookieSecure bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     auth.CookieName,
 			Value:    "",
@@ -173,10 +160,11 @@ func Logout(cookieSecure bool) http.HandlerFunc {
 	}
 }
 
-func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
+func RoomPeers(resolve RoomResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		room, ok := resolve(r)
+		if !ok {
+			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -191,10 +179,6 @@ func RoomPeersOf(room RoomPeerLister) http.HandlerFunc {
 // returns ICE server config along with the caller's role.
 func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		sess, _ := auth.SessionFromRequest(sessionSecret, r)
 		username, credential := turnsrv.GenerateCredentials(turnSharedSecret, "u", turnCredsTTL)
 		response := AppConfigResponse{
@@ -217,10 +201,6 @@ func Config(sessionSecret []byte, turnSharedSecret, stunURL, turnURL string) htt
 
 func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(connPass.Status()); err != nil {
 			log.Printf("connpass status: encode: %v", err)
@@ -230,10 +210,6 @@ func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 
 func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		plain, err := connPass.Rotate()
 		if err != nil {
 			log.Printf("connpass rotate: %v", err)
@@ -257,10 +233,6 @@ func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.Handl
 
 func ConnPassRevoke(connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		if err := connPass.Revoke(); err != nil {
 			log.Printf("connpass revoke: %v", err)
 			http.Error(w, "revoke failed", http.StatusInternalServerError)
@@ -276,10 +248,6 @@ func ConnPassRevoke(connPass *auth.ConnPassStore) http.HandlerFunc {
 // lock new logins.
 func DisconnectUsers(registry *auth.WSRegistry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		registry.DisconnectUsers()
 		w.WriteHeader(http.StatusNoContent)
 	}
