@@ -123,7 +123,15 @@ func main() {
 	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir))))
 	mux.HandleFunc("GET /healthz", handler.Health())
 	mux.HandleFunc("GET /api/version", handler.Version(version))
-	mux.HandleFunc("POST /api/login", handler.Login(cfg.AdminPassword, adminVer, cfg.CookieSecure, cfg.SessionSecret, connPass, limiter, cfg.TrustedProxies))
+	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{
+		AdminPassword: cfg.AdminPassword,
+		AdminVer:      adminVer,
+		CookieSecure:  cfg.CookieSecure,
+		SessionSecret: cfg.SessionSecret,
+		ConnPass:      connPass,
+		Limiter:       limiter,
+		Trusted:       cfg.TrustedProxies,
+	}))
 	mux.HandleFunc("POST /api/logout", handler.Logout(cfg.CookieSecure))
 	mux.Handle("GET /ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
 		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -137,7 +145,12 @@ func main() {
 		rm, ok := rooms[req.PathValue("roomID")]
 		return rm, ok
 	})))
-	mux.Handle("GET /api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(cfg.SessionSecret, cfg.TurnSharedSecret, stunURL, turnURL)))
+	mux.Handle("GET /api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(handler.ConfigOptions{
+		SessionSecret:    cfg.SessionSecret,
+		TurnSharedSecret: cfg.TurnSharedSecret,
+		StunURL:          stunURL,
+		TurnURL:          turnURL,
+	})))
 	mux.Handle("GET /api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
 	mux.Handle("POST /api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
 	mux.Handle("POST /api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
