@@ -186,6 +186,10 @@ func RoomPeers(resolve RoomResolver) http.HandlerFunc {
 	}
 }
 
+// turnUsernamePrefix is the stable prefix used when minting ephemeral TURN
+// usernames for credentials returned by the /api/config endpoint.
+const turnUsernamePrefix = "u"
+
 // ConfigOptions contains dependencies and static values used by Config.
 type ConfigOptions struct {
 	SessionSecret    []byte
@@ -199,7 +203,7 @@ type ConfigOptions struct {
 func Config(opts ConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, _ := auth.SessionFromRequest(opts.SessionSecret, r)
-		username, credential := turnsrv.GenerateCredentials(opts.TurnSharedSecret, "u", turnCredsTTL)
+		username, credential := turnsrv.GenerateCredentials(opts.TurnSharedSecret, turnUsernamePrefix, turnCredsTTL)
 		response := AppConfigResponse{
 			ICEServers: []ICEServer{
 				{URLs: []string{opts.StunURL}},
