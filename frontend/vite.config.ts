@@ -29,7 +29,7 @@ export default defineConfig({
   },
 
   build: {
-    sourcemap: false,
+    sourcemap: "hidden",
 
     rollupOptions: {
       input: {
