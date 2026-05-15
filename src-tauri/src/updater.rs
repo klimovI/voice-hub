@@ -69,7 +69,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(INTERVAL).await;
-            check(h.clone(), /* force */ true).await;
+            check(h.clone(), /* force */ false).await;
         }
     });
 
