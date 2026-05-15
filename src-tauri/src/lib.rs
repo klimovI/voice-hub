@@ -72,7 +72,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -137,11 +137,14 @@ pub fn run() {
         .setup(move |app| {
             app.manage(QuitFlag(AtomicBool::new(false)));
 
+            let start_hidden = std::env::args().any(|a| a == "--hidden");
+
             WebviewWindowBuilder::new(app, "main", initial_url)
                 .title("Voice Hub")
                 .inner_size(1440.0, 980.0)
                 .min_inner_size(1100.0, 760.0)
                 .resizable(true)
+                .visible(!start_hidden)
                 .build()?;
 
             let handle = app.handle().clone();
