@@ -80,6 +80,15 @@ pub async fn check_on_focus(app: AppHandle) {
     check(app, /* force */ false).await;
 }
 
+/// Snapshot the version of the currently pending update, if any.
+/// Used by the tray to preserve the "Install vX.Y.Z" item across menu rebuilds
+/// triggered by unrelated state changes (e.g. autostart toggle).
+pub fn pending_version(app: &AppHandle) -> Option<String> {
+    let state = app.try_state::<SharedUpdater>()?;
+    let s = state.lock().ok()?;
+    s.pending.as_ref().map(|u| u.version.clone())
+}
+
 /// Force an immediate update check. Called from the tray "Check for updates"
 /// item so it must be `pub`.
 pub async fn check_forced(app: AppHandle) {

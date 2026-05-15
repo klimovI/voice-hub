@@ -6,9 +6,10 @@
 
 use std::sync::atomic::Ordering;
 
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime, Wry};
+use tauri_plugin_autostart::ManagerExt;
 
 use crate::connection;
 use crate::updater;
@@ -21,7 +22,18 @@ const ITEM_CHECK: &str = "update_check";
 const ITEM_SHOW: &str = "show_window";
 const ITEM_CHANGE_SERVER: &str = "change_server";
 const ITEM_DISCONNECT: &str = "disconnect";
+const ITEM_AUTOSTART: &str = "autostart";
 const ITEM_QUIT: &str = "quit";
+
+fn autostart_enabled(app: &AppHandle) -> bool {
+    match app.autolaunch().is_enabled() {
+        Ok(v) => v,
+        Err(err) => {
+            log::warn!("autostart: is_enabled failed: {err}");
+            false
+        }
+    }
+}
 
 /// Build the tray menu. When `update_version` is `Some`, an "Install vX.Y.Z"
 /// item appears at the top separated from the rest. `connected` controls
@@ -36,8 +48,17 @@ pub fn build_menu(
     let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Сменить сервер", true, None::<&str>)?;
     let disconnect =
         MenuItem::with_id(app, ITEM_DISCONNECT, "Отключиться", connected, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(
+        app,
+        ITEM_AUTOSTART,
+        "Автозапуск",
+        true,
+        autostart_enabled(app),
+        None::<&str>,
+    )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, ITEM_QUIT, "Выход", true, None::<&str>)?;
 
     let mut builder = MenuBuilder::new(app);
@@ -56,6 +77,8 @@ pub fn build_menu(
         .item(&change)
         .item(&disconnect)
         .item(&sep2)
+        .item(&autostart)
+        .item(&sep3)
         .item(&quit)
         .build()
 }
@@ -96,6 +119,16 @@ pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()>
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
         tray.set_tooltip(Some(format!("Voice Hub — доступна v{version}")))?;
+    }
+    Ok(())
+}
+
+/// Rebuild the tray menu in place, preserving any pending update.
+fn refresh_menu(app: &AppHandle) -> tauri::Result<()> {
+    let pending = updater::pending_version(app);
+    let menu = build_menu(app, pending.as_deref(), connection::load_host().is_some())?;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_menu(Some(menu))?;
     }
     Ok(())
 }
@@ -141,6 +174,20 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             show_main(app);
             if let Err(err) = connection::disconnect(app.clone()) {
                 log::error!("disconnect: {err}");
+            }
+        }
+        ITEM_AUTOSTART => {
+            let manager = app.autolaunch();
+            let result = if autostart_enabled(app) {
+                manager.disable()
+            } else {
+                manager.enable()
+            };
+            if let Err(err) = result {
+                log::error!("autostart toggle: {err}");
+            }
+            if let Err(err) = refresh_menu(app) {
+                log::warn!("autostart: refresh tray menu failed: {err}");
             }
         }
         ITEM_QUIT => {
