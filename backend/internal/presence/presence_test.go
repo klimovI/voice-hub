@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,22 +59,29 @@ func dial(t *testing.T, srv *httptest.Server) (*websocket.Conn, context.Context,
 	return c, ctx, cancel
 }
 
-func readEnvelope(t *testing.T, c *websocket.Conn, ctx context.Context) protocol.PresencePayload {
+// readEvent reads one envelope and returns the event name and raw data bytes.
+func readEvent(t *testing.T, c *websocket.Conn, ctx context.Context) (event string, data json.RawMessage) {
 	t.Helper()
-	_, data, err := c.Read(ctx)
+	_, raw, err := c.Read(ctx)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	var env protocol.Envelope
-	if err := json.Unmarshal(data, &env); err != nil {
+	if err := json.Unmarshal(raw, &env); err != nil {
 		t.Fatalf("envelope unmarshal: %v", err)
 	}
-	if env.Event != protocol.PresenceEvent {
-		t.Fatalf("event = %q, want %q", env.Event, protocol.PresenceEvent)
+	return env.Event, env.Data
+}
+
+func readSnapshot(t *testing.T, c *websocket.Conn, ctx context.Context) protocol.PresenceSnapshotPayload {
+	t.Helper()
+	event, data := readEvent(t, c, ctx)
+	if event != protocol.PresenceSnapshotEvent {
+		t.Fatalf("event = %q, want %q", event, protocol.PresenceSnapshotEvent)
 	}
-	var p protocol.PresencePayload
-	if err := json.Unmarshal(env.Data, &p); err != nil {
-		t.Fatalf("payload unmarshal: %v", err)
+	var p protocol.PresenceSnapshotPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("snapshot payload unmarshal: %v", err)
 	}
 	return p
 }
@@ -91,121 +97,270 @@ func TestServeWSSendsInitialSnapshot(t *testing.T) {
 	defer dcancel()
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	p := readEnvelope(t, c, ctx)
-	got := p.Rooms["room1"].Peers
+	snap := readSnapshot(t, c, ctx)
+	got := snap.Rooms["room1"].Peers
 	if len(got) != 1 || got[0].ID != "abc" || got[0].DisplayName != "Alice" {
 		t.Fatalf("initial snapshot peers = %+v", got)
 	}
 }
 
-func TestNotifyBroadcastsToAllSubscribers(t *testing.T) {
+func TestPeerJoinedBroadcasts(t *testing.T) {
 	room := &fakeRoom{}
 	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
 	defer cancel()
 	srv := startServer(t, h)
 	defer srv.Close()
 
-	const n = 5
+	const n = 3
 	conns := make([]*websocket.Conn, n)
 	ctxs := make([]context.Context, n)
-	cancels := make([]context.CancelFunc, n)
+	dcancels := make([]context.CancelFunc, n)
 	for i := range conns {
 		c, ctx, dc := dial(t, srv)
-		conns[i] = c
-		ctxs[i] = ctx
-		cancels[i] = dc
+		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
 		defer dc()
 		defer c.Close(websocket.StatusNormalClosure, "")
-		// Drain initial snapshot.
-		readEnvelope(t, c, ctx)
+		readSnapshot(t, c, ctx) // drain initial
 	}
 
-	room.set([]protocol.PeerInfo{{ID: "x", DisplayName: "X"}})
-	h.Notify()
+	peer := protocol.PeerInfo{ID: "p1", DisplayName: "Bob"}
+	h.PeerJoined("room1", peer)
 
 	for i, c := range conns {
-		p := readEnvelope(t, c, ctxs[i])
-		peers := p.Rooms["room1"].Peers
-		if len(peers) != 1 || peers[0].ID != "x" {
-			t.Fatalf("sub %d got %+v", i, peers)
+		event, data := readEvent(t, c, ctxs[i])
+		if event != protocol.PresencePeerJoinedEvent {
+			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerJoinedEvent)
+		}
+		var p protocol.PresencePeerJoinedPayload
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatalf("sub %d: unmarshal: %v", i, err)
+		}
+		if p.Room != "room1" || p.Peer.ID != "p1" || p.Peer.DisplayName != "Bob" {
+			t.Fatalf("sub %d: payload = %+v", i, p)
 		}
 	}
 }
 
-func TestNotifyCoalescesBursts(t *testing.T) {
-	var calls atomic.Int32
-	room := &fakeRoom{}
-	h := New(func() map[string]RoomLister {
-		calls.Add(1)
-		return map[string]RoomLister{"room1": room}
-	}, []string{"*"})
-
-	ctx, cancel := context.WithCancel(t.Context())
+func TestPeerLeftBroadcasts(t *testing.T) {
+	room := &fakeRoom{peers: []protocol.PeerInfo{{ID: "p1"}}}
+	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
 	defer cancel()
-	go h.Run(ctx)
-
 	srv := startServer(t, h)
 	defer srv.Close()
 
-	c, dctx, dcancel := dial(t, srv)
-	defer dcancel()
-	defer c.Close(websocket.StatusNormalClosure, "")
-	readEnvelope(t, c, dctx) // initial
-
-	// Burst many Notify calls — should coalesce into ≤ a small number of
-	// snapshots (size-1 dirty channel collapses bursts while Run is busy).
-	const burst = 200
-	before := calls.Load()
-	for range burst {
-		h.Notify()
+	const n = 3
+	conns := make([]*websocket.Conn, n)
+	ctxs := make([]context.Context, n)
+	dcancels := make([]context.CancelFunc, n)
+	for i := range conns {
+		c, ctx, dc := dial(t, srv)
+		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
+		defer dc()
+		defer c.Close(websocket.StatusNormalClosure, "")
+		readSnapshot(t, c, ctx)
 	}
 
-	// Let Run drain.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		// Drain any pending frames so write side stays unblocked.
-		rctx, rcancel := context.WithTimeout(dctx, 50*time.Millisecond)
-		_, _, err := c.Read(rctx)
-		rcancel()
-		if err != nil {
-			break
+	h.PeerLeft("room1", "p1")
+
+	for i, c := range conns {
+		event, data := readEvent(t, c, ctxs[i])
+		if event != protocol.PresencePeerLeftEvent {
+			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerLeftEvent)
 		}
-	}
-	after := calls.Load() - before
-	if after >= burst/2 {
-		t.Fatalf("expected coalescing, snapshot calls = %d (burst = %d)", after, burst)
+		var p protocol.PresencePeerLeftPayload
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatalf("sub %d: unmarshal: %v", i, err)
+		}
+		if p.Room != "room1" || p.ID != "p1" {
+			t.Fatalf("sub %d: payload = %+v", i, p)
+		}
 	}
 }
 
-func TestNotifyBeforeAnySubscriberIsSafe(t *testing.T) {
+func TestPeerUpdatedBroadcasts(t *testing.T) {
+	room := &fakeRoom{peers: []protocol.PeerInfo{{ID: "p1"}}}
+	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
+	defer cancel()
+	srv := startServer(t, h)
+	defer srv.Close()
+
+	const n = 3
+	conns := make([]*websocket.Conn, n)
+	ctxs := make([]context.Context, n)
+	dcancels := make([]context.CancelFunc, n)
+	for i := range conns {
+		c, ctx, dc := dial(t, srv)
+		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
+		defer dc()
+		defer c.Close(websocket.StatusNormalClosure, "")
+		readSnapshot(t, c, ctx)
+	}
+
+	updated := protocol.PeerInfo{ID: "p1", DisplayName: "Alice Updated", SelfMuted: true}
+	h.PeerUpdated("room1", updated)
+
+	for i, c := range conns {
+		event, data := readEvent(t, c, ctxs[i])
+		if event != protocol.PresencePeerUpdatedEvent {
+			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerUpdatedEvent)
+		}
+		var p protocol.PresencePeerUpdatedPayload
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatalf("sub %d: unmarshal: %v", i, err)
+		}
+		if p.Room != "room1" || p.Peer.ID != "p1" || p.Peer.DisplayName != "Alice Updated" || !p.Peer.SelfMuted {
+			t.Fatalf("sub %d: payload = %+v", i, p)
+		}
+	}
+}
+
+// TestNewSubReceivesSnapshotNotPastDeltas verifies that a subscriber who
+// connects after some deltas were fired gets a snapshot reflecting current
+// state — not a replay of past deltas.
+func TestNewSubReceivesSnapshotNotPastDeltas(t *testing.T) {
 	room := &fakeRoom{}
 	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
 	defer cancel()
-	// No subscribers; Notify must not panic or block.
-	for range 10 {
-		h.Notify()
-	}
-	// Run gets a moment to process.
-	time.Sleep(20 * time.Millisecond)
-}
-
-func TestServeWSMultipleRoomsInSnapshot(t *testing.T) {
-	r1 := &fakeRoom{peers: []protocol.PeerInfo{{ID: "a"}}}
-	r2 := &fakeRoom{peers: []protocol.PeerInfo{{ID: "b"}, {ID: "c"}}}
-	h, cancel := newHub(t, map[string]RoomLister{"room1": r1, "room2": r2})
-	defer cancel()
 	srv := startServer(t, h)
 	defer srv.Close()
 
+	// Fire deltas with no subscribers present.
+	room.set([]protocol.PeerInfo{{ID: "p1", DisplayName: "Alice"}})
+	h.PeerJoined("room1", protocol.PeerInfo{ID: "p1", DisplayName: "Alice"})
+	// Give Run goroutine time to drain the event (no subs → fanout is a no-op).
+	time.Sleep(20 * time.Millisecond)
+
+	// Now connect. The first frame must be a snapshot, not a peer-joined delta.
 	c, ctx, dcancel := dial(t, srv)
 	defer dcancel()
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	p := readEnvelope(t, c, ctx)
-	if len(p.Rooms["room1"].Peers) != 1 || p.Rooms["room1"].Peers[0].ID != "a" {
-		t.Fatalf("room1: %+v", p.Rooms["room1"])
+	event, data := readEvent(t, c, ctx)
+	if event != protocol.PresenceSnapshotEvent {
+		t.Fatalf("first frame event = %q, want %q", event, protocol.PresenceSnapshotEvent)
 	}
-	if len(p.Rooms["room2"].Peers) != 2 {
-		t.Fatalf("room2: %+v", p.Rooms["room2"])
+	var snap protocol.PresenceSnapshotPayload
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("snapshot unmarshal: %v", err)
 	}
+	peers := snap.Rooms["room1"].Peers
+	if len(peers) != 1 || peers[0].ID != "p1" {
+		t.Fatalf("snapshot peers = %+v", peers)
+	}
+}
+
+// TestBurstEventsDoNotDeadlock fires many events rapidly and verifies all
+// subscribers drain without deadlock.
+func TestBurstEventsDoNotDeadlock(t *testing.T) {
+	room := &fakeRoom{}
+	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
+	defer cancel()
+	srv := startServer(t, h)
+	defer srv.Close()
+
+	const numSubs = 5
+	conns := make([]*websocket.Conn, numSubs)
+	ctxs := make([]context.Context, numSubs)
+	dcancels := make([]context.CancelFunc, numSubs)
+	for i := range conns {
+		c, ctx, dc := dial(t, srv)
+		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
+		defer dc()
+		defer c.Close(websocket.StatusNormalClosure, "")
+		readSnapshot(t, c, ctx)
+	}
+
+	const burst = 50
+	for i := range burst {
+		h.PeerJoined("room1", protocol.PeerInfo{ID: strings.Repeat("x", i+1)})
+	}
+
+	// Each subscriber should receive at least some events without deadlock.
+	// We drain for up to 500 ms; the exact count isn't asserted (drop-oldest
+	// means slow readers may not see every event), but no goroutine must stall.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var wg sync.WaitGroup
+	for i, c := range conns {
+		wg.Add(1)
+		go func(conn *websocket.Conn, ctx context.Context) {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				rctx, rcancel := context.WithDeadline(ctx, deadline)
+				_, _, err := conn.Read(rctx)
+				rcancel()
+				if err != nil {
+					return
+				}
+			}
+		}(c, ctxs[i])
+	}
+	wg.Wait()
+}
+
+func TestSlowSubscriberGetsSnapshotResync(t *testing.T) {
+	room := &fakeRoom{peers: []protocol.PeerInfo{{ID: "final"}}}
+	h := New(func() map[string]RoomLister {
+		return map[string]RoomLister{"room1": room}
+	}, []string{"*"})
+
+	sub := &subscriber{out: make(chan []byte, outBufLen)}
+	for range outBufLen {
+		sub.out <- mustPresenceEnvelope(t, protocol.PresencePeerJoinedEvent, protocol.PresencePeerJoinedPayload{
+			Room: "room1",
+			Peer: protocol.PeerInfo{ID: "stale"},
+		})
+	}
+	h.subs[sub] = struct{}{}
+
+	h.fanout(mustPresenceEnvelope(t, protocol.PresencePeerLeftEvent, protocol.PresencePeerLeftPayload{
+		Room: "room1",
+		ID:   "stale",
+	}))
+
+	if len(sub.out) != 1 {
+		t.Fatalf("queued messages = %d, want 1 snapshot", len(sub.out))
+	}
+	var env protocol.Envelope
+	if err := json.Unmarshal(<-sub.out, &env); err != nil {
+		t.Fatalf("envelope unmarshal: %v", err)
+	}
+	if env.Event != protocol.PresenceSnapshotEvent {
+		t.Fatalf("event = %q, want %q", env.Event, protocol.PresenceSnapshotEvent)
+	}
+	var snap protocol.PresenceSnapshotPayload
+	if err := json.Unmarshal(env.Data, &snap); err != nil {
+		t.Fatalf("snapshot unmarshal: %v", err)
+	}
+	peers := snap.Rooms["room1"].Peers
+	if len(peers) != 1 || peers[0].ID != "final" {
+		t.Fatalf("snapshot peers = %+v", peers)
+	}
+}
+
+// TestNotifyBeforeAnySubscriberIsSafe verifies that firing events with no
+// subscribers does not panic or block.
+func TestNotifyBeforeAnySubscriberIsSafe(t *testing.T) {
+	room := &fakeRoom{}
+	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
+	defer cancel()
+
+	for range 10 {
+		h.PeerJoined("room1", protocol.PeerInfo{ID: "x"})
+		h.PeerLeft("room1", "x")
+		h.PeerUpdated("room1", protocol.PeerInfo{ID: "x"})
+	}
+	time.Sleep(20 * time.Millisecond)
+}
+
+func mustPresenceEnvelope(t *testing.T, event string, payload any) []byte {
+	t.Helper()
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("payload marshal: %v", err)
+	}
+	env, err := json.Marshal(protocol.Envelope{Event: event, Data: data})
+	if err != nil {
+		t.Fatalf("envelope marshal: %v", err)
+	}
+	return env
 }

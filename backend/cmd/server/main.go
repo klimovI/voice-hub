@@ -19,6 +19,7 @@ import (
 	"voice-hub/backend/internal/middleware"
 	"voice-hub/backend/internal/presence"
 	"voice-hub/backend/internal/sfu"
+	"voice-hub/backend/internal/sfu/protocol"
 	turnsrv "voice-hub/backend/internal/turn"
 
 	"github.com/pion/webrtc/v4"
@@ -94,12 +95,14 @@ func main() {
 	go presenceHub.Run(presenceCtx)
 	for _, slug := range roomSlugs {
 		rm, err := sfu.NewRoom(sfu.Config{
-			ICEServers:     []webrtc.ICEServer{{URLs: []string{stunURL}}},
-			NAT1To1IPs:     []string{cfg.PublicIP},
-			UDPPortMin:     cfg.UDPPortMin,
-			UDPPortMax:     cfg.UDPPortMax,
-			AppHostname:    cfg.AppHostname,
-			OnPeersChanged: presenceHub.Notify,
+			ICEServers:    []webrtc.ICEServer{{URLs: []string{stunURL}}},
+			NAT1To1IPs:    []string{cfg.PublicIP},
+			UDPPortMin:    cfg.UDPPortMin,
+			UDPPortMax:    cfg.UDPPortMax,
+			AppHostname:   cfg.AppHostname,
+			OnPeerJoined:  func(p protocol.PeerInfo) { presenceHub.PeerJoined(slug, p) },
+			OnPeerLeft:    func(id string) { presenceHub.PeerLeft(slug, id) },
+			OnPeerUpdated: func(p protocol.PeerInfo) { presenceHub.PeerUpdated(slug, p) },
 		})
 		if err != nil {
 			log.Fatalf("sfu init %q: %v", slug, err)

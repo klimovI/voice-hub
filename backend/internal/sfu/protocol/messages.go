@@ -130,18 +130,59 @@ type PeerStatePayload struct {
 }
 
 // --- Presence (cross-room) ---
+//
+// /ws/presence carries four event types:
+//   - "presence-snapshot": full rooms map. Sent once on connect, and again
+//     after reconnect. Clients replace their local roster verbatim.
+//   - "presence-peer-joined": single peer added to one room.
+//   - "presence-peer-left":   single peer removed from one room.
+//   - "presence-peer-updated": existing peer's fields changed (display name,
+//     selfMuted, deafened).
+//
+// Deltas are NOT sequenced/resumable. On reconnect, clients discard local
+// state and wait for the next snapshot — server sends it as the first frame.
+//
+// Deltas MUST be applied idempotently: a peer-joined for an already-known ID
+// replaces in place; peer-left for an unknown ID is a no-op; peer-updated
+// replaces by ID, inserting if absent. The reason: a delta can race a fresh
+// subscriber's snapshot — the snapshot may already reflect the event, or the
+// delta may arrive describing state already-superseded. Idempotent merge keeps
+// the client converged either way.
 
-const PresenceEvent = "presence"
+const (
+	PresenceSnapshotEvent    = "presence-snapshot"
+	PresencePeerJoinedEvent  = "presence-peer-joined"
+	PresencePeerLeftEvent    = "presence-peer-left"
+	PresencePeerUpdatedEvent = "presence-peer-updated"
+)
 
 type PresenceRoom struct {
 	Peers []PeerInfo `json:"peers"`
 }
 
-// PresencePayload is the data field of the "presence" message broadcast on
-// /ws/presence whenever any room's roster or per-peer state changes. Full
-// snapshot every time — clients replace their local roster verbatim.
-type PresencePayload struct {
+// PresenceSnapshotPayload is the data field of "presence-snapshot". Map key
+// is the room slug.
+type PresenceSnapshotPayload struct {
 	Rooms map[string]PresenceRoom `json:"rooms"`
+}
+
+// PresencePeerJoinedPayload is the data field of "presence-peer-joined".
+type PresencePeerJoinedPayload struct {
+	Room string   `json:"room"`
+	Peer PeerInfo `json:"peer"`
+}
+
+// PresencePeerLeftPayload is the data field of "presence-peer-left".
+type PresencePeerLeftPayload struct {
+	Room string `json:"room"`
+	ID   string `json:"id"`
+}
+
+// PresencePeerUpdatedPayload is the data field of "presence-peer-updated".
+// The full PeerInfo is sent; clients replace the peer entry by ID.
+type PresencePeerUpdatedPayload struct {
+	Room string   `json:"room"`
+	Peer PeerInfo `json:"peer"`
 }
 
 // --- Text chat ---

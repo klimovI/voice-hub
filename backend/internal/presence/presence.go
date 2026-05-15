@@ -3,7 +3,7 @@ package presence
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -19,15 +19,18 @@ type RoomLister interface {
 
 type Rooms func() map[string]RoomLister
 
-// Hub fans out a snapshot of every room's peer roster to all subscribers over
-// /ws/presence. Snapshot+fan-out runs on a single goroutine driven by a
-// dirty-flag channel, so concurrent Notify() callers cannot interleave
-// snapshots or race on per-subscriber drop-oldest replacement.
+// Hub fans out presence deltas (and an initial snapshot) to all /ws/presence
+// subscribers. Events are pre-marshalled once and pushed onto a buffered
+// channel; a single Run goroutine drains the channel and fans out under h.mu,
+// keeping per-subscriber writes sequential and race-free.
 type Hub struct {
 	rooms          Rooms
 	originPatterns []string
 
-	dirty chan struct{}
+	// events carries pre-marshalled envelope bytes. Capacity sized for
+	// burst tolerance; on full, the event is logged and dropped — deltas
+	// are idempotent and clients self-heal via the snapshot on reconnect.
+	events chan []byte
 
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
@@ -37,45 +40,73 @@ type subscriber struct {
 	out chan []byte
 }
 
-const outBufLen = 8
+const (
+	eventBufLen = 256
+	outBufLen   = 8
+)
 
 func New(rooms Rooms, originPatterns []string) *Hub {
 	return &Hub{
 		rooms:          rooms,
 		originPatterns: originPatterns,
-		dirty:          make(chan struct{}, 1),
+		events:         make(chan []byte, eventBufLen),
 		subs:           make(map[*subscriber]struct{}),
 	}
 }
 
-// Run must be started exactly once before any Notify or ServeWS call.
+// Run drains the events channel and fans out each envelope to all current
+// subscribers. Must be started exactly once before any PeerJoined/PeerLeft/
+// PeerUpdated or ServeWS call.
 func (h *Hub) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-h.dirty:
-			h.broadcast()
+		case env := <-h.events:
+			h.fanout(env)
 		}
 	}
 }
 
-// Notify schedules a snapshot broadcast. Non-blocking: coalesces bursts via
-// the size-1 dirty channel. Safe to call from any goroutine.
-func (h *Hub) Notify() {
-	select {
-	case h.dirty <- struct{}{}:
-	default:
-	}
+// PeerJoined fires a presence-peer-joined delta to all subscribers.
+func (h *Hub) PeerJoined(roomSlug string, peer protocol.PeerInfo) {
+	h.push(protocol.PresencePeerJoinedEvent, protocol.PresencePeerJoinedPayload{
+		Room: roomSlug,
+		Peer: peer,
+	})
 }
 
-func (h *Hub) broadcast() {
-	raw, err := h.snapshot()
+// PeerLeft fires a presence-peer-left delta to all subscribers.
+func (h *Hub) PeerLeft(roomSlug string, id string) {
+	h.push(protocol.PresencePeerLeftEvent, protocol.PresencePeerLeftPayload{
+		Room: roomSlug,
+		ID:   id,
+	})
+}
+
+// PeerUpdated fires a presence-peer-updated delta to all subscribers.
+func (h *Hub) PeerUpdated(roomSlug string, peer protocol.PeerInfo) {
+	h.push(protocol.PresencePeerUpdatedEvent, protocol.PresencePeerUpdatedPayload{
+		Room: roomSlug,
+		Peer: peer,
+	})
+}
+
+func (h *Hub) push(event string, payload any) {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("presence: snapshot: %v", err)
+		slog.Error("presence: marshal payload", "event", event, "err", err)
 		return
 	}
+	env, err := json.Marshal(protocol.Envelope{Event: event, Data: data})
+	if err != nil {
+		slog.Error("presence: marshal envelope", "event", event, "err", err)
+		return
+	}
+	h.events <- env
+}
 
+func (h *Hub) fanout(env []byte) {
 	h.mu.Lock()
 	subs := make([]*subscriber, 0, len(h.subs))
 	for sub := range h.subs {
@@ -83,20 +114,29 @@ func (h *Hub) broadcast() {
 	}
 	h.mu.Unlock()
 
-	// Single-writer per sub.out (this goroutine), so the drain-then-push
-	// drop-oldest pattern is race-free.
+	// Single writer per sub.out (this goroutine), so the drain-then-push
+	// resync pattern is race-free.
 	for _, sub := range subs {
 		select {
-		case sub.out <- raw:
+		case sub.out <- env:
 		default:
-			select {
-			case <-sub.out:
-			default:
-			}
-			select {
-			case sub.out <- raw:
-			default:
-			}
+			h.queueResync(sub)
+		}
+	}
+}
+
+func (h *Hub) queueResync(sub *subscriber) {
+	snap, err := h.buildSnapshot()
+	if err != nil {
+		slog.Error("presence: resync snapshot", "err", err)
+		return
+	}
+	for {
+		select {
+		case <-sub.out:
+		default:
+			sub.out <- snap
+			return
 		}
 	}
 }
@@ -106,7 +146,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		OriginPatterns: h.originPatterns,
 	})
 	if err != nil {
-		log.Printf("presence: ws accept: %v", err)
+		slog.Error("presence: ws accept", "err", err)
 		return
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "")
@@ -116,15 +156,29 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	ctx := ws.CloseRead(r.Context())
 
 	sub := &subscriber{out: make(chan []byte, outBufLen)}
-	h.add(sub)
-	defer h.remove(sub)
 
-	raw, err := h.snapshot()
+	// Critical ordering: build snapshot and register sub under the same lock
+	// so no delta can be lost between the two. A delta fired before Lock()
+	// is reflected in the snapshot. A delta fired after Unlock() is delivered
+	// via fanout. A delta fired between snapshot and Unlock() blocks at h.mu
+	// in fanout, then delivers after Unlock() — the client may already have
+	// the state from the snapshot; idempotent merge absorbs the duplicate.
+	h.mu.Lock()
+	snapBytes, err := h.buildSnapshot()
 	if err != nil {
-		log.Printf("presence: initial snapshot: %v", err)
+		h.mu.Unlock()
+		slog.Error("presence: initial snapshot", "err", err)
 		return
 	}
-	sub.out <- raw
+	sub.out <- snapBytes
+	h.subs[sub] = struct{}{}
+	h.mu.Unlock()
+
+	defer func() {
+		h.mu.Lock()
+		delete(h.subs, sub)
+		h.mu.Unlock()
+	}()
 
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
@@ -151,27 +205,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Hub) add(sub *subscriber) {
-	h.mu.Lock()
-	h.subs[sub] = struct{}{}
-	h.mu.Unlock()
-}
-
-func (h *Hub) remove(sub *subscriber) {
-	h.mu.Lock()
-	delete(h.subs, sub)
-	h.mu.Unlock()
-}
-
-func (h *Hub) snapshot() ([]byte, error) {
+func (h *Hub) buildSnapshot() ([]byte, error) {
 	rooms := h.rooms()
-	p := protocol.PresencePayload{Rooms: make(map[string]protocol.PresenceRoom, len(rooms))}
-	for slug, room := range rooms {
-		p.Rooms[slug] = protocol.PresenceRoom{Peers: room.Peers()}
+	payload := protocol.PresenceSnapshotPayload{
+		Rooms: make(map[string]protocol.PresenceRoom, len(rooms)),
 	}
-	data, err := json.Marshal(p)
+	for slug, room := range rooms {
+		payload.Rooms[slug] = protocol.PresenceRoom{Peers: room.Peers()}
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(protocol.Envelope{Event: protocol.PresenceEvent, Data: data})
+	return json.Marshal(protocol.Envelope{Event: protocol.PresenceSnapshotEvent, Data: data})
 }

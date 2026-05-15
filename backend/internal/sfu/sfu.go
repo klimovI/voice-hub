@@ -42,8 +42,12 @@ type Config struct {
 	// When "localhost", dev wildcard patterns are added so local frontends on
 	// any port are accepted. For any other value, only that exact host is
 	// allowed (scheme-independent, since coder/websocket matches host:port).
-	AppHostname    string
-	OnPeersChanged func()
+	AppHostname string
+	// Callers must release r.mu before these callbacks are invoked; they are
+	// allowed to re-enter Room methods that acquire r.mu (e.g. Peers()).
+	OnPeerJoined  func(protocol.PeerInfo)
+	OnPeerLeft    func(id string)
+	OnPeerUpdated func(protocol.PeerInfo)
 }
 
 func OriginPatterns(appHostname string) []string {
@@ -565,7 +569,14 @@ func (r *Room) addPeer(p *peer) {
 	if len(evicted) > 0 {
 		r.signalPeerConnections()
 	}
-	r.notifyPeersChanged()
+	if r.cfg.OnPeerLeft != nil {
+		for _, ev := range evicted {
+			r.cfg.OnPeerLeft(ev.id)
+		}
+	}
+	if r.cfg.OnPeerJoined != nil {
+		r.cfg.OnPeerJoined(peerInfo(p))
+	}
 }
 
 func (r *Room) removePeer(id string) {
@@ -599,7 +610,9 @@ func (r *Room) removePeer(id string) {
 	if !p.chatOnly {
 		r.signalPeerConnections()
 	}
-	r.notifyPeersChanged()
+	if r.cfg.OnPeerLeft != nil {
+		r.cfg.OnPeerLeft(id)
+	}
 }
 
 // Close stops accepting new peers and tears down all active sessions.
@@ -645,7 +658,9 @@ func (r *Room) setDisplayName(id, name string) {
 	for _, op := range others {
 		_ = op.writeRaw(infoEnv)
 	}
-	r.notifyPeersChanged()
+	if r.cfg.OnPeerUpdated != nil {
+		r.cfg.OnPeerUpdated(info)
+	}
 }
 
 func (r *Room) setState(id string, selfMuted, deafened bool) {
@@ -657,6 +672,7 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	}
 	p.selfMuted = selfMuted
 	p.deafened = deafened
+	info := peerInfo(p)
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		if op.id != id {
@@ -670,14 +686,8 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	for _, op := range others {
 		_ = op.writeRaw(stateEnv)
 	}
-	r.notifyPeersChanged()
-}
-
-// Callers must release r.mu first: OnPeersChanged is allowed to re-enter Room
-// methods that take r.mu (e.g. Peers() for snapshot building).
-func (r *Room) notifyPeersChanged() {
-	if r.cfg.OnPeersChanged != nil {
-		r.cfg.OnPeersChanged()
+	if r.cfg.OnPeerUpdated != nil {
+		r.cfg.OnPeerUpdated(info)
 	}
 }
 

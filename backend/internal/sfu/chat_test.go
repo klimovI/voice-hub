@@ -109,6 +109,40 @@ func newTestRoom(t *testing.T) (*Room, *peer, *peer, func()) {
 	return room, p1, p2, cleanup
 }
 
+func TestAddPeerEvictionNotifiesPeerLeftBeforeJoin(t *testing.T) {
+	t.Parallel()
+
+	var events []string
+	room := &Room{
+		peers:  make(map[string]*peer),
+		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+		cfg: Config{
+			OnPeerLeft: func(id string) {
+				events = append(events, "left:"+id)
+			},
+			OnPeerJoined: func(p protocol.PeerInfo) {
+				events = append(events, "joined:"+p.ID)
+			},
+		},
+	}
+
+	oldPeer, oldCancel := newTestPeer("old-peer", "Alice")
+	defer oldCancel()
+	oldPeer.clientID = "client-1"
+	room.peers[oldPeer.id] = oldPeer
+
+	newPeer, newCancel := newTestPeer("new-peer", "Alice")
+	defer newCancel()
+	newPeer.clientID = "client-1"
+
+	room.addPeer(newPeer)
+
+	want := []string{"left:old-peer", "joined:new-peer"}
+	if strings.Join(events, ",") != strings.Join(want, ",") {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
 func TestChatBroadcast(t *testing.T) {
 	t.Parallel()
 
