@@ -279,7 +279,7 @@ func TestAuthenticated_AdminUnaffectedByRotate(t *testing.T) {
 
 // A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD) must be
 // rejected by the broad Authenticated check, not only by RequireAdmin —
-// otherwise it could still reach /api/config, /api/room/peers, /ws.
+// otherwise it could still reach /api/config and /ws endpoints.
 func TestAuthenticated_StaleAdminVersionRejected(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)

@@ -17,6 +17,7 @@ import (
 	"voice-hub/backend/internal/config"
 	"voice-hub/backend/internal/handler"
 	"voice-hub/backend/internal/middleware"
+	"voice-hub/backend/internal/presence"
 	"voice-hub/backend/internal/sfu"
 	turnsrv "voice-hub/backend/internal/turn"
 
@@ -81,13 +82,24 @@ func main() {
 
 	roomSlugs := []string{"room1", "room2", "room3"}
 	rooms := make(map[string]*sfu.Room, len(roomSlugs))
+	presenceHub := presence.New(func() map[string]presence.RoomLister {
+		out := make(map[string]presence.RoomLister, len(rooms))
+		for slug, room := range rooms {
+			out[slug] = room
+		}
+		return out
+	}, sfu.OriginPatterns(cfg.AppHostname))
+	presenceCtx, presenceCancel := context.WithCancel(context.Background())
+	defer presenceCancel()
+	go presenceHub.Run(presenceCtx)
 	for _, slug := range roomSlugs {
 		rm, err := sfu.NewRoom(sfu.Config{
-			ICEServers:  []webrtc.ICEServer{{URLs: []string{stunURL}}},
-			NAT1To1IPs:  []string{cfg.PublicIP},
-			UDPPortMin:  cfg.UDPPortMin,
-			UDPPortMax:  cfg.UDPPortMax,
-			AppHostname: cfg.AppHostname,
+			ICEServers:     []webrtc.ICEServer{{URLs: []string{stunURL}}},
+			NAT1To1IPs:     []string{cfg.PublicIP},
+			UDPPortMin:     cfg.UDPPortMin,
+			UDPPortMax:     cfg.UDPPortMax,
+			AppHostname:    cfg.AppHostname,
+			OnPeersChanged: presenceHub.Notify,
 		})
 		if err != nil {
 			log.Fatalf("sfu init %q: %v", slug, err)
@@ -133,6 +145,8 @@ func main() {
 		Trusted:       cfg.TrustedProxies,
 	}))
 	mux.HandleFunc("POST /api/logout", handler.Logout(cfg.CookieSecure))
+	mux.Handle("GET /ws/presence", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
+		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(presenceHub.ServeWS))))
 	mux.Handle("GET /ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
 		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rm, ok := resolveRoom(w, req)
@@ -141,10 +155,6 @@ func main() {
 			}
 			rm.ServeWS(w, req)
 		}))))
-	mux.Handle("GET /api/room/{roomID}/peers", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.RoomPeers(func(req *http.Request) (handler.RoomPeerLister, bool) {
-		rm, ok := rooms[req.PathValue("roomID")]
-		return rm, ok
-	})))
 	mux.Handle("GET /api/config", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.Config(handler.ConfigOptions{
 		SessionSecret:    cfg.SessionSecret,
 		TurnSharedSecret: cfg.TurnSharedSecret,

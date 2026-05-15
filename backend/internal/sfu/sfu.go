@@ -42,25 +42,19 @@ type Config struct {
 	// When "localhost", dev wildcard patterns are added so local frontends on
 	// any port are accepted. For any other value, only that exact host is
 	// allowed (scheme-independent, since coder/websocket matches host:port).
-	AppHostname string
+	AppHostname    string
+	OnPeersChanged func()
 }
 
-// originPatterns returns the OriginPatterns value for websocket.AcceptOptions
-// derived from cfg.AppHostname.
-//
-// coder/websocket already accepts requests whose Origin host equals r.Host, so
-// these patterns only need to cover cross-port/cross-host dev scenarios.
-//
-//   - "localhost" → also allow "localhost:*" and "127.0.0.1:*" (Vite, Tauri
-//     webview, or any local dev frontend may run on a different port).
-//   - any other hostname → allow only that exact host with no port wildcard,
-//     which covers the production case where the browser sends the canonical
-//     origin (no port, or the standard port stripped by the browser).
-func (cfg Config) originPatterns() []string {
-	if cfg.AppHostname == "" || cfg.AppHostname == "localhost" {
+func OriginPatterns(appHostname string) []string {
+	if appHostname == "" || appHostname == "localhost" {
 		return []string{"localhost:*", "127.0.0.1:*"}
 	}
-	return []string{cfg.AppHostname}
+	return []string{appHostname}
+}
+
+func (cfg Config) originPatterns() []string {
+	return OriginPatterns(cfg.AppHostname)
 }
 
 type peer struct {
@@ -571,6 +565,7 @@ func (r *Room) addPeer(p *peer) {
 	if len(evicted) > 0 {
 		r.signalPeerConnections()
 	}
+	r.notifyPeersChanged()
 }
 
 func (r *Room) removePeer(id string) {
@@ -604,6 +599,7 @@ func (r *Room) removePeer(id string) {
 	if !p.chatOnly {
 		r.signalPeerConnections()
 	}
+	r.notifyPeersChanged()
 }
 
 // Close stops accepting new peers and tears down all active sessions.
@@ -649,6 +645,7 @@ func (r *Room) setDisplayName(id, name string) {
 	for _, op := range others {
 		_ = op.writeRaw(infoEnv)
 	}
+	r.notifyPeersChanged()
 }
 
 func (r *Room) setState(id string, selfMuted, deafened bool) {
@@ -672,6 +669,15 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	stateEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-state", Data: state})
 	for _, op := range others {
 		_ = op.writeRaw(stateEnv)
+	}
+	r.notifyPeersChanged()
+}
+
+// Callers must release r.mu first: OnPeersChanged is allowed to re-enter Room
+// methods that take r.mu (e.g. Peers() for snapshot building).
+func (r *Room) notifyPeersChanged() {
+	if r.cfg.OnPeersChanged != nil {
+		r.cfg.OnPeersChanged()
 	}
 }
 

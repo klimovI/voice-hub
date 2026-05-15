@@ -129,6 +129,21 @@ type PeerStatePayload struct {
 	Deafened  bool   `json:"deafened"`
 }
 
+// --- Presence (cross-room) ---
+
+const PresenceEvent = "presence"
+
+type PresenceRoom struct {
+	Peers []PeerInfo `json:"peers"`
+}
+
+// PresencePayload is the data field of the "presence" message broadcast on
+// /ws/presence whenever any room's roster or per-peer state changes. Full
+// snapshot every time — clients replace their local roster verbatim.
+type PresencePayload struct {
+	Rooms map[string]PresenceRoom `json:"rooms"`
+}
+
 // --- Text chat ---
 
 // MsgTypePing is the event name for the ping signaling message (both C→S and S→C).

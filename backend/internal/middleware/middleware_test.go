@@ -182,7 +182,7 @@ func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
 
 // A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD) must be
 // rejected by the broad RequireAuthAPI gate, not only by RequireAdmin —
-// otherwise it could still reach /api/config, /api/room/peers, /ws.
+// otherwise it could still reach /api/config and /ws endpoints.
 func TestRequireAuthAPIRejectsStaleAdminCookie(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	connPass, err := auth.LoadConnPassStore(t.TempDir())

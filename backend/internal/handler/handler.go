@@ -17,18 +17,8 @@ import (
 
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/middleware"
-	"voice-hub/backend/internal/sfu/protocol"
 	turnsrv "voice-hub/backend/internal/turn"
 )
-
-// RoomPeerLister is the subset of *sfu.Room needed by the room-peers endpoint.
-// Consumer-defined so the handler package does not import sfu directly.
-type RoomPeerLister interface {
-	Peers() []protocol.PeerInfo
-}
-
-// RoomResolver maps a request to a room. Resolvers must not write to the response.
-type RoomResolver func(*http.Request) (RoomPeerLister, bool)
 
 // turnCredsTTL balances security and usability: credentials are short-lived enough
 // to limit exposure if leaked, but long enough to avoid frequent re-issuance during
@@ -64,11 +54,6 @@ type RotateResponse struct {
 	Password   string    `json:"password"`
 	Generation uint64    `json:"generation"`
 	RotatedAt  time.Time `json:"rotated_at"`
-}
-
-// RoomPeersResponse is the JSON body for GET /api/room/peers.
-type RoomPeersResponse struct {
-	Peers []protocol.PeerInfo `json:"peers"`
 }
 
 // FrontendVersion fingerprints the deployed frontend by hashing index.html.
@@ -180,21 +165,6 @@ func Logout(cookieSecure bool) http.HandlerFunc {
 			SameSite: http.SameSiteStrictMode,
 		})
 		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func RoomPeers(resolve RoomResolver) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		room, ok := resolve(r)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		if err := json.NewEncoder(w).Encode(RoomPeersResponse{Peers: room.Peers()}); err != nil {
-			log.Printf("room peers: encode: %v", err)
-		}
 	}
 }
 
