@@ -19,7 +19,10 @@ use crate::listener::{ListenerState, SharedState};
 pub struct QuitFlag(pub AtomicBool);
 
 fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(
+        png::Transformations::normalize_to_color8() | png::Transformations::ALPHA,
+    );
     let mut reader = decoder.read_info()?;
     let buf_size = reader
         .output_buffer_size()
@@ -43,9 +46,10 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
             .flat_map(|c| [c[0], c[0], c[0], c[1]])
             .collect(),
         png::ColorType::Indexed => {
-            return Err(png::DecodingError::Format(
-                png::FormatErrorInner::ImageDataMismatch.into(),
-            ));
+            return Err(png::DecodingError::IoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "indexed PNG output was not expanded",
+            )));
         }
     };
 
