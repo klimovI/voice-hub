@@ -19,7 +19,10 @@ use crate::listener::{ListenerState, SharedState};
 pub struct QuitFlag(pub AtomicBool);
 
 fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(
+        png::Transformations::normalize_to_color8() | png::Transformations::ALPHA,
+    );
     let mut reader = decoder.read_info()?;
     let buf_size = reader
         .output_buffer_size()
@@ -34,7 +37,20 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
             .chunks_exact(3)
             .flat_map(|c| [c[0], c[1], c[2], 255])
             .collect(),
-        _ => raw.to_vec(),
+        png::ColorType::Grayscale => raw
+            .iter()
+            .flat_map(|&g| [g, g, g, 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => raw
+            .chunks_exact(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        png::ColorType::Indexed => {
+            return Err(png::DecodingError::IoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "indexed PNG output was not expanded",
+            )));
+        }
     };
 
     Ok(Image::new_owned(rgba, info.width, info.height))
@@ -177,7 +193,7 @@ pub fn run() {
 
             static ALERT_PNG: &[u8] = include_bytes!("../icons/tray-alert.png");
             let alert_icon = decode_png_rgba(ALERT_PNG)
-                .unwrap_or_else(|e| unreachable!("bundled tray-alert.png failed to decode: {e}"));
+                .expect("bundled tray-alert.png failed to decode");
 
             app.manage(Arc::new(TrayFlashState::new(base_icon, alert_icon)));
 
