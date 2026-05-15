@@ -177,7 +177,7 @@ pub fn run() {
 
             static ALERT_PNG: &[u8] = include_bytes!("../icons/tray-alert.png");
             let alert_icon = decode_png_rgba(ALERT_PNG)
-                .unwrap_or_else(|e| unreachable!("bundled tray-alert.png failed to decode: {e}"));
+                .expect("bundled tray-alert.png failed to decode");
 
             app.manage(Arc::new(TrayFlashState::new(base_icon, alert_icon)));
 
