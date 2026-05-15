@@ -34,7 +34,19 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
             .chunks_exact(3)
             .flat_map(|c| [c[0], c[1], c[2], 255])
             .collect(),
-        _ => raw.to_vec(),
+        png::ColorType::Grayscale => raw
+            .iter()
+            .flat_map(|&g| [g, g, g, 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => raw
+            .chunks_exact(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        png::ColorType::Indexed => {
+            return Err(png::DecodingError::Format(
+                png::FormatErrorInner::ImageDataMismatch.into(),
+            ));
+        }
     };
 
     Ok(Image::new_owned(rgba, info.width, info.height))
