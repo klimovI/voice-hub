@@ -185,6 +185,13 @@ pub async fn check_for_update(app: AppHandle) {
 // This keeps the logic unit-testable without a real AppHandle.
 // ---------------------------------------------------------------------------
 
+fn lock_or_recover<'a, T>(mutex: &'a Mutex<T>, context: &str) -> std::sync::MutexGuard<'a, T> {
+    mutex.lock().unwrap_or_else(|p| {
+        log::error!("updater: {context} mutex poisoned, recovering");
+        p.into_inner()
+    })
+}
+
 async fn run_install<FP, FI>(update: Update, on_progress: FP, on_installing: FI) -> Result<(), String>
 where
     FP: Fn(u64, Option<u64>) + Send + 'static,
@@ -197,18 +204,12 @@ where
         .download_and_install(
             move |chunk_len, content_len| {
                 let total = {
-                    let mut d = downloaded.lock().unwrap_or_else(|p| {
-                        log::error!("updater: downloaded counter mutex poisoned, recovering");
-                        p.into_inner()
-                    });
+                    let mut d = lock_or_recover(&downloaded, "downloaded counter");
                     *d += chunk_len as u64;
                     *d
                 };
                 let should_emit = {
-                    let mut t = last_emit.lock().unwrap_or_else(|p| {
-                        log::error!("updater: last_emit throttle mutex poisoned, recovering");
-                        p.into_inner()
-                    });
+                    let mut t = lock_or_recover(&last_emit, "last_emit throttle");
                     let done = content_len.map(|c| total >= c).unwrap_or(false);
                     if done || t.elapsed() >= PROGRESS_EMIT_THROTTLE {
                         *t = Instant::now();
