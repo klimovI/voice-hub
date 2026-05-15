@@ -1,16 +1,16 @@
 package presence
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
 
 	"voice-hub/backend/internal/sfu/protocol"
 )
@@ -36,7 +36,7 @@ func (f *fakeRoom) set(peers []protocol.PeerInfo) {
 
 func newHub(t *testing.T, rooms map[string]RoomLister) (*Hub, context.CancelFunc) {
 	t.Helper()
-	h := New(func() map[string]RoomLister { return rooms }, []string{"*"})
+	h := New(func() map[string]RoomLister { return rooms })
 	ctx, cancel := context.WithCancel(context.Background())
 	go h.Run(ctx)
 	return h, cancel
@@ -44,60 +44,63 @@ func newHub(t *testing.T, rooms map[string]RoomLister) (*Hub, context.CancelFunc
 
 func startServer(t *testing.T, h *Hub) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	return httptest.NewServer(http.HandlerFunc(h.ServeSSE))
 }
 
-func dial(t *testing.T, srv *httptest.Server) (*websocket.Conn, context.Context, context.CancelFunc) {
+// connect opens an SSE connection and returns a bufio.Reader over the body.
+// The caller must close resp.Body when done.
+func connect(t *testing.T, srv *httptest.Server) (*http.Response, *bufio.Reader) {
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 	if err != nil {
-		cancel()
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("new request: %v", err)
 	}
-	return c, ctx, cancel
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	return resp, bufio.NewReader(resp.Body)
 }
 
-// readEvent reads one envelope and returns the event name and raw data bytes.
-func readEvent(t *testing.T, c *websocket.Conn, ctx context.Context) (event string, data json.RawMessage) {
+func mustReadFrame(t *testing.T, r *bufio.Reader) (event string, data []byte) {
 	t.Helper()
-	_, raw, err := c.Read(ctx)
+	ev, d, err := readSSEFrame(r)
 	if err != nil {
-		t.Fatalf("read: %v", err)
+		t.Fatalf("readSSEFrame: %v", err)
 	}
-	var env protocol.Envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("envelope unmarshal: %v", err)
-	}
-	return env.Event, env.Data
+	return ev, d
 }
 
-func readSnapshot(t *testing.T, c *websocket.Conn, ctx context.Context) protocol.PresenceSnapshotPayload {
+func mustReadSnapshot(t *testing.T, r *bufio.Reader) protocol.PresenceSnapshotPayload {
 	t.Helper()
-	event, data := readEvent(t, c, ctx)
+	event, data := mustReadFrame(t, r)
 	if event != protocol.PresenceSnapshotEvent {
 		t.Fatalf("event = %q, want %q", event, protocol.PresenceSnapshotEvent)
 	}
 	var p protocol.PresenceSnapshotPayload
 	if err := json.Unmarshal(data, &p); err != nil {
-		t.Fatalf("snapshot payload unmarshal: %v", err)
+		t.Fatalf("snapshot unmarshal: %v", err)
 	}
 	return p
 }
 
-func TestServeWSSendsInitialSnapshot(t *testing.T) {
+func TestServeSSESendsInitialSnapshot(t *testing.T) {
 	room := &fakeRoom{peers: []protocol.PeerInfo{{ID: "abc", DisplayName: "Alice"}}}
 	h, cancel := newHub(t, map[string]RoomLister{"room1": room})
 	defer cancel()
 	srv := startServer(t, h)
 	defer srv.Close()
 
-	c, ctx, dcancel := dial(t, srv)
-	defer dcancel()
-	defer c.Close(websocket.StatusNormalClosure, "")
+	resp, br := connect(t, srv)
+	defer resp.Body.Close()
 
-	snap := readSnapshot(t, c, ctx)
+	snap := mustReadSnapshot(t, br)
 	got := snap.Rooms["room1"].Peers
 	if len(got) != 1 || got[0].ID != "abc" || got[0].DisplayName != "Alice" {
 		t.Fatalf("initial snapshot peers = %+v", got)
@@ -112,22 +115,20 @@ func TestPeerJoinedBroadcasts(t *testing.T) {
 	defer srv.Close()
 
 	const n = 3
-	conns := make([]*websocket.Conn, n)
-	ctxs := make([]context.Context, n)
-	dcancels := make([]context.CancelFunc, n)
-	for i := range conns {
-		c, ctx, dc := dial(t, srv)
-		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
-		defer dc()
-		defer c.Close(websocket.StatusNormalClosure, "")
-		readSnapshot(t, c, ctx) // drain initial
+	resps := make([]*http.Response, n)
+	brs := make([]*bufio.Reader, n)
+	for i := range n {
+		resp, br := connect(t, srv)
+		resps[i], brs[i] = resp, br
+		defer resp.Body.Close()
+		mustReadSnapshot(t, br) // drain initial
 	}
 
 	peer := protocol.PeerInfo{ID: "p1", DisplayName: "Bob"}
 	h.PeerJoined("room1", peer)
 
-	for i, c := range conns {
-		event, data := readEvent(t, c, ctxs[i])
+	for i, br := range brs {
+		event, data := mustReadFrame(t, br)
 		if event != protocol.PresencePeerJoinedEvent {
 			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerJoinedEvent)
 		}
@@ -149,21 +150,19 @@ func TestPeerLeftBroadcasts(t *testing.T) {
 	defer srv.Close()
 
 	const n = 3
-	conns := make([]*websocket.Conn, n)
-	ctxs := make([]context.Context, n)
-	dcancels := make([]context.CancelFunc, n)
-	for i := range conns {
-		c, ctx, dc := dial(t, srv)
-		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
-		defer dc()
-		defer c.Close(websocket.StatusNormalClosure, "")
-		readSnapshot(t, c, ctx)
+	resps := make([]*http.Response, n)
+	brs := make([]*bufio.Reader, n)
+	for i := range n {
+		resp, br := connect(t, srv)
+		resps[i], brs[i] = resp, br
+		defer resp.Body.Close()
+		mustReadSnapshot(t, br)
 	}
 
 	h.PeerLeft("room1", "p1")
 
-	for i, c := range conns {
-		event, data := readEvent(t, c, ctxs[i])
+	for i, br := range brs {
+		event, data := mustReadFrame(t, br)
 		if event != protocol.PresencePeerLeftEvent {
 			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerLeftEvent)
 		}
@@ -185,22 +184,20 @@ func TestPeerUpdatedBroadcasts(t *testing.T) {
 	defer srv.Close()
 
 	const n = 3
-	conns := make([]*websocket.Conn, n)
-	ctxs := make([]context.Context, n)
-	dcancels := make([]context.CancelFunc, n)
-	for i := range conns {
-		c, ctx, dc := dial(t, srv)
-		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
-		defer dc()
-		defer c.Close(websocket.StatusNormalClosure, "")
-		readSnapshot(t, c, ctx)
+	resps := make([]*http.Response, n)
+	brs := make([]*bufio.Reader, n)
+	for i := range n {
+		resp, br := connect(t, srv)
+		resps[i], brs[i] = resp, br
+		defer resp.Body.Close()
+		mustReadSnapshot(t, br)
 	}
 
 	updated := protocol.PeerInfo{ID: "p1", DisplayName: "Alice Updated", SelfMuted: true}
 	h.PeerUpdated("room1", updated)
 
-	for i, c := range conns {
-		event, data := readEvent(t, c, ctxs[i])
+	for i, br := range brs {
+		event, data := mustReadFrame(t, br)
 		if event != protocol.PresencePeerUpdatedEvent {
 			t.Fatalf("sub %d: event = %q, want %q", i, event, protocol.PresencePeerUpdatedEvent)
 		}
@@ -224,18 +221,14 @@ func TestNewSubReceivesSnapshotNotPastDeltas(t *testing.T) {
 	srv := startServer(t, h)
 	defer srv.Close()
 
-	// Fire deltas with no subscribers present.
 	room.set([]protocol.PeerInfo{{ID: "p1", DisplayName: "Alice"}})
 	h.PeerJoined("room1", protocol.PeerInfo{ID: "p1", DisplayName: "Alice"})
-	// Give Run goroutine time to drain the event (no subs → fanout is a no-op).
 	time.Sleep(20 * time.Millisecond)
 
-	// Now connect. The first frame must be a snapshot, not a peer-joined delta.
-	c, ctx, dcancel := dial(t, srv)
-	defer dcancel()
-	defer c.Close(websocket.StatusNormalClosure, "")
+	resp, br := connect(t, srv)
+	defer resp.Body.Close()
 
-	event, data := readEvent(t, c, ctx)
+	event, data := mustReadFrame(t, br)
 	if event != protocol.PresenceSnapshotEvent {
 		t.Fatalf("first frame event = %q, want %q", event, protocol.PresenceSnapshotEvent)
 	}
@@ -259,15 +252,13 @@ func TestBurstEventsDoNotDeadlock(t *testing.T) {
 	defer srv.Close()
 
 	const numSubs = 5
-	conns := make([]*websocket.Conn, numSubs)
-	ctxs := make([]context.Context, numSubs)
-	dcancels := make([]context.CancelFunc, numSubs)
-	for i := range conns {
-		c, ctx, dc := dial(t, srv)
-		conns[i], ctxs[i], dcancels[i] = c, ctx, dc
-		defer dc()
-		defer c.Close(websocket.StatusNormalClosure, "")
-		readSnapshot(t, c, ctx)
+	resps := make([]*http.Response, numSubs)
+	brs := make([]*bufio.Reader, numSubs)
+	for i := range numSubs {
+		resp, br := connect(t, srv)
+		resps[i], brs[i] = resp, br
+		defer resp.Body.Close()
+		mustReadSnapshot(t, br)
 	}
 
 	const burst = 50
@@ -275,24 +266,21 @@ func TestBurstEventsDoNotDeadlock(t *testing.T) {
 		h.PeerJoined("room1", protocol.PeerInfo{ID: strings.Repeat("x", i+1)})
 	}
 
-	// Each subscriber should receive at least some events without deadlock.
-	// We drain for up to 500 ms; the exact count isn't asserted (drop-oldest
-	// means slow readers may not see every event), but no goroutine must stall.
+	// Exact count not asserted: slow readers get a snapshot-resync instead of
+	// every delta, so per-sub frame counts vary.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	var wg sync.WaitGroup
-	for i, c := range conns {
+	for i := range numSubs {
 		wg.Add(1)
-		go func(conn *websocket.Conn, ctx context.Context) {
+		go func(br *bufio.Reader) {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				rctx, rcancel := context.WithDeadline(ctx, deadline)
-				_, _, err := conn.Read(rctx)
-				rcancel()
+				_, _, err := readSSEFrame(br)
 				if err != nil {
 					return
 				}
 			}
-		}(c, ctxs[i])
+		}(brs[i])
 	}
 	wg.Wait()
 }
@@ -301,18 +289,19 @@ func TestSlowSubscriberGetsSnapshotResync(t *testing.T) {
 	room := &fakeRoom{peers: []protocol.PeerInfo{{ID: "final"}}}
 	h := New(func() map[string]RoomLister {
 		return map[string]RoomLister{"room1": room}
-	}, []string{"*"})
+	})
 
 	sub := &subscriber{out: make(chan []byte, outBufLen)}
+	staleFrame := mustSSEFrame(t, protocol.PresencePeerJoinedEvent, protocol.PresencePeerJoinedPayload{
+		Room: "room1",
+		Peer: protocol.PeerInfo{ID: "stale"},
+	})
 	for range outBufLen {
-		sub.out <- mustPresenceEnvelope(t, protocol.PresencePeerJoinedEvent, protocol.PresencePeerJoinedPayload{
-			Room: "room1",
-			Peer: protocol.PeerInfo{ID: "stale"},
-		})
+		sub.out <- staleFrame
 	}
 	h.subs[sub] = struct{}{}
 
-	h.fanout(mustPresenceEnvelope(t, protocol.PresencePeerLeftEvent, protocol.PresencePeerLeftPayload{
+	h.fanout(mustSSEFrame(t, protocol.PresencePeerLeftEvent, protocol.PresencePeerLeftPayload{
 		Room: "room1",
 		ID:   "stale",
 	}))
@@ -320,15 +309,17 @@ func TestSlowSubscriberGetsSnapshotResync(t *testing.T) {
 	if len(sub.out) != 1 {
 		t.Fatalf("queued messages = %d, want 1 snapshot", len(sub.out))
 	}
-	var env protocol.Envelope
-	if err := json.Unmarshal(<-sub.out, &env); err != nil {
-		t.Fatalf("envelope unmarshal: %v", err)
+	frame := <-sub.out
+	br := bufio.NewReader(strings.NewReader(string(frame)))
+	event, data, err := readSSEFrame(br)
+	if err != nil {
+		t.Fatalf("readSSEFrame: %v", err)
 	}
-	if env.Event != protocol.PresenceSnapshotEvent {
-		t.Fatalf("event = %q, want %q", env.Event, protocol.PresenceSnapshotEvent)
+	if event != protocol.PresenceSnapshotEvent {
+		t.Fatalf("event = %q, want %q", event, protocol.PresenceSnapshotEvent)
 	}
 	var snap protocol.PresenceSnapshotPayload
-	if err := json.Unmarshal(env.Data, &snap); err != nil {
+	if err := json.Unmarshal(data, &snap); err != nil {
 		t.Fatalf("snapshot unmarshal: %v", err)
 	}
 	peers := snap.Rooms["room1"].Peers
@@ -352,15 +343,11 @@ func TestNotifyBeforeAnySubscriberIsSafe(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
-func mustPresenceEnvelope(t *testing.T, event string, payload any) []byte {
+func mustSSEFrame(t *testing.T, event string, payload any) []byte {
 	t.Helper()
 	data, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("payload marshal: %v", err)
 	}
-	env, err := json.Marshal(protocol.Envelope{Event: event, Data: data})
-	if err != nil {
-		t.Fatalf("envelope marshal: %v", err)
-	}
-	return env
+	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, data)
 }

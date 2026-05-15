@@ -1,14 +1,15 @@
 package presence
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/coder/websocket"
 
 	"voice-hub/backend/internal/sfu/protocol"
 )
@@ -19,17 +20,16 @@ type RoomLister interface {
 
 type Rooms func() map[string]RoomLister
 
-// Hub fans out presence deltas (and an initial snapshot) to all /ws/presence
-// subscribers. Events are pre-marshalled once and pushed onto a buffered
-// channel; a single Run goroutine drains the channel and fans out under h.mu,
-// keeping per-subscriber writes sequential and race-free.
+// Hub fans out presence deltas (and an initial snapshot) to all /api/presence
+// subscribers over Server-Sent Events. Events are pre-framed as SSE bytes once
+// and pushed onto a buffered channel; a single Run goroutine drains the channel
+// and fans out under h.mu, keeping per-subscriber writes sequential and race-free.
 type Hub struct {
-	rooms          Rooms
-	originPatterns []string
+	rooms Rooms
 
-	// events carries pre-marshalled envelope bytes. Capacity sized for
-	// burst tolerance; on full, the event is logged and dropped — deltas
-	// are idempotent and clients self-heal via the snapshot on reconnect.
+	// events carries pre-framed SSE bytes. Capacity sized for burst tolerance.
+	// On full, the producer blocks until Run drains; per-subscriber overflow is
+	// handled separately in fanout via snapshot-resync.
 	events chan []byte
 
 	mu   sync.Mutex
@@ -45,18 +45,16 @@ const (
 	outBufLen   = 8
 )
 
-func New(rooms Rooms, originPatterns []string) *Hub {
+func New(rooms Rooms) *Hub {
 	return &Hub{
-		rooms:          rooms,
-		originPatterns: originPatterns,
-		events:         make(chan []byte, eventBufLen),
-		subs:           make(map[*subscriber]struct{}),
+		rooms:  rooms,
+		events: make(chan []byte, eventBufLen),
+		subs:   make(map[*subscriber]struct{}),
 	}
 }
 
-// Run drains the events channel and fans out each envelope to all current
-// subscribers. Must be started exactly once before any PeerJoined/PeerLeft/
-// PeerUpdated or ServeWS call.
+// Run must be started exactly once before any PeerJoined/PeerLeft/PeerUpdated
+// or ServeSSE call.
 func (h *Hub) Run(ctx context.Context) {
 	for {
 		select {
@@ -68,7 +66,6 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// PeerJoined fires a presence-peer-joined delta to all subscribers.
 func (h *Hub) PeerJoined(roomSlug string, peer protocol.PeerInfo) {
 	h.push(protocol.PresencePeerJoinedEvent, protocol.PresencePeerJoinedPayload{
 		Room: roomSlug,
@@ -76,7 +73,6 @@ func (h *Hub) PeerJoined(roomSlug string, peer protocol.PeerInfo) {
 	})
 }
 
-// PeerLeft fires a presence-peer-left delta to all subscribers.
 func (h *Hub) PeerLeft(roomSlug string, id string) {
 	h.push(protocol.PresencePeerLeftEvent, protocol.PresencePeerLeftPayload{
 		Room: roomSlug,
@@ -84,7 +80,6 @@ func (h *Hub) PeerLeft(roomSlug string, id string) {
 	})
 }
 
-// PeerUpdated fires a presence-peer-updated delta to all subscribers.
 func (h *Hub) PeerUpdated(roomSlug string, peer protocol.PeerInfo) {
 	h.push(protocol.PresencePeerUpdatedEvent, protocol.PresencePeerUpdatedPayload{
 		Room: roomSlug,
@@ -98,15 +93,11 @@ func (h *Hub) push(event string, payload any) {
 		slog.Error("presence: marshal payload", "event", event, "err", err)
 		return
 	}
-	env, err := json.Marshal(protocol.Envelope{Event: event, Data: data})
-	if err != nil {
-		slog.Error("presence: marshal envelope", "event", event, "err", err)
-		return
-	}
-	h.events <- env
+	frame := fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, data)
+	h.events <- frame
 }
 
-func (h *Hub) fanout(env []byte) {
+func (h *Hub) fanout(frame []byte) {
 	h.mu.Lock()
 	subs := make([]*subscriber, 0, len(h.subs))
 	for sub := range h.subs {
@@ -118,7 +109,7 @@ func (h *Hub) fanout(env []byte) {
 	// resync pattern is race-free.
 	for _, sub := range subs {
 		select {
-		case sub.out <- env:
+		case sub.out <- frame:
 		default:
 			h.queueResync(sub)
 		}
@@ -141,19 +132,14 @@ func (h *Hub) queueResync(sub *subscriber) {
 	}
 }
 
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: h.originPatterns,
-	})
-	if err != nil {
-		slog.Error("presence: ws accept", "err", err)
-		return
-	}
-	defer ws.Close(websocket.StatusNormalClosure, "")
+// SSE is unidirectional: no read pump needed.
+func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 
-	// Drive the read side so coder/websocket processes pings/pongs/close
-	// frames. Clients never send application data on /ws/presence.
-	ctx := ws.CloseRead(r.Context())
+	rc := http.NewResponseController(w)
 
 	sub := &subscriber{out: make(chan []byte, outBufLen)}
 
@@ -168,6 +154,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.mu.Unlock()
 		slog.Error("presence: initial snapshot", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	sub.out <- snapBytes
@@ -180,25 +167,26 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 	}()
 
-	ping := time.NewTicker(25 * time.Second)
-	defer ping.Stop()
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
 
+	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msg := <-sub.out:
-			wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err := ws.Write(wctx, websocket.MessageText, msg)
-			cancel()
-			if err != nil {
+		case frame := <-sub.out:
+			if _, err := w.Write(frame); err != nil {
 				return
 			}
-		case <-ping.C:
-			pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err := ws.Ping(pctx)
-			cancel()
-			if err != nil {
+			if err := rc.Flush(); err != nil {
+				return
+			}
+		case <-heartbeat.C:
+			if _, err := w.Write([]byte(": heartbeat\n\n")); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
 				return
 			}
 		}
@@ -217,5 +205,34 @@ func (h *Hub) buildSnapshot() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(protocol.Envelope{Event: protocol.PresenceSnapshotEvent, Data: data})
+	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", protocol.PresenceSnapshotEvent, data), nil
+}
+
+// readSSEFrame reads one SSE event frame from r, returning the event name and
+// raw data bytes. Returns io.EOF when the stream ends.
+func readSSEFrame(r *bufio.Reader) (event string, data []byte, err error) {
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if event != "" || data != nil {
+				return event, data, nil
+			}
+			continue
+		}
+		if len(line) > 0 && line[0] == ':' {
+			// SSE comment (e.g. ": heartbeat") — skip
+			continue
+		}
+		field, value, _ := strings.Cut(line, ": ")
+		switch field {
+		case "event":
+			event = value
+		case "data":
+			data = []byte(value)
+		}
+	}
 }

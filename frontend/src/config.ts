@@ -24,8 +24,3 @@ export function buildWsUrl(roomSlug: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}/ws/${roomSlug}`;
 }
-
-export function buildPresenceWsUrl(): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/ws/presence`;
-}

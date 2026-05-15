@@ -89,7 +89,7 @@ func main() {
 			out[slug] = room
 		}
 		return out
-	}, sfu.OriginPatterns(cfg.AppHostname))
+	})
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	defer presenceCancel()
 	go presenceHub.Run(presenceCtx)
@@ -148,8 +148,8 @@ func main() {
 		Trusted:       cfg.TrustedProxies,
 	}))
 	mux.HandleFunc("POST /api/logout", handler.Logout(cfg.CookieSecure))
-	mux.Handle("GET /ws/presence", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
-		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(presenceHub.ServeWS))))
+	mux.Handle("GET /api/presence", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
+		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(presenceHub.ServeSSE))))
 	mux.Handle("GET /ws/{roomID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,
 		middleware.TrackWS(cfg.SessionSecret, wsRegistry, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rm, ok := resolveRoom(w, req)
