@@ -1,32 +1,41 @@
-# Правила для AI-агентов
+# Rules for AI agents
 
-Репозиторий **публичный**. Всё, что коммитится, видно всему интернету.
+This repository is **public**. Treat every commit as visible.
 
-## Никогда не коммить
+## Never commit
 
-- Реальные имена, эмейлы, телефоны, ники из мессенджеров
-- Абсолютные пути с домашней директорией (`/home/<user>/...`, `C:\Users\<name>\...`) — используй `~` или относительные пути
-- Реальные хостнеймы / IP проды, dev-серверов, тестовых VPS — используй плейсхолдеры (`your-host.example.com`, `<server-ip>`)
-- Содержимое `.env`, токенов, ключей, паролей, SSH-ключей — даже в виде «примера»
-- Вывод `whoami`, `hostname`, `id`, `env` со своей машины
-- Снапшоты состояния машины разработчика (что у меня установлено, какие версии, какие пути) — это шум, не документация
-- Личные пометки типа «(я)», «у меня», «на моём ноуте» — заменяй на нейтральное
+- Real names, emails, phone numbers, messenger handles
+- Absolute home paths (`/home/<user>/...`, `C:\Users\<name>\...`) — use `~` or relative
+- Real hostnames / IPs of prod, dev, or test VPS — use placeholders (`your-host.example.com`, `<server-ip>`)
+- `.env` contents, tokens, keys, passwords, SSH keys — even as "examples"
+- Output of `whoami`, `hostname`, `id`, `env`
+- Personal asides like "(me)", "on my laptop"
 
-## Стиль документации
+## Doc style
 
-- README, release notes, комментарии — **только сигнал, никакого защитного шума**. Не объясняй очевидное, не оправдывайся, не предупреждай о вещах, про которые читатель не спрашивал.
-- Не плоди планировочные `.md` файлы (`*_PLAN.md`, `V020_PLAN.md`, etc.). План — в плане Claude / тикете / PR description, не в репо.
-- После завершения фичи — удалить связанный плановый документ, а не оставлять как «исторический артефакт».
-- Стейл-проверка перед PR: если фича шипнута, грепни всю репу на упоминания «пока не», «not yet», «TODO» по теме фичи и обнови.
+- README, release notes, comments — signal only. Don't explain the obvious, don't apologise, don't pre-empt unasked questions.
+- No planning `*.md` files in the repo. Plans live in PR descriptions or tickets.
+- Delete a feature's planning doc once it ships.
+- Before PR: grep for "not yet" / "TODO" on shipped features and refresh.
 
-## Безопасность
+## Security
 
-- Бинарь Tauri **не должен содержать секретов или хардкоженных host'ов**. Host вводит пользователь при первом запуске, хранится в OS keychain. ICE/TURN credentials и signaling URL приходят с бэкенда после login.
-- Приватный ключ подписи updater'а (`~/.tauri/voice-hub.key`) — только в GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`, никогда в репо.
-- При работе с `tauri.conf.json` → `plugins.updater.pubkey`: это публичный ключ, его раскрытие безопасно (на то он и публичный).
+- The Tauri binary contains no secrets and no hardcoded hosts. Host is entered on first launch and stored in the OS keychain. ICE/TURN credentials and signaling URL come from the backend after login.
+- Updater signing private key (`~/.tauri/voice-hub.key`) lives only in GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`.
+- `tauri.conf.json` → `plugins.updater.pubkey` is a public key — safe to commit.
 
-## Git / релизы
+## Env naming
 
-- Коммиты по conventional commits (`feat:`, `fix:`, `chore(desktop):`, etc.) — `release-desktop.yml` парсит префиксы для секций changelog.
-- Не делать `--amend` опубликованных коммитов и `--force-push` в master.
-- Не теггать релиз вручную если не правил `src-tauri/**` — auto-tag bot сделает это сам.
+| Tier | Prefix | When |
+|------|--------|------|
+| App-level | `APP_*` | service-wide: `APP_ADDR`, `APP_HOSTNAME`, `APP_WEB_DIR`, `APP_ADMIN_PASSWORD`, dev toggles (`APP_PPROF`, `APP_ALLOW_INSECURE`) |
+| Subsystem | `<DOMAIN>_*` | ≥2 vars in one domain: `TURN_*`, `UDP_*` |
+| Infra context | no prefix | set from outside the app: `IMAGE_TAG`, `PUBLIC_IP`, `VIBES_NET_SUBNET` |
+
+Range pairs: `<NAME>_MIN` / `<NAME>_MAX`. Required vars have no defaults and crash on startup. Secrets only via env, never as flags, never logged.
+
+## Git / releases
+
+- Conventional commits (`feat:`, `fix:`, `chore(desktop):`, ...) — `release-desktop.yml` parses the prefix for changelog sections.
+- No `--amend` on published commits, no `--force-push` to `master`.
+- Don't tag releases manually unless you changed `src-tauri/**` — the auto-tag bot handles it.

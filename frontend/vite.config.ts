@@ -1,6 +1,6 @@
 // Voice Hub — Vite multi-page config
 //
-// Build output: ./dist (Vite default). Consumed by Go backend (via WEB_DIR
+// Build output: ./dist (Vite default). Consumed by Go backend (via APP_WEB_DIR
 // env / config default) and by Tauri (frontendDist in tauri.conf.json).
 //
 // Auth whitelist approach:

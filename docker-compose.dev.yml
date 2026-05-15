@@ -9,7 +9,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       APP_ADDR: ":8080"
-      WEB_DIR: "/app/web"
+      APP_WEB_DIR: "/app/web"
       APP_HOSTNAME: "localhost"
       PUBLIC_IP: "127.0.0.1"
       APP_ADMIN_PASSWORD: "dev"

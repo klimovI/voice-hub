@@ -35,7 +35,7 @@ func Load() (Config, error) {
 	}
 	return Config{
 		Addr:           env("APP_ADDR", ":8080"),
-		WebDir:         env("WEB_DIR", "../frontend/dist"),
+		WebDir:         env("APP_WEB_DIR", "../frontend/dist"),
 		AppHostname:    hostname,
 		PublicIP:       os.Getenv("PUBLIC_IP"),
 		TurnRealm:      env("TURN_REALM", hostname),

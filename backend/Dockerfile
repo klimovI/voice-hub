@@ -40,7 +40,7 @@ COPY --from=frontend /src/frontend/dist /app/web
 RUN mkdir -p /app/data && chown app:app /app/data
 
 ENV APP_ADDR=:8080
-ENV WEB_DIR=/app/web
+ENV APP_WEB_DIR=/app/web
 
 EXPOSE 8080
 
