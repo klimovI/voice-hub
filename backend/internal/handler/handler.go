@@ -75,9 +75,10 @@ type RoomPeersResponse struct {
 // Vite injects content-hashed asset URLs into index.html, so any rebuild
 // shifts the hash. Used by the version-poll banner to detect stale tabs.
 func FrontendVersion(webDir string) string {
-	data, err := os.ReadFile(filepath.Join(webDir, "index.html"))
+	indexPath := filepath.Join(webDir, "index.html")
+	data, err := os.ReadFile(indexPath)
 	if err != nil {
-		log.Printf("version: cannot read index.html: %v", err)
+		log.Printf("version: cannot read %s: %v", indexPath, err)
 		return "unknown"
 	}
 	sum := sha256.Sum256(data)
@@ -86,9 +87,17 @@ func FrontendVersion(webDir string) string {
 
 func Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(HealthResponse{Status: "ok"}); err != nil {
+		body, err := json.Marshal(HealthResponse{Status: "ok"})
+		if err != nil {
 			log.Printf("health: encode: %v", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(append(body, '\n')); err != nil {
+			log.Printf("health: write: %v", err)
 		}
 	}
 }
