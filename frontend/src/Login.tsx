@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { ArrowLeftRight, LogIn } from 'lucide-react';
 import { isTauri } from './utils/tauri';
 import './styles/main.css';
 
@@ -62,9 +63,7 @@ export function Login() {
           aria-label="Сменить сервер"
           className="fixed top-4 right-4 z-10 inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
         >
-          <span className="msym" style={{ fontSize: 18 }}>
-            swap_horiz
-          </span>
+          <ArrowLeftRight size={18} />
         </button>
       )}
       <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
@@ -106,9 +105,7 @@ export function Login() {
             className="btn btn-primary btn-hero mt-6 disabled:cursor-progress"
           >
             Войти
-            <span className="msym" style={{ fontSize: 18 }}>
-              login
-            </span>
+            <LogIn size={18} />
           </button>
           {error && (
             <div className="mt-3 px-3 py-2 text-[12px] text-danger bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.3)]">

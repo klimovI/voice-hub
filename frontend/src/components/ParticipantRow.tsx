@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Bell, EarOff, MicOff, ScreenShare, Tag, Volume2, VolumeX } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { PEER_LABEL_MAX, savePeerLabel, savePeerVolume } from '../utils/storage';
 import type { ParticipantUI } from '../types';
@@ -156,9 +157,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
             </span>
             {!pingCoolingDown && (
               <span className={`absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${isLurker ? 'text-accent' : 'text-accent-ink'}`}>
-                <span className="msym" style={{ fontSize: 20 }}>
-                  notifications
-                </span>
+                <Bell size={20} />
               </span>
             )}
           </button>
@@ -214,9 +213,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
                 aria-label="Добавить метку"
                 className="shrink-0 text-muted-2 hover:text-accent cursor-pointer opacity-0 group-hover/label:opacity-100 transition-opacity grid place-items-center"
               >
-                <span className="msym" style={{ fontSize: 16 }}>
-                  label
-                </span>
+                <Tag size={16} />
               </button>
             ) : null}
           </div>
@@ -235,9 +232,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
                 title="Делится экраном"
                 className="grid place-items-center w-9 h-9 text-accent border border-accent/40"
               >
-                <span className="msym" style={{ fontSize: 18 }}>
-                  screen_share
-                </span>
+                <ScreenShare size={18} />
               </span>
             )}
             {participant.remoteMuted && (
@@ -246,9 +241,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
                 title="Микрофон выключен"
                 className="grid place-items-center w-9 h-9 text-danger border border-danger/40"
               >
-                <span className="msym" style={{ fontSize: 18 }}>
-                  mic_off
-                </span>
+                <MicOff size={18} />
               </span>
             )}
             {participant.remoteDeafened && (
@@ -257,9 +250,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
                 title="В наушниках"
                 className="grid place-items-center w-9 h-9 text-danger border border-danger/40"
               >
-                <span className="msym" style={{ fontSize: 18 }}>
-                  hearing_disabled
-                </span>
+                <EarOff size={18} />
               </span>
             )}
           </div>
@@ -280,9 +271,7 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
                 : 'border-line text-muted hover:border-accent hover:text-accent'
             }`}
           >
-            <span className="msym" style={{ fontSize: 18 }}>
-              {participant.localMuted ? 'volume_off' : 'volume_up'}
-            </span>
+            {participant.localMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <label className="grid gap-1 flex-1 min-w-0">
             <span className="whitespace-nowrap tabular-nums text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2">

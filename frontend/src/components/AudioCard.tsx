@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
 import { ENGINE_OPTIONS, type ActiveEngineKind } from '../audio/engine';
@@ -168,13 +169,10 @@ export function AudioCard({
                 </option>
               ))}
             </select>
-            <span
-              aria-hidden
-              className="msym absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
-              style={{ fontSize: 16 }}
-            >
-              expand_more
-            </span>
+            <ChevronDown
+              size={16}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
+            />
           </div>
         </div>
       )}
@@ -207,13 +205,10 @@ export function AudioCard({
                   </option>
                 ))}
               </select>
-              <span
-                aria-hidden
-                className="msym absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
-                style={{ fontSize: 16 }}
-              >
-                expand_more
-              </span>
+              <ChevronDown
+                size={16}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
+              />
             </div>
           </div>
         )}

@@ -10,6 +10,7 @@ import {
 import { selectSelfPeerId, useStore, type ChatMessage } from '../store/useStore';
 import { CHAT_MAX_BYTES } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
+import { Send } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
 
 // http(s):// or bare www. — greedy until whitespace/quotes/angle brackets,
@@ -259,9 +260,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
             style={{ width: 40, height: 40 }}
             aria-label="Отправить"
           >
-            <span className="msym" style={{ fontSize: 26 }}>
-              send
-            </span>
+            <Send size={26} />
           </button>
         </div>
         {bytes > CHAT_MAX_BYTES * 0.8 && (

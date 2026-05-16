@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Maximize, ScreenShare } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { ParticipantUI } from '../types';
 
@@ -54,9 +55,7 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
               title="На весь экран"
               className="text-muted hover:text-accent grid place-items-center"
             >
-              <span className="msym" style={{ fontSize: 18 }}>
-                fullscreen
-              </span>
+              <Maximize size={18} />
             </button>
           )}
           {actions.map((a) => (
@@ -106,9 +105,7 @@ function ScreenPlaceholder({ name, onOpen }: PlaceholderProps) {
       onClick={onOpen}
       className="card flex items-center gap-3 p-4 text-left hover:border-accent transition-colors"
     >
-      <span className="msym text-accent shrink-0" style={{ fontSize: 28 }}>
-        screen_share
-      </span>
+      <ScreenShare size={28} className="text-accent shrink-0" />
       <span className="flex-1 min-w-0">
         <span className="block text-[14px] font-bold text-body truncate">{name}</span>
         <span className="block text-[11px] uppercase tracking-[0.18em] text-muted-2">

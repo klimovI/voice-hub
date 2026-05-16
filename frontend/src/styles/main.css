@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/manrope/index.css';
 
 @theme {
   /* Signal Minimal palette — pure black canvas, deep gray cards, vibrant green accent. */
@@ -25,7 +26,7 @@
 
   --shadow-card: 0 0 0 0 transparent;
 
-  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Manrope Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -307,32 +308,6 @@
   .vh-hw-danger {
     @apply border-danger text-danger bg-[rgba(248,113,113,0.08)]
       hover:bg-[rgba(248,113,113,0.16)];
-  }
-
-  /* Material Symbols sizing helper. Box is locked to 1em x 1em with overflow
-     clipped so that the invisible fallback text (rendered by font-display:block
-     before the icon font loads) cannot widen the slot and shift the layout. */
-  .msym {
-    font-family: 'Material Symbols Outlined';
-    font-weight: normal;
-    font-style: normal;
-    font-size: 18px;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    width: 1em;
-    height: 1em;
-    overflow: hidden;
-    white-space: nowrap;
-    word-wrap: normal;
-    direction: ltr;
-    -webkit-font-smoothing: antialiased;
-    user-select: none;
-    font-variation-settings: 'FILL' 0;
-  }
-  .msym.msym-fill {
-    font-variation-settings: 'FILL' 1;
   }
 }
 

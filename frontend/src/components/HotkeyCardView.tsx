@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { formatBinding } from '../utils/binding';
 import { type HotkeyApi } from '../hooks/useKeyboardCapture';
 
@@ -52,9 +53,7 @@ export function HotkeyCardView({ api }: { api: HotkeyApi }) {
                 api.capturing ? 'text-danger' : 'text-muted-2 hover:text-danger'
               }`}
             >
-              <span className="msym" style={{ fontSize: 20 }}>
-                close
-              </span>
+              <X size={20} />
             </button>
           )}
         </div>

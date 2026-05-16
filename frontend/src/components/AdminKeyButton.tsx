@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Key } from 'lucide-react';
 import { useIsAdmin } from '../hooks/useIsAdmin';
 
 interface ConnPassStatus {
@@ -174,9 +175,7 @@ export function AdminKeyButton() {
         aria-label="Управление паролем подключения"
         className="inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
       >
-        <span className="msym" style={{ fontSize: 18 }}>
-          key
-        </span>
+        <Key size={18} />
       </button>
 
       {open && (

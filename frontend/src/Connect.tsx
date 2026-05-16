@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { ConnectionState } from './ipc';
+import { AudioWaveform, Wifi } from 'lucide-react';
 import { isTauri } from './utils/tauri';
 import './styles/main.css';
 
@@ -36,9 +37,7 @@ export function Connect() {
   return (
     <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,24px)]">
       <div className="flex items-center gap-2.5 mb-6">
-        <span className="msym msym-fill text-accent" style={{ fontSize: 22 }}>
-          graphic_eq
-        </span>
+        <AudioWaveform size={22} className="text-accent" />
         <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">
           Voice&nbsp;Hub
         </span>
@@ -76,9 +75,7 @@ export function Connect() {
           className="btn btn-primary btn-hero mt-6 disabled:cursor-progress"
         >
           Подключиться
-          <span className="msym" style={{ fontSize: 18 }}>
-            sensors
-          </span>
+          <Wifi size={18} />
         </button>
         {error && (
           <div className="mt-3 px-3 py-2 text-[12px] text-danger bg-[rgba(248,113,113,0.08)] border border-[rgba(248,113,113,0.3)]">

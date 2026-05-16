@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { LogOut } from 'lucide-react';
 
 // POST /api/logout expires the session cookie; the server has no session
 // table so nothing else needs cleaning. The redirect lands on /login.html.
@@ -21,9 +22,7 @@ export function LogoutButton() {
       className="inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2
         hover:text-danger hover:border-danger transition-colors"
     >
-      <span className="msym" style={{ fontSize: 18 }}>
-        logout
-      </span>
+      <LogOut size={18} />
     </button>
   );
 }

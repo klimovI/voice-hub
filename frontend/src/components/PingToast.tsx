@@ -1,3 +1,4 @@
+import { BellRing } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 export function PingToast() {
@@ -16,17 +17,14 @@ export function PingToast() {
       role="status"
       aria-live="polite"
     >
-      <span
-        className="msym msym-fill"
+      <BellRing
+        size={18}
+        aria-hidden
         style={{
-          fontSize: 18,
           animation: 'vh-bell-shake 0.6s ease-in-out',
           transformOrigin: '50% 20%',
         }}
-        aria-hidden="true"
-      >
-        notifications_active
-      </span>
+      />
       <span>{ping.fromName} пингует</span>
     </div>
   );

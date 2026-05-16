@@ -1,3 +1,4 @@
+import { Mic, ScreenShare, Volume2, Wifi, WifiOff, type LucideIcon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { isTauri } from '../utils/tauri';
 
@@ -46,16 +47,16 @@ export function SessionCard({
   const earOn = !deafened;
 
   let heroLabel: string;
-  let heroIcon: string;
+  let HeroIcon: LucideIcon;
   if (joined) {
     heroLabel = 'Отключиться';
-    heroIcon = 'sensors_off';
+    HeroIcon = WifiOff;
   } else if (joining) {
     heroLabel = 'Подключение…';
-    heroIcon = 'sensors';
+    HeroIcon = Wifi;
   } else {
     heroLabel = 'Подключиться';
-    heroIcon = 'sensors';
+    HeroIcon = Wifi;
   }
 
   const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
@@ -99,9 +100,7 @@ export function SessionCard({
                 micOn ? tileOn : tileOff
               }`}
             >
-              <span className="msym shrink-0" style={{ fontSize: 24 }}>
-                mic
-              </span>
+              <Mic size={24} className="shrink-0" />
               <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
                 {micOn ? 'Микро' : 'Выкл'}
               </span>
@@ -117,9 +116,7 @@ export function SessionCard({
                 earOn ? tileOn : tileOff
               }`}
             >
-              <span className="msym shrink-0" style={{ fontSize: 24 }}>
-                volume_up
-              </span>
+              <Volume2 size={24} className="shrink-0" />
               <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
                 {earOn ? 'Звук' : 'Выкл'}
               </span>
@@ -132,9 +129,7 @@ export function SessionCard({
             disabled={joining || (!joined && !configReady)}
             className={`btn btn-hero ${joined ? 'btn-danger' : 'btn-primary'}`}
           >
-            <span className="msym shrink-0" style={{ fontSize: 32 }}>
-              {heroIcon}
-            </span>
+            <HeroIcon size={32} className="shrink-0" />
             <span className="flex-1 text-center">{heroLabel}</span>
           </button>
 
@@ -147,9 +142,7 @@ export function SessionCard({
                 title="Показ экрана пока доступен только в браузере. В десктоп-приложении — в работе."
                 className="flex items-center p-4 bg-bg-0 border border-line text-muted-2 cursor-not-allowed opacity-60"
               >
-                <span className="msym shrink-0" style={{ fontSize: 24 }}>
-                  screen_share
-                </span>
+                <ScreenShare size={24} className="shrink-0" />
                 <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
                   Экран — только в браузере
                 </span>
@@ -165,9 +158,7 @@ export function SessionCard({
                   sharingScreen ? tileOff : tileOn
                 }`}
               >
-                <span className="msym shrink-0" style={{ fontSize: 24 }}>
-                  screen_share
-                </span>
+                <ScreenShare size={24} className="shrink-0" />
                 <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
                   {sharingScreen ? 'Завершить экран' : 'Показать экран'}
                 </span>
