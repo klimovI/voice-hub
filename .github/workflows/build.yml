@@ -76,7 +76,8 @@ jobs:
 
   deploy:
     needs: [build, write-env]
-    permissions: {}
+    permissions:
+      contents: read
     uses: vibes-group/infra/.github/workflows/deploy.yml@master
     with:
       app: voice-hub
