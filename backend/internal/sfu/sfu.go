@@ -1,7 +1,8 @@
-// Package sfu is a minimal audio-only WebRTC SFU embedded in the same Go
-// process as the HTTP/auth backend. Single permanent room, fan-out of every
-// participant's Opus track to every other participant. Forked from
-// pion/example-webrtc-applications/sfu-ws, stripped of video.
+// Package sfu is a minimal WebRTC SFU embedded in the same Go process as
+// the HTTP/auth backend. Single permanent room, fan-out of every
+// participant's Opus audio track to every other participant. Optional VP8
+// video track per peer (screen share) is forwarded the same way. Forked
+// from pion/example-webrtc-applications/sfu-ws.
 package sfu
 
 import (
@@ -22,6 +23,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/oklog/ulid/v2"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/intervalpli"
+	"github.com/pion/interceptor/pkg/nack"
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
@@ -73,7 +77,12 @@ type peer struct {
 	deafened  bool
 	// chatOnly is true for lurker peers. pc is nil for lurker peers; any
 	// code path that touches pc must guard on this field first.
-	chatOnly bool
+	chatOnly      bool
+	screenSharing bool
+	// watching opts in to specific publishers' screen-share video. Audio
+	// is unconditional; video is gated so idle viewers don't pay the
+	// bandwidth tax. Guarded by Room.mu.
+	watching map[string]bool
 
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
@@ -83,6 +92,10 @@ type peer struct {
 	// per target (one alert / 10 s) so a target doesn't get spammed by many
 	// senders simultaneously.
 	lastPingReceivedAt time.Time
+
+	// lastRenegotiateAt rate-limits inbound renegotiate so one client
+	// can't trigger a room-wide offer storm. Guarded by Room.mu.
+	lastRenegotiateAt time.Time
 
 	// out is the per-peer outbound queue, drained by writeLoop. Broadcast
 	// loops enqueue here non-blocking and never wait on a slow socket; if
@@ -108,6 +121,11 @@ const peerOutBufLen = 1024
 // are silently dropped, so a target doesn't get spammed when several peers
 // ping them at once.
 const pingCooldown = 10 * time.Second
+
+// renegotiateCooldown caps inbound renegotiate frequency per peer. Each
+// renegotiate triggers an offer/answer round-trip on every other peer, so
+// without this a single tight-looping client amplifies into N peers of work.
+const renegotiateCooldown = 250 * time.Millisecond
 
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
@@ -176,14 +194,26 @@ func (p *peer) writeLoop() {
 	}
 }
 
+// publisherRef carries the original publisher PC + SSRC for a video
+// track. The SSRC pion exposes on subscriber senders is freshly allocated;
+// PLI/FIR forwarded back to the publisher must use the publisher's original
+// SSRC instead.
+type publisherRef struct {
+	pc   *webrtc.PeerConnection
+	ssrc uint32
+}
+
 // Room holds the live state of all peers and forwarded tracks.
 type Room struct {
-	mu     sync.Mutex
-	peers  map[string]*peer
-	tracks map[string]*webrtc.TrackLocalStaticRTP // track ID -> track (track ID == publisher peer ID)
-	cfg    Config
-	api    *webrtc.API
-	closed atomic.Bool
+	mu    sync.Mutex
+	peers map[string]*peer
+	// tracks is keyed by trackKey(ownerID, kind) so one peer can
+	// publish both audio and screen-share video concurrently.
+	tracks     map[string]*webrtc.TrackLocalStaticRTP
+	publishers map[string]publisherRef
+	cfg        Config
+	api        *webrtc.API
+	closed     atomic.Bool
 
 	// resyncPending guards the deferred-retry goroutine spawn in
 	// signalPeerConnections so that a storm of join/leave/track events
@@ -218,30 +248,44 @@ func NewRoom(cfg Config) (*Room, error) {
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, err
 	}
+	// VP8 only: ubiquitous browser support, pion forwards untouched.
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeVP8,
+			ClockRate:   90000,
+			RTCPFeedback: []webrtc.RTCPFeedback{
+				{Type: "goog-remb"},
+				{Type: "ccm", Parameter: "fir"},
+				{Type: "nack"},
+				{Type: "nack", Parameter: "pli"},
+			},
+		},
+		PayloadType: 96,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, err
+	}
 
-	// Slim interceptor registry. Pion's default registry adds NACK,
-	// RTCPReports, Stats, and TWCC. We keep only RTCPReports.
-	//
-	// Skipped:
-	//   - Stats: getStats() is never called server-side; per-packet
-	//     bookkeeping is pure overhead (~1-2% CPU during sustained RTP).
-	//   - TWCC: bandwidth estimation for audio-only with fixed Opus
-	//     bitrate has no actionable use; the header extension and the
-	//     sender-side feedback generation are pure overhead.
-	//   - NACK: ConfigureNack only registers feedback on video codecs.
-	//     Default RegisterDefaultCodecs registers Opus with nil
-	//     RTCPFeedback, so the NACK interceptors never engage for audio
-	//     streams. Keeping them is dead weight; if Opus loss recovery
-	//     is ever wanted, register RTCPFeedback{Type:"nack"} for
-	//     RTPCodecTypeAudio and call ConfigureNack here.
-	//
-	// Kept:
-	//   - RTCPReports: SR/RR fired on a 1s timer, cheap; needed by
-	//     browser webrtc-internals and external monitoring tools.
+	// Interceptors. Skipping pion's defaults (Stats, TWCC) — getStats is
+	// never read server-side and TWCC is meaningless for fixed-bitrate
+	// Opus / screen-share content. intervalpli + nack responder are
+	// no-ops on audio (Opus carries no matching RTCPFeedback) and engage
+	// automatically for VP8.
 	ir := &interceptor.Registry{}
 	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
 		return nil, err
 	}
+	pliFactory, err := intervalpli.NewReceiverInterceptor(
+		intervalpli.GeneratorInterval(3 * time.Second),
+	)
+	if err != nil {
+		return nil, err
+	}
+	ir.Add(pliFactory)
+	nackFactory, err := nack.NewResponderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+	ir.Add(nackFactory)
 
 	api := webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
@@ -249,11 +293,31 @@ func NewRoom(cfg Config) (*Room, error) {
 		webrtc.WithInterceptorRegistry(ir),
 	)
 	return &Room{
-		peers:  make(map[string]*peer),
-		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
-		cfg:    cfg,
-		api:    api,
+		peers:      make(map[string]*peer),
+		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
+		publishers: make(map[string]publisherRef),
+		cfg:        cfg,
+		api:        api,
 	}, nil
+}
+
+func (r *Room) setPublisher(key string, ref publisherRef) {
+	r.mu.Lock()
+	r.publishers[key] = ref
+	r.mu.Unlock()
+}
+
+func (r *Room) clearPublisher(key string) {
+	r.mu.Lock()
+	delete(r.publishers, key)
+	r.mu.Unlock()
+}
+
+func (r *Room) lookupPublisher(key string) (publisherRef, bool) {
+	r.mu.Lock()
+	ref, ok := r.publishers[key]
+	r.mu.Unlock()
+	return ref, ok
 }
 
 // ServeWS upgrades the request to a WebSocket and runs one peer session.
@@ -310,7 +374,15 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionRecvonly,
 	}); err != nil {
-		log.Printf("sfu: add transceiver: %v", err)
+		log.Printf("sfu: add audio transceiver: %v", err)
+		return
+	}
+	// Upfront video transceiver so screen-share start is a direction flip
+	// (recvonly→sendonly on the publisher side) rather than an m-line add.
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		log.Printf("sfu: add video transceiver: %v", err)
 		return
 	}
 
@@ -323,6 +395,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
+		watching:    make(map[string]bool),
 	}
 	go p.writeLoop()
 
@@ -351,14 +424,24 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 	})
 
 	pc.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		// StreamID = publisher peer ID so the receiving client can group tracks by peer.
-		local, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, p.id, p.id)
+		trackID := trackKey(p.id, t.Kind().String())
+		// StreamID = peer id so the receiving client groups audio + video by publisher.
+		local, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, trackID, p.id)
 		if err != nil {
 			log.Printf("sfu: new local track: %v", err)
 			return
 		}
-		r.publishTrack(p.id, local)
-		defer r.unpublishTrack(p.id)
+		if t.Kind() == webrtc.RTPCodecTypeVideo {
+			r.setPublisher(trackID, publisherRef{pc: pc, ssrc: uint32(t.SSRC())})
+			defer r.clearPublisher(trackID)
+			// Broadcast sharing state immediately — lurkers never receive the
+			// track itself and depend on this flag entirely.
+			r.setScreenSharing(p.id, true)
+			defer r.setScreenSharing(p.id, false)
+		}
+
+		r.publishTrack(trackID, local)
+		defer r.unpublishTrack(trackID)
 
 		buf := make([]byte, 1500)
 		pkt := &rtp.Packet{}
@@ -490,6 +573,41 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.broadcastChat(p, cs)
+	case "renegotiate":
+		r.mu.Lock()
+		if time.Since(p.lastRenegotiateAt) < renegotiateCooldown {
+			r.mu.Unlock()
+			return
+		}
+		p.lastRenegotiateAt = time.Now()
+		r.mu.Unlock()
+		r.signalPeerConnections()
+	case "watch-screen":
+		var w protocol.WatchScreenPayload
+		if err := json.Unmarshal(msg.Data, &w); err != nil || w.PeerID == "" || w.PeerID == p.id {
+			return
+		}
+		r.mu.Lock()
+		if p.watching[w.PeerID] {
+			r.mu.Unlock()
+			return
+		}
+		p.watching[w.PeerID] = true
+		r.mu.Unlock()
+		r.signalPeerConnections()
+	case "unwatch-screen":
+		var w protocol.WatchScreenPayload
+		if err := json.Unmarshal(msg.Data, &w); err != nil || w.PeerID == "" {
+			return
+		}
+		r.mu.Lock()
+		if !p.watching[w.PeerID] {
+			r.mu.Unlock()
+			return
+		}
+		delete(p.watching, w.PeerID)
+		r.mu.Unlock()
+		r.signalPeerConnections()
 	}
 }
 
@@ -497,12 +615,13 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 // since this function does not access room state directly.
 func peerInfo(p *peer) protocol.PeerInfo {
 	return protocol.PeerInfo{
-		ID:          p.id,
-		DisplayName: p.displayName,
-		ClientID:    p.clientID,
-		SelfMuted:   p.selfMuted,
-		Deafened:    p.deafened,
-		ChatOnly:    p.chatOnly,
+		ID:            p.id,
+		DisplayName:   p.displayName,
+		ClientID:      p.clientID,
+		SelfMuted:     p.selfMuted,
+		Deafened:      p.deafened,
+		ChatOnly:      p.chatOnly,
+		ScreenSharing: p.screenSharing,
 	}
 }
 
@@ -528,7 +647,7 @@ func (r *Room) addPeer(p *peer) {
 		for id, op := range r.peers {
 			if op.clientID == p.clientID {
 				delete(r.peers, id)
-				delete(r.tracks, id)
+				r.dropTracksForPeer(id)
 				evicted = append(evicted, op)
 			}
 		}
@@ -587,7 +706,7 @@ func (r *Room) removePeer(id string) {
 		return
 	}
 	delete(r.peers, id)
-	delete(r.tracks, id)
+	r.dropTracksForPeer(id)
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		others = append(others, op)
@@ -644,6 +763,35 @@ func (r *Room) setDisplayName(id, name string) {
 		return
 	}
 	p.displayName = name
+	info := peerInfo(p)
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != id {
+			others = append(others, op)
+		}
+	}
+	r.mu.Unlock()
+
+	infoData, _ := json.Marshal(info)
+	infoEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-info", Data: infoData})
+	for _, op := range others {
+		_ = op.writeRaw(infoEnv)
+	}
+	if r.cfg.OnPeerUpdated != nil {
+		r.cfg.OnPeerUpdated(info)
+	}
+}
+
+// setScreenSharing toggles the flag and broadcasts peer-info to the room
+// including lurkers. Idempotent so OnTrack's defer can call it unguarded.
+func (r *Room) setScreenSharing(id string, sharing bool) {
+	r.mu.Lock()
+	p, ok := r.peers[id]
+	if !ok || p.screenSharing == sharing {
+		r.mu.Unlock()
+		return
+	}
+	p.screenSharing = sharing
 	info := peerInfo(p)
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
@@ -765,18 +913,53 @@ func newChatID(t time.Time) string {
 	return ulid.MustNew(ulid.Timestamp(t), rand.Reader).String()
 }
 
-func (r *Room) publishTrack(ownerID string, t *webrtc.TrackLocalStaticRTP) {
+// trackKey doubles as map key and wire track ID. The kind suffix lets a
+// receiving client tell a publisher's audio and video tracks apart even
+// though they share the same StreamID.
+func trackKey(ownerID, kind string) string {
+	return ownerID + ":" + kind
+}
+
+func ownerOf(key string) string {
+	if i := strings.IndexByte(key, ':'); i > 0 {
+		return key[:i]
+	}
+	return key
+}
+
+func (r *Room) publishTrack(key string, t *webrtc.TrackLocalStaticRTP) {
 	r.mu.Lock()
-	r.tracks[ownerID] = t
+	r.tracks[key] = t
 	r.mu.Unlock()
 	r.signalPeerConnections()
 }
 
-func (r *Room) unpublishTrack(ownerID string) {
+func (r *Room) unpublishTrack(key string) {
 	r.mu.Lock()
-	delete(r.tracks, ownerID)
+	delete(r.tracks, key)
+	owner := ownerOf(key)
+	// Reset every peer's watch state for this publisher so a fresh share
+	// starts as a new invitation (Discord-style), not an auto-resume.
+	for _, op := range r.peers {
+		delete(op.watching, owner)
+	}
 	r.mu.Unlock()
 	r.signalPeerConnections()
+}
+
+// dropTracksForPeer clears all tracks + publisher entries for ownerID.
+// Caller must hold r.mu.
+func (r *Room) dropTracksForPeer(ownerID string) {
+	for k := range r.tracks {
+		if ownerOf(k) == ownerID {
+			delete(r.tracks, k)
+		}
+	}
+	for k := range r.publishers {
+		if ownerOf(k) == ownerID {
+			delete(r.publishers, k)
+		}
+	}
 }
 
 // signalPeerConnections renegotiates each peer so it has senders for all
@@ -833,16 +1016,24 @@ func (r *Room) deferredResyncLoop() {
 
 func (r *Room) attemptSync() (retry bool) {
 	r.mu.Lock()
-	peers := make([]*peer, 0, len(r.peers))
+	type peerSync struct {
+		p        *peer
+		watching map[string]bool
+	}
+	syncs := make([]peerSync, 0, len(r.peers))
 	for _, p := range r.peers {
-		peers = append(peers, p)
+		w := make(map[string]bool, len(p.watching))
+		for k := range p.watching {
+			w[k] = true
+		}
+		syncs = append(syncs, peerSync{p: p, watching: w})
 	}
 	tracks := make(map[string]*webrtc.TrackLocalStaticRTP, len(r.tracks))
 	maps.Copy(tracks, r.tracks)
 	r.mu.Unlock()
 
-	for _, p := range peers {
-		if r.syncOnePeer(p, tracks) {
+	for _, s := range syncs {
+		if r.syncOnePeer(s.p, s.watching, tracks) {
 			return true
 		}
 	}
@@ -866,7 +1057,7 @@ var syncBufsPool = sync.Pool{
 	},
 }
 
-func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
+func (r *Room) syncOnePeer(p *peer, watching map[string]bool, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
 	// Lurker peers have no PeerConnection; nothing to sync.
 	if p.pc == nil {
 		return false
@@ -890,8 +1081,12 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 	clear(want)
 	clear(have)
 
-	for ownerID, t := range tracks {
-		if ownerID == p.id {
+	for key, t := range tracks {
+		owner := ownerOf(key)
+		if owner == p.id {
+			continue
+		}
+		if t.Kind() == webrtc.RTPCodecTypeVideo && !watching[owner] {
 			continue
 		}
 		want[t.ID()] = true
@@ -920,16 +1115,32 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		have[t.ID()] = true
 	}
 
-	for ownerID, t := range tracks {
-		if ownerID == p.id {
+	for key, t := range tracks {
+		owner := ownerOf(key)
+		if owner == p.id {
+			continue
+		}
+		if t.Kind() == webrtc.RTPCodecTypeVideo && !watching[owner] {
 			continue
 		}
 		if have[t.ID()] {
 			continue
 		}
-		if _, err := p.pc.AddTrack(t); err != nil {
+		sender, err := p.pc.AddTrack(t)
+		if err != nil {
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
+		}
+		// Immediate PLI bounds first-frame latency to ~RTT instead of the
+		// intervalpli tick. Goroutine then forwards any further subscriber
+		// PLI/FIR back to the publisher with the publisher's SSRC.
+		if t.Kind() == webrtc.RTPCodecTypeVideo {
+			if pub, ok := r.lookupPublisher(key); ok {
+				_ = pub.pc.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: pub.ssrc},
+				})
+				go r.forwardSubscriberRTCP(sender, key)
+			}
 		}
 	}
 
@@ -954,6 +1165,47 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		return true
 	}
 	return false
+}
+
+// forwardSubscriberRTCP relays PLI/FIR from a subscriber's sender back to
+// the publisher's pc, rewriting MediaSSRC to the publisher's original
+// (pion allocates a fresh SSRC for each forwarded sender). NACK is handled
+// locally by the responder interceptor; everything else is dropped.
+func (r *Room) forwardSubscriberRTCP(sender *webrtc.RTPSender, key string) {
+	buf := make([]byte, 1500)
+	for {
+		n, _, err := sender.Read(buf)
+		if err != nil {
+			return
+		}
+		pkts, err := rtcp.Unmarshal(buf[:n])
+		if err != nil {
+			continue
+		}
+		var forward []rtcp.Packet
+		for _, pkt := range pkts {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				forward = append(forward, pkt)
+			}
+		}
+		if len(forward) == 0 {
+			continue
+		}
+		pub, ok := r.lookupPublisher(key)
+		if !ok {
+			continue
+		}
+		for _, pkt := range forward {
+			switch p := pkt.(type) {
+			case *rtcp.PictureLossIndication:
+				p.MediaSSRC = pub.ssrc
+			case *rtcp.FullIntraRequest:
+				p.MediaSSRC = pub.ssrc
+			}
+		}
+		_ = pub.pc.WriteRTCP(forward)
+	}
 }
 
 func newPeerID() string {

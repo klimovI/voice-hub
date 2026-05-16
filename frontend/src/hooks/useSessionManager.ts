@@ -86,6 +86,11 @@ export type UseSessionManagerReturn = {
   sendChat: (text: string, clientMsgId: string) => void;
   /** Send a ping to a specific peer. No-op when not joined. */
   sendPing: (targetId: string) => void;
+  /** Prompts getDisplayMedia + publishes; throws on denial or no-connection. */
+  startScreenShare: () => Promise<void>;
+  stopScreenShare: () => void;
+  watchScreen: (peerId: string) => void;
+  unwatchScreen: (peerId: string) => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
   /**
@@ -267,6 +272,68 @@ export function useSessionManager({
     sfu.getClient()?.sendPing(targetId);
   }, [sfu]);
 
+  const watchScreen = useCallback(
+    (peerId: string): void => {
+      sfu.getClient()?.watchScreen(peerId);
+    },
+    [sfu],
+  );
+
+  const unwatchScreen = useCallback(
+    (peerId: string): void => {
+      sfu.getClient()?.unwatchScreen(peerId);
+    },
+    [sfu],
+  );
+
+  // Imperative WebRTC handles stay in refs; the store only mirrors the
+  // MediaStream for <video srcObject> rendering.
+  const screenSenderRef = useRef<RTCRtpSender | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+
+  const stopScreenShare = useCallback((): void => {
+    const sender = screenSenderRef.current;
+    const stream = screenStreamRef.current;
+    screenSenderRef.current = null;
+    screenStreamRef.current = null;
+    if (stream) {
+      for (const t of stream.getTracks()) t.stop();
+    }
+    if (sender) {
+      sfu.getClient()?.stopScreenShare(sender);
+    }
+    useStore.getState().setSelfScreenStream(null);
+  }, [sfu]);
+
+  const startScreenShare = useCallback(async (): Promise<void> => {
+    if (screenSenderRef.current) return;
+    const client = sfu.getClient();
+    if (!client) throw new Error('Подключитесь к комнате, чтобы делиться экраном');
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30 },
+      audio: false,
+    });
+    const track = stream.getVideoTracks()[0];
+    if (!track) {
+      for (const t of stream.getTracks()) t.stop();
+      throw new Error('Поток без видео-дорожки');
+    }
+    // Tells VP8 to favour sharpness over motion smoothing — better for code/docs.
+    if ('contentHint' in track) {
+      (track as MediaStreamTrack & { contentHint: string }).contentHint = 'detail';
+    }
+    const sender = client.startScreenShare(track);
+    if (!sender) {
+      track.stop();
+      throw new Error('Не удалось опубликовать поток');
+    }
+    screenSenderRef.current = sender;
+    screenStreamRef.current = stream;
+    useStore.getState().setSelfScreenStream(stream);
+    // Native browser "Stop sharing" bar ends the track without telling us.
+    track.addEventListener('ended', () => stopScreenShare(), { once: true });
+  }, [sfu, stopScreenShare]);
+
   const handleChatReceive = useCallback(
     (data: ChatPayload): void => {
       const sender = useStore.getState().participants.get(data.from);
@@ -370,6 +437,7 @@ export function useSessionManager({
               remoteMuted: p.selfMuted ?? false,
               remoteDeafened: p.deafened ?? false,
               chatOnly: p.chatOnly ?? false,
+              screenSharing: p.screenSharing ?? false,
               ...(stored !== null ? { localVolume: stored } : {}),
             });
           }
@@ -384,6 +452,7 @@ export function useSessionManager({
           selfMuted,
           deafened,
           chatOnly,
+          screenSharing,
         }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
           getStore().upsertParticipant({
@@ -393,6 +462,7 @@ export function useSessionManager({
             remoteMuted: selfMuted ?? false,
             remoteDeafened: deafened ?? false,
             chatOnly: chatOnly ?? false,
+            screenSharing: screenSharing ?? false,
             ...(stored !== null ? { localVolume: stored } : {}),
           });
         },
@@ -400,17 +470,16 @@ export function useSessionManager({
           audio.detachRemoteStream(id);
           getStore().removeParticipant(id);
         },
-        onPeerInfo: ({ id, displayName: peerDisplay, clientId }) => {
-          const patch: { display?: string; clientId?: string } = {};
+        onPeerInfo: ({ id, displayName: peerDisplay, clientId, screenSharing }) => {
+          const patch: {
+            display?: string;
+            clientId?: string;
+            screenSharing?: boolean;
+          } = { screenSharing: Boolean(screenSharing) };
           if (peerDisplay) patch.display = peerDisplay;
-          // Defensive: if onTrack created the entry before peer-joined arrived,
-          // clientId would be missing. peer-info carries it on every broadcast,
-          // so backfill if absent. clientId never changes mid-session, so
-          // overwriting with the same value is safe.
+          // Backfill clientId if a track-induced entry beat peer-joined here.
           if (clientId) patch.clientId = clientId;
-          if (patch.display !== undefined || patch.clientId !== undefined) {
-            getStore().updateParticipant(id, patch);
-          }
+          getStore().updateParticipant(id, patch);
         },
         onPeerState: ({ id, selfMuted, deafened }) => {
           getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
@@ -418,9 +487,29 @@ export function useSessionManager({
         onChat: handleChatReceive,
         onPing: handlePingReceive,
         onTrack: ({ track, stream, peerId }) => {
-          if (!peerId || track.kind !== 'audio') return;
-          getStore().upsertParticipant({ id: peerId, hasStream: true });
-          audio.attachRemoteStream(peerId, stream);
+          if (!peerId) return;
+          if (track.kind === 'audio') {
+            getStore().upsertParticipant({ id: peerId, hasStream: true });
+            audio.attachRemoteStream(peerId, stream);
+            return;
+          }
+          if (track.kind === 'video') {
+            // Listening for `mute` here caused the tile to flicker during
+            // routine renegotiation pauses — `ended` is the only reliable
+            // "actually stopped" signal; `peer-info.screenSharing` covers
+            // the rest.
+            getStore().updateParticipant(peerId, { screenStream: stream });
+            track.addEventListener(
+              'ended',
+              () => {
+                const s = useStore.getState().participants.get(peerId);
+                if (s?.screenStream === stream) {
+                  getStore().updateParticipant(peerId, { screenStream: undefined });
+                }
+              },
+              { once: true },
+            );
+          }
         },
         onError: () => {
           // onState handles user-visible errors
@@ -457,6 +546,14 @@ export function useSessionManager({
   const handleLeave = useCallback(() => {
     userLeavingRef.current = true;
     reconnectSchedulerRef.current.reset();
+    // Stop capture before the SFU teardown so the OS capture surface is
+    // released even if the WS is already dead.
+    if (screenStreamRef.current) {
+      for (const t of screenStreamRef.current.getTracks()) t.stop();
+      screenStreamRef.current = null;
+    }
+    screenSenderRef.current = null;
+    useStore.getState().setSelfScreenStream(null);
     sfu.disconnect();
     audio.fullCleanup();
     micGraphRef.current = null;
@@ -653,6 +750,10 @@ export function useSessionManager({
     sendSetState,
     sendChat,
     sendPing,
+    startScreenShare,
+    stopScreenShare,
+    watchScreen,
+    unwatchScreen,
     getRoomId,
     handleChatReceive,
     handlePingReceive,

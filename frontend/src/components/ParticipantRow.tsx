@@ -132,7 +132,9 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
   const avatarRing = participant.speaking ? 'ring-2 ring-accent ring-offset-0' : '';
 
   const showIndicators =
-    !participant.isSelf && !isLurker && (participant.remoteMuted || participant.remoteDeafened);
+    !participant.isSelf &&
+    !isLurker &&
+    (participant.remoteMuted || participant.remoteDeafened || participant.screenSharing);
 
   return (
     <div
@@ -227,6 +229,17 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
         </div>
         {showIndicators && (
           <div className="flex gap-1 items-center shrink-0">
+            {participant.screenSharing && (
+              <span
+                aria-label="Делится экраном"
+                title="Делится экраном"
+                className="grid place-items-center w-9 h-9 text-accent border border-accent/40"
+              >
+                <span className="msym" style={{ fontSize: 18 }}>
+                  screen_share
+                </span>
+              </span>
+            )}
             {participant.remoteMuted && (
               <span
                 aria-label="Микрофон выключен"

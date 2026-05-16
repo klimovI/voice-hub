@@ -36,6 +36,11 @@ export type PeerInfo = {
    * Absent / false for normal voice peers.
    */
   chatOnly?: boolean;
+  /**
+   * Server-driven "is currently screen-sharing" flag. Lurkers rely on it
+   * entirely; voice peers can use it before the video track has arrived.
+   */
+  screenSharing?: boolean;
 };
 
 // Server → Client payloads
@@ -175,7 +180,13 @@ export type ClientMessage =
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
   | { event: 'set-state'; data: SetStatePayload }
   | { event: 'chat-send'; data: ChatSendPayload }
-  | { event: 'ping'; data: { to: string } };
+  | { event: 'ping'; data: { to: string } }
+  /** Asks the server for a fresh offer after a publisher-side track change. */
+  | { event: 'renegotiate'; data?: undefined }
+  /** Opt in to receive a specific peer's screen-share video. Audio is unconditional. */
+  | { event: 'watch-screen'; data: { peerId: string } }
+  /** Opt out; server stops forwarding that peer's video to us. */
+  | { event: 'unwatch-screen'; data: { peerId: string } };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 

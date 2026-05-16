@@ -38,6 +38,11 @@ export type SFUClient = {
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
   sendPing(targetId: string): void;
+  /** Publishes a getDisplayMedia track; returns its sender, or null when not connected. */
+  startScreenShare(track: MediaStreamTrack): RTCRtpSender | null;
+  stopScreenShare(sender: RTCRtpSender): void;
+  watchScreen(peerId: string): void;
+  unwatchScreen(peerId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
 };
@@ -209,6 +214,53 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     send('ping', { to: targetId });
   }
 
+  function startScreenShare(track: MediaStreamTrack): RTCRtpSender | null {
+    if (!pc) return null;
+    // Reuse the recvonly video transceiver pion already offered; addTrack
+    // here would create a second m-line.
+    const reusable = pc.getTransceivers().find(
+      (tr) =>
+        tr.receiver.track?.kind === 'video' &&
+        (!tr.sender.track || tr.sender.track.readyState === 'ended'),
+    );
+    let sender: RTCRtpSender;
+    if (reusable) {
+      void reusable.sender.replaceTrack(track);
+      try {
+        reusable.direction = 'sendonly';
+      } catch {
+        /* some browsers reject post-negotiation direction changes */
+      }
+      sender = reusable.sender;
+    } else {
+      sender = pc.addTrack(track);
+    }
+    send('renegotiate', undefined);
+    return sender;
+  }
+
+  function stopScreenShare(sender: RTCRtpSender): void {
+    if (!pc) return;
+    void sender.replaceTrack(null);
+    const tr = pc.getTransceivers().find((t) => t.sender === sender);
+    if (tr) {
+      try {
+        tr.direction = 'recvonly';
+      } catch {
+        /* ignore */
+      }
+    }
+    send('renegotiate', undefined);
+  }
+
+  function watchScreen(peerId: string): void {
+    send('watch-screen', { peerId });
+  }
+
+  function unwatchScreen(peerId: string): void {
+    send('unwatch-screen', { peerId });
+  }
+
   function getPeerConnection(): RTCPeerConnection | null {
     return pc;
   }
@@ -250,7 +302,20 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     myId = null;
   }
 
-  return { connect, disconnect, setDisplayName, sendSetState, sendChat, sendPing, getPeerConnection, getId };
+  return {
+    connect,
+    disconnect,
+    setDisplayName,
+    sendSetState,
+    sendChat,
+    sendPing,
+    startScreenShare,
+    stopScreenShare,
+    watchScreen,
+    unwatchScreen,
+    getPeerConnection,
+    getId,
+  };
 }
 
 // --------------------------------------------------------------------------

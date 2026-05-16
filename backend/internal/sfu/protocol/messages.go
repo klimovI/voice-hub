@@ -37,13 +37,18 @@ type Envelope struct {
 // in the room roster (welcome.peers and peer-joined/peer-left broadcasts)
 // so all clients can display them; they should be rendered visually distinct
 // and sorted below voice peers. Omitted from JSON when false (voice peers).
+//
+// ScreenSharing flips on/off as the server starts/stops forwarding a video
+// track from this peer. Lurkers never receive media, so this flag is their
+// only signal that a share is active.
 type PeerInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	ClientID    string `json:"clientId,omitempty"`
-	SelfMuted   bool   `json:"selfMuted,omitempty"`
-	Deafened    bool   `json:"deafened,omitempty"`
-	ChatOnly    bool   `json:"chatOnly,omitempty"`
+	ID            string `json:"id"`
+	DisplayName   string `json:"displayName,omitempty"`
+	ClientID      string `json:"clientId,omitempty"`
+	SelfMuted     bool   `json:"selfMuted,omitempty"`
+	Deafened      bool   `json:"deafened,omitempty"`
+	ChatOnly      bool   `json:"chatOnly,omitempty"`
+	ScreenSharing bool   `json:"screenSharing,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -119,6 +124,13 @@ type SetDisplayNamePayload struct {
 type SetStatePayload struct {
 	SelfMuted bool `json:"selfMuted"`
 	Deafened  bool `json:"deafened"`
+}
+
+// WatchScreenPayload is the body of "watch-screen" / "unwatch-screen".
+// Subscribers opt into a publisher's screen-share video; audio is always
+// forwarded. Server clears all watch entries for a publisher on unpublish.
+type WatchScreenPayload struct {
+	PeerID string `json:"peerId"`
 }
 
 // PeerStatePayload is the data field of the "peer-state" message,

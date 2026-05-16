@@ -27,6 +27,11 @@ export type ParticipantUI = {
   localMuted: boolean;
   localVolume: number; // 0–500 (WebAudio can exceed 100%)
   hasStream: boolean;
+  // Remote screen share. Self never carries this — App reads the captured
+  // stream from the store's selfScreenStream directly.
+  screenStream?: MediaStream;
+  // Server flag: arrives via peer-info before the video track itself does.
+  screenSharing?: boolean;
   remoteMuted?: boolean;
   remoteDeafened?: boolean;
   chatOnly?: boolean;

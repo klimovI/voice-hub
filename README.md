@@ -11,9 +11,10 @@
 Self-hosted голосовая комната для маленьких компаний. Заточена под игры: фокус на чистом звуке и низкой задержке.
 
 - одна постоянная комната, 3–10 человек
-- WebRTC через embedded pion SFU (audio-only, в одном Go-процессе)
+- WebRTC через embedded pion SFU (Opus + опциональный VP8 screen-share, в одном Go-процессе)
 - два движка денойза на выбор, переключение без переподключения
 - весь стейт в браузере — никаких аккаунтов
+- показ экрана — пока только в браузере; в desktop-сборке кнопка отключена (требуется WebView2 permission delegate)
 
 ## Скачать (Windows)
 
@@ -119,7 +120,7 @@ deploy/    Caddyfile
      └──────▶└──────────────────────────┘
 ```
 
-Один Go-бинарь делает всё: cookie-auth, отдача статики из `frontend/dist/`, JSON-WS signaling, pion SFU (audio-only forwarding), pion TURN (HMAC short-term creds).
+Один Go-бинарь делает всё: cookie-auth, отдача статики из `frontend/dist/`, JSON-WS signaling, pion SFU (Opus аудио + VP8 screen-share forwarding), pion TURN (HMAC short-term creds).
 
 Свой speaking считается локально по RMS на `AnalyserNode`. Чужой speaking-индикатор не реализован.
 
