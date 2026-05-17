@@ -94,9 +94,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     pc.ontrack = (event) => {
       const stream = event.streams?.[0] ?? null;
       const peerId = stream ? stream.id : null;
-      if (event.track.kind === 'video') {
-        (event.receiver as RTCRtpReceiver & { playoutDelayHint?: number }).playoutDelayHint = 0;
-      }
       if (stream) {
         on.onTrack({ track: event.track, stream, peerId });
       }

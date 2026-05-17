@@ -139,10 +139,7 @@ const pingCooldown = 10 * time.Second
 // without this a single tight-looping client amplifies into N peers of work.
 const renegotiateCooldown = 250 * time.Millisecond
 
-const (
-	rtpExtURITWCC         = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
-	rtpExtURIPlayoutDelay = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"
-)
+const rtpExtURITWCC = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
 
 const ptVP9 = 98
 
@@ -321,12 +318,6 @@ func NewRoom(cfg Config) (*Room, error) {
 	); err != nil {
 		return nil, err
 	}
-	if err := mediaEngine.RegisterHeaderExtension(
-		webrtc.RTPHeaderExtensionCapability{URI: rtpExtURIPlayoutDelay},
-		webrtc.RTPCodecTypeVideo,
-	); err != nil {
-		return nil, err
-	}
 
 	// Stats interceptor skipped — getStats is never consumed server-side.
 	ir := &interceptor.Registry{}
@@ -350,13 +341,11 @@ func NewRoom(cfg Config) (*Room, error) {
 		return nil, err
 	}
 	ir.Add(twccFactory)
-	ir.Add(playoutDelayInterceptorFactory{})
 
 	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
 		// default LeakyBucketPacer queues packets at the estimated rate and
-		// stalls the wire when the encoder briefly outpaces it, which
-		// playoutDelayHint=0 then renders as a black viewer.
+		// stalls the wire when the encoder briefly outpaces it.
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(bweInitialBitrate),
 			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
