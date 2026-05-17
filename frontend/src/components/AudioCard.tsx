@@ -87,11 +87,30 @@ export function AudioCard({
         // enumerateDevices can throw in restricted contexts; leave list empty.
       }
     };
-    void refresh();
+    // Wait for mic permission before probing: without it labels are anonymous
+    // and Chromium logs a Permissions-Policy violation for the camera kind it
+    // also enumerates internally.
+    let permStatus: PermissionStatus | null = null;
+    const onPermChange = () => {
+      if (permStatus?.state === 'granted') void refresh();
+    };
+    const start = async () => {
+      try {
+        permStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (cancelled) return;
+        if (permStatus.state === 'granted') void refresh();
+        permStatus.addEventListener('change', onPermChange);
+      } catch {
+        // Permissions API not supported — fall back to immediate enumerate.
+        void refresh();
+      }
+    };
+    void start();
     md.addEventListener?.('devicechange', refresh);
     return () => {
       cancelled = true;
       md.removeEventListener?.('devicechange', refresh);
+      permStatus?.removeEventListener('change', onPermChange);
     };
   }, []);
 

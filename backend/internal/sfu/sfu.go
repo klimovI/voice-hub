@@ -353,7 +353,14 @@ func NewRoom(cfg Config) (*Room, error) {
 	ir.Add(playoutDelayInterceptorFactory{})
 
 	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-		return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(bweInitialBitrate))
+		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
+		// default LeakyBucketPacer queues packets at the estimated rate and
+		// stalls the wire when the encoder briefly outpaces it, which
+		// playoutDelayHint=0 then renders as a black viewer.
+		return gcc.NewSendSideBWE(
+			gcc.SendSideBWEInitialBitrate(bweInitialBitrate),
+			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+		)
 	})
 	if err != nil {
 		return nil, err
