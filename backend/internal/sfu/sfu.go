@@ -119,6 +119,9 @@ type peer struct {
 
 	// syncMu serialises syncOnePeer for this peer; caller must not hold r.mu.
 	syncMu sync.Mutex
+	// syncPending is set when syncOnePeer was skipped because the PC was
+	// mid-negotiation; the answer handler drains it once signaling settles.
+	syncPending atomic.Bool
 }
 
 // peerOutBufLen bounds per-peer outbound queue depth. Sized for the
@@ -655,8 +658,12 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			log.Printf("sfu: set remote (%s): %v", p.id, err)
 			return
 		}
-		// Drain syncs that were skipped while signaling was non-stable.
-		r.signalPeerConnections()
+		// Drain a sync skipped earlier while this peer was mid-negotiation.
+		// Conditional: unconditionally re-syncing here creates an offer
+		// ping-pong (every answer triggers a fresh offer for all peers).
+		if p.syncPending.Swap(false) {
+			r.signalPeerConnections()
+		}
 	case "candidate":
 		var c webrtc.ICECandidateInit
 		if err := json.Unmarshal(msg.Data, &c); err != nil {
@@ -1208,9 +1215,10 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string
 		return true
 	}
 	// Offer-in-flight: SetLocalDescription rejects while signaling is
-	// have-local-offer. The "answer" handler re-triggers signalPeerConnections
-	// once the remote answer lands, so dropping the attempt here is safe.
+	// have-local-offer. Mark a re-sync request; the answer handler drains
+	// it once the remote answer lands.
 	if p.pc.SignalingState() != webrtc.SignalingStateStable {
+		p.syncPending.Store(true)
 		return false
 	}
 

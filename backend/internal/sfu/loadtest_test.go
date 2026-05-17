@@ -58,6 +58,9 @@ type loadClient struct {
 
 	// recvCount counts inbound signaling messages.
 	recvCount atomic.Int64
+	// offersRecv counts inbound "offer" envelopes; a healthy session
+	// should plateau quickly. A runaway value means an offer ping-pong.
+	offersRecv atomic.Int64
 	// rtpRecv counts RTP packets received across all remote tracks.
 	rtpRecv atomic.Int64
 }
@@ -218,6 +221,7 @@ func (c *loadClient) readLoop() {
 		}
 		switch env.Event {
 		case "offer":
+			c.offersRecv.Add(1)
 			var sd webrtc.SessionDescription
 			if err := json.Unmarshal(env.Data, &sd); err != nil {
 				continue
@@ -601,5 +605,15 @@ func TestRenegotiationRaceDoesNotErrorSetLocalDescription(t *testing.T) {
 		if strings.Contains(out, needle) {
 			t.Fatalf("renegotiation race triggered server log containing %q\nfull server log:\n%s", needle, out)
 		}
+	}
+	// A healthy two-peer join with one watch-screen would settle in a
+	// handful of offers per peer. Any value past the cap indicates an
+	// offer ping-pong (e.g. answer→signalPeerConnections→offer→answer→…).
+	const offerCap = 10
+	if got := a.offersRecv.Load(); got > offerCap {
+		t.Fatalf("peer A received %d offers (cap %d) — offer ping-pong", got, offerCap)
+	}
+	if got := b.offersRecv.Load(); got > offerCap {
+		t.Fatalf("peer B received %d offers (cap %d) — offer ping-pong", got, offerCap)
 	}
 }
