@@ -1,6 +1,5 @@
 import { Mic, ScreenShare, Volume2, Wifi, WifiOff, type LucideIcon } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { isTauri } from '../utils/tauri';
 
 interface Props {
   onJoin: (displayName: string) => void;
@@ -133,37 +132,23 @@ export function SessionCard({
             <span className="flex-1 text-center">{heroLabel}</span>
           </button>
 
-          {joined &&
-            (isTauri() ? (
-              <button
-                id="screen-share-button"
-                type="button"
-                disabled
-                title="Показ экрана пока доступен только в браузере. В десктоп-приложении — в работе."
-                className="flex items-center p-4 bg-bg-0 border border-line text-muted-2 cursor-not-allowed opacity-60"
-              >
-                <ScreenShare size={24} className="shrink-0" />
-                <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                  Экран — только в браузере
-                </span>
-              </button>
-            ) : (
-              <button
-                id="screen-share-button"
-                type="button"
-                onClick={onToggleScreenShare}
-                aria-pressed={sharingScreen}
-                title={sharingScreen ? 'Завершить трансляцию' : 'Показать экран'}
-                className={`flex items-center p-4 transition-colors duration-150 ${
-                  sharingScreen ? tileOff : tileOn
-                }`}
-              >
-                <ScreenShare size={24} className="shrink-0" />
-                <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                  {sharingScreen ? 'Завершить экран' : 'Показать экран'}
-                </span>
-              </button>
-            ))}
+          {joined && (
+            <button
+              id="screen-share-button"
+              type="button"
+              onClick={onToggleScreenShare}
+              aria-pressed={sharingScreen}
+              title={sharingScreen ? 'Завершить трансляцию' : 'Показать экран'}
+              className={`flex items-center p-4 transition-colors duration-150 ${
+                sharingScreen ? tileOff : tileOn
+              }`}
+            >
+              <ScreenShare size={24} className="shrink-0" />
+              <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
+                {sharingScreen ? 'Завершить экран' : 'Показать экран'}
+              </span>
+            </button>
+          )}
         </form>
       </div>
     </section>
