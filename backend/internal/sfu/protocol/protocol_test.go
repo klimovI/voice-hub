@@ -117,6 +117,11 @@ var fixtureCases = []fixtureCase{
 			},
 		},
 	},
+	// watch-screen: exercises Quality field for VP9 temporal-layer subscription.
+	{
+		name:    "watch-screen",
+		payload: protocol.WatchScreenPayload{PeerID: "11223344aabbccdd", Quality: "medium"},
+	},
 }
 
 // TestGoldenFixtures marshals each payload type and asserts the result

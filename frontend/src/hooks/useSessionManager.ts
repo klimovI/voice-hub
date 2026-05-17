@@ -89,7 +89,7 @@ export type UseSessionManagerReturn = {
   /** Prompts getDisplayMedia + publishes; throws on denial or no-connection. */
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
-  watchScreen: (peerId: string) => void;
+  watchScreen: (peerId: string, quality?: 'low' | 'medium' | 'high') => void;
   unwatchScreen: (peerId: string) => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
@@ -273,8 +273,8 @@ export function useSessionManager({
   }, [sfu]);
 
   const watchScreen = useCallback(
-    (peerId: string): void => {
-      sfu.getClient()?.watchScreen(peerId);
+    (peerId: string, quality?: 'low' | 'medium' | 'high'): void => {
+      sfu.getClient()?.watchScreen(peerId, quality);
     },
     [sfu],
   );
@@ -313,7 +313,11 @@ export function useSessionManager({
       throw new Error('Браузер не поддерживает показ экрана');
     }
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30 },
+      video: {
+        width: { max: 1920 },
+        height: { max: 1080 },
+        frameRate: { max: 30 },
+      },
       audio: false,
     });
     const track = stream.getVideoTracks()[0];
@@ -321,11 +325,17 @@ export function useSessionManager({
       for (const t of stream.getTracks()) t.stop();
       throw new Error('Поток без видео-дорожки');
     }
-    // Tells VP8 to favour sharpness over motion smoothing — better for code/docs.
+    // 'detail' biases the encoder toward sharpness over motion — better for code/docs.
     if ('contentHint' in track) {
       (track as MediaStreamTrack & { contentHint: string }).contentHint = 'detail';
     }
-    const sender = client.startScreenShare(track);
+    const sender = client.startScreenShare(track, {
+      maxBitrate: 4_000_000,
+      maxFramerate: 30,
+      priority: 'high',
+      scalabilityMode: 'L1T3',
+      degradationPreference: 'maintain-resolution',
+    });
     if (!sender) {
       track.stop();
       throw new Error('Не удалось опубликовать поток');

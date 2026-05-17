@@ -1,8 +1,10 @@
 // Package sfu is a minimal WebRTC SFU embedded in the same Go process as
 // the HTTP/auth backend. Single permanent room, fan-out of every
-// participant's Opus audio track to every other participant. Optional VP8
-// video track per peer (screen share) is forwarded the same way. Forked
-// from pion/example-webrtc-applications/sfu-ws.
+// participant's Opus audio track to every other participant. Optional VP9
+// video track per peer (screen share) is forwarded with per-subscriber
+// temporal-layer filtering: each subscriber carries a target TID (0/1/2)
+// and enhancement packets with TID > target are dropped before WriteRTP.
+// Forked from pion/example-webrtc-applications/sfu-ws.
 package sfu
 
 import (
@@ -23,10 +25,14 @@ import (
 	"github.com/coder/websocket"
 	"github.com/oklog/ulid/v2"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/interceptor/pkg/nack"
+	"github.com/pion/interceptor/pkg/twcc"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	rtpcodecs "github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
 
 	"voice-hub/backend/internal/sfu/protocol"
@@ -79,13 +85,18 @@ type peer struct {
 	// code path that touches pc must guard on this field first.
 	chatOnly      bool
 	screenSharing bool
-	// watching opts in to specific publishers' screen-share video. Audio
-	// is unconditional; video is gated so idle viewers don't pay the
-	// bandwidth tax. Guarded by Room.mu.
-	watching map[string]bool
+	// watching maps publisher peer ID → target VP9 temporal layer ID (0/1/2).
+	// Presence in the map means "subscribed to this publisher's video".
+	// Guarded by Room.mu.
+	watching map[string]uint8
 
 	pc *webrtc.PeerConnection
 	ws *websocket.Conn
+
+	// bwe is nil for lurkers; its OnTargetBitrateChange feeds bwCapTID.
+	bwe cc.BandwidthEstimator
+	// bwCapTID is read lock-free on the RTP forward path; bwCapNone = no clamp.
+	bwCapTID atomic.Uint32
 
 	// lastPingReceivedAt is the timestamp of the last ping this peer received,
 	// from any sender. Guarded by Room.mu. Used to rate-limit incoming pings
@@ -126,6 +137,27 @@ const pingCooldown = 10 * time.Second
 // renegotiate triggers an offer/answer round-trip on every other peer, so
 // without this a single tight-looping client amplifies into N peers of work.
 const renegotiateCooldown = 250 * time.Millisecond
+
+const (
+	rtpExtURITWCC         = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+	rtpExtURIPlayoutDelay = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"
+)
+
+const ptVP9 = 98
+
+const tidHigh uint8 = 2
+
+// bwCapNone: sentinel above the TID range (uint32, since atomic.Uint8 doesn't exist).
+const bwCapNone uint32 = 255
+
+const (
+	bweInitialBitrate   = 3_000_000
+	bweMidThresholdBps  = 1_500_000
+	bweHighThresholdBps = 3_000_000
+)
+
+// pliCooldown: skip immediate-on-subscribe PLI if a keyframe arrived within this window.
+const pliCooldown = time.Second
 
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
@@ -194,13 +226,12 @@ func (p *peer) writeLoop() {
 	}
 }
 
-// publisherRef carries the original publisher PC + SSRC for a video
-// track. The SSRC pion exposes on subscriber senders is freshly allocated;
-// PLI/FIR forwarded back to the publisher must use the publisher's original
-// SSRC instead.
+// publisherRef carries the publisher's original SSRC (pion allocates a fresh
+// one for subscriber senders; PLI/FIR forwarded back must use the original).
 type publisherRef struct {
-	pc   *webrtc.PeerConnection
-	ssrc uint32
+	pc             *webrtc.PeerConnection
+	ssrc           uint32
+	lastKeyframeNS *atomic.Int64
 }
 
 // Room holds the live state of all peers and forwarded tracks.
@@ -211,9 +242,21 @@ type Room struct {
 	// publish both audio and screen-share video concurrently.
 	tracks     map[string]*webrtc.TrackLocalStaticRTP
 	publishers map[string]publisherRef
+	// subTracks holds per-subscriber TrackLocalStaticRTP instances for VP9
+	// video. Keyed by subTrackKey(publisherID, subscriberID). These are the
+	// actual tracks added to each subscriber's PeerConnection; the shared
+	// entry in r.tracks serves only as the negotiation template/existence
+	// signal. Audio continues to use the shared track.
+	// Guarded by mu.
+	subTracks  map[string]*webrtc.TrackLocalStaticRTP
 	cfg        Config
 	api        *webrtc.API
 	closed     atomic.Bool
+
+	// pcCreateMu serialises NewPeerConnection so the cc OnNewPeerConnection
+	// callback (sync, during construction) can deposit into pendingBWE safely.
+	pcCreateMu sync.Mutex
+	pendingBWE cc.BandwidthEstimator
 
 	// resyncPending guards the deferred-retry goroutine spawn in
 	// signalPeerConnections so that a storm of join/leave/track events
@@ -248,28 +291,37 @@ func NewRoom(cfg Config) (*Room, error) {
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, err
 	}
-	// VP8 only: ubiquitous browser support, pion forwards untouched.
+	// VP9 only: the temporal-layer forwarding path depends on parsable TID.
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP8,
+			MimeType:    webrtc.MimeTypeVP9,
 			ClockRate:   90000,
+			SDPFmtpLine: "profile-id=0",
 			RTCPFeedback: []webrtc.RTCPFeedback{
-				{Type: "goog-remb"},
+				{Type: "transport-cc"},
 				{Type: "ccm", Parameter: "fir"},
 				{Type: "nack"},
 				{Type: "nack", Parameter: "pli"},
 			},
 		},
-		PayloadType: 96,
+		PayloadType: ptVP9,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, err
 	}
+	if err := mediaEngine.RegisterHeaderExtension(
+		webrtc.RTPHeaderExtensionCapability{URI: rtpExtURITWCC},
+		webrtc.RTPCodecTypeVideo,
+	); err != nil {
+		return nil, err
+	}
+	if err := mediaEngine.RegisterHeaderExtension(
+		webrtc.RTPHeaderExtensionCapability{URI: rtpExtURIPlayoutDelay},
+		webrtc.RTPCodecTypeVideo,
+	); err != nil {
+		return nil, err
+	}
 
-	// Interceptors. Skipping pion's defaults (Stats, TWCC) — getStats is
-	// never read server-side and TWCC is meaningless for fixed-bitrate
-	// Opus / screen-share content. intervalpli + nack responder are
-	// no-ops on audio (Opus carries no matching RTCPFeedback) and engage
-	// automatically for VP8.
+	// Stats interceptor skipped — getStats is never consumed server-side.
 	ir := &interceptor.Registry{}
 	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
 		return nil, err
@@ -286,19 +338,38 @@ func NewRoom(cfg Config) (*Room, error) {
 		return nil, err
 	}
 	ir.Add(nackFactory)
+	twccFactory, err := twcc.NewSenderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+	ir.Add(twccFactory)
+	ir.Add(playoutDelayInterceptorFactory{})
 
-	api := webrtc.NewAPI(
+	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+		return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(bweInitialBitrate))
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	r := &Room{
+		peers:      make(map[string]*peer),
+		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
+		publishers: make(map[string]publisherRef),
+		subTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
+		cfg:        cfg,
+	}
+	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
+		r.pendingBWE = bwe
+	})
+	ir.Add(ccFactory)
+
+	r.api = webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithInterceptorRegistry(ir),
 	)
-	return &Room{
-		peers:      make(map[string]*peer),
-		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
-		publishers: make(map[string]publisherRef),
-		cfg:        cfg,
-		api:        api,
-	}, nil
+	return r, nil
 }
 
 func (r *Room) setPublisher(key string, ref publisherRef) {
@@ -364,7 +435,12 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	r.pcCreateMu.Lock()
+	r.pendingBWE = nil
 	pc, err := r.api.NewPeerConnection(webrtc.Configuration{ICEServers: r.cfg.ICEServers})
+	bwe := r.pendingBWE
+	r.pendingBWE = nil
+	r.pcCreateMu.Unlock()
 	if err != nil {
 		log.Printf("sfu: new pc: %v", err)
 		return
@@ -395,7 +471,14 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		out:         make(chan []byte, peerOutBufLen),
 		ctx:         ctx,
 		cancel:      cancel,
-		watching:    make(map[string]bool),
+		watching:    make(map[string]uint8),
+		bwe:         bwe,
+	}
+	p.bwCapTID.Store(bwCapNone)
+	if bwe != nil {
+		bwe.OnTargetBitrateChange(func(bitrate int) {
+			p.bwCapTID.Store(bitrateToTIDCap(bitrate))
+		})
 	}
 	go p.writeLoop()
 
@@ -431,8 +514,11 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			log.Printf("sfu: new local track: %v", err)
 			return
 		}
-		if t.Kind() == webrtc.RTPCodecTypeVideo {
-			r.setPublisher(trackID, publisherRef{pc: pc, ssrc: uint32(t.SSRC())})
+		isVideo := t.Kind() == webrtc.RTPCodecTypeVideo
+		var lastKeyframeNS *atomic.Int64
+		if isVideo {
+			lastKeyframeNS = new(atomic.Int64)
+			r.setPublisher(trackID, publisherRef{pc: pc, ssrc: uint32(t.SSRC()), lastKeyframeNS: lastKeyframeNS})
 			defer r.clearPublisher(trackID)
 			// Broadcast sharing state immediately — lurkers never receive the
 			// track itself and depend on this flag entirely.
@@ -445,6 +531,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 
 		buf := make([]byte, 1500)
 		pkt := &rtp.Packet{}
+		var vp9pkt rtpcodecs.VP9Packet
 		for {
 			n, _, err := t.Read(buf)
 			if err != nil {
@@ -458,9 +545,23 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// to misparse the extension block.
 			pkt.Extension = false
 			pkt.Extensions = nil
-			if err := local.WriteRTP(pkt); err != nil {
-				return
+
+			if !isVideo {
+				// Audio: shared track, unconditional forward.
+				if err := local.WriteRTP(pkt); err != nil {
+					return
+				}
+				continue
 			}
+
+			// Zero scratch: Unmarshal leaves stale slice fields on partial reads.
+			vp9pkt = rtpcodecs.VP9Packet{}
+			tid, hasLayer := vp9TID(&vp9pkt, pkt.Payload)
+			// VP9 keyframe = !P && B (begin-of-frame, not inter-predicted).
+			if !vp9pkt.P && vp9pkt.B {
+				lastKeyframeNS.Store(time.Now().UnixNano())
+			}
+			r.writeVP9ToSubscribers(p.id, pkt, tid, hasLayer)
 		}
 	})
 
@@ -587,21 +688,29 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		if err := json.Unmarshal(msg.Data, &w); err != nil || w.PeerID == "" || w.PeerID == p.id {
 			return
 		}
+		targetTID := qualityToTID(w.Quality)
 		r.mu.Lock()
-		if p.watching[w.PeerID] {
-			r.mu.Unlock()
+		prevTID, alreadyWatching := p.watching[w.PeerID]
+		p.watching[w.PeerID] = targetTID
+		r.mu.Unlock()
+		if alreadyWatching && prevTID == targetTID {
+			// Already subscribed at the same quality; nothing to do.
 			return
 		}
-		p.watching[w.PeerID] = true
-		r.mu.Unlock()
-		r.signalPeerConnections()
+		if !alreadyWatching {
+			// New subscription: renegotiate to add the track.
+			r.signalPeerConnections()
+		}
+		// In-place quality update (alreadyWatching && prevTID != targetTID):
+		// the per-subscriber subTrack is already in the peer's PC; no
+		// renegotiation needed — subsequent packets will use the new TID.
 	case "unwatch-screen":
 		var w protocol.WatchScreenPayload
 		if err := json.Unmarshal(msg.Data, &w); err != nil || w.PeerID == "" {
 			return
 		}
 		r.mu.Lock()
-		if !p.watching[w.PeerID] {
+		if _, watching := p.watching[w.PeerID]; !watching {
 			r.mu.Unlock()
 			return
 		}
@@ -943,12 +1052,20 @@ func (r *Room) unpublishTrack(key string) {
 	for _, op := range r.peers {
 		delete(op.watching, owner)
 	}
+	// Drop all per-subscriber sub-tracks for this publisher.
+	prefix := owner + "/"
+	for k := range r.subTracks {
+		if strings.HasPrefix(k, prefix) {
+			delete(r.subTracks, k)
+		}
+	}
 	r.mu.Unlock()
 	r.signalPeerConnections()
 }
 
-// dropTracksForPeer clears all tracks + publisher entries for ownerID.
-// Caller must hold r.mu.
+// dropTracksForPeer clears all tracks, publisher entries, and sub-tracks for
+// ownerID (as publisher) and removes ownerID as a subscriber from all
+// sub-tracks. Caller must hold r.mu.
 func (r *Room) dropTracksForPeer(ownerID string) {
 	for k := range r.tracks {
 		if ownerOf(k) == ownerID {
@@ -958,6 +1075,14 @@ func (r *Room) dropTracksForPeer(ownerID string) {
 	for k := range r.publishers {
 		if ownerOf(k) == ownerID {
 			delete(r.publishers, k)
+		}
+	}
+	// Drop sub-tracks where ownerID is the publisher (prefix) OR subscriber (suffix).
+	prefix := ownerID + "/"
+	suffix := "/" + ownerID
+	for k := range r.subTracks {
+		if strings.HasPrefix(k, prefix) || strings.HasSuffix(k, suffix) {
+			delete(r.subTracks, k)
 		}
 	}
 }
@@ -1018,14 +1143,12 @@ func (r *Room) attemptSync() (retry bool) {
 	r.mu.Lock()
 	type peerSync struct {
 		p        *peer
-		watching map[string]bool
+		watching map[string]uint8
 	}
 	syncs := make([]peerSync, 0, len(r.peers))
 	for _, p := range r.peers {
-		w := make(map[string]bool, len(p.watching))
-		for k := range p.watching {
-			w[k] = true
-		}
+		w := make(map[string]uint8, len(p.watching))
+		maps.Copy(w, p.watching)
 		syncs = append(syncs, peerSync{p: p, watching: w})
 	}
 	tracks := make(map[string]*webrtc.TrackLocalStaticRTP, len(r.tracks))
@@ -1057,7 +1180,7 @@ var syncBufsPool = sync.Pool{
 	},
 }
 
-func (r *Room) syncOnePeer(p *peer, watching map[string]bool, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
+func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
 	// Lurker peers have no PeerConnection; nothing to sync.
 	if p.pc == nil {
 		return false
@@ -1086,10 +1209,13 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]bool, tracks map[string]
 		if owner == p.id {
 			continue
 		}
-		if t.Kind() == webrtc.RTPCodecTypeVideo && !watching[owner] {
-			continue
+		if t.Kind() == webrtc.RTPCodecTypeVideo {
+			if _, watching := watching[owner]; !watching {
+				continue
+			}
 		}
-		want[t.ID()] = true
+		trackID := r.resolvedTrackID(t, key, p.id)
+		want[trackID] = true
 	}
 
 	for _, sender := range p.pc.GetSenders() {
@@ -1120,25 +1246,32 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]bool, tracks map[string]
 		if owner == p.id {
 			continue
 		}
-		if t.Kind() == webrtc.RTPCodecTypeVideo && !watching[owner] {
+		if t.Kind() == webrtc.RTPCodecTypeVideo {
+			if _, watching := watching[owner]; !watching {
+				continue
+			}
+		}
+		trackID := r.resolvedTrackID(t, key, p.id)
+		if have[trackID] {
 			continue
 		}
-		if have[t.ID()] {
-			continue
-		}
-		sender, err := p.pc.AddTrack(t)
+		// For VP9 video, add a per-subscriber track; for all others use shared.
+		trackToAdd := r.trackForSubscriber(t, key, p.id)
+		sender, err := p.pc.AddTrack(trackToAdd)
 		if err != nil {
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
 		}
-		// Immediate PLI bounds first-frame latency to ~RTT instead of the
-		// intervalpli tick. Goroutine then forwards any further subscriber
-		// PLI/FIR back to the publisher with the publisher's SSRC.
+		// Immediate PLI bounds first-frame latency to ~RTT; skip if a recent
+		// keyframe is already in-flight so we don't spike publisher bitrate.
 		if t.Kind() == webrtc.RTPCodecTypeVideo {
 			if pub, ok := r.lookupPublisher(key); ok {
-				_ = pub.pc.WriteRTCP([]rtcp.Packet{
-					&rtcp.PictureLossIndication{MediaSSRC: pub.ssrc},
-				})
+				if pub.lastKeyframeNS == nil ||
+					time.Since(time.Unix(0, pub.lastKeyframeNS.Load())) > pliCooldown {
+					_ = pub.pc.WriteRTCP([]rtcp.Packet{
+						&rtcp.PictureLossIndication{MediaSSRC: pub.ssrc},
+					})
+				}
 				go r.forwardSubscriberRTCP(sender, key)
 			}
 		}
@@ -1205,6 +1338,143 @@ func (r *Room) forwardSubscriberRTCP(sender *webrtc.RTPSender, key string) {
 			}
 		}
 		_ = pub.pc.WriteRTCP(forward)
+	}
+}
+
+// subTrackKey identifies a per-subscriber VP9 track: publisher peer ID +
+// "/" + subscriber peer ID.
+func subTrackKey(publisherID, subscriberID string) string {
+	return publisherID + "/" + subscriberID
+}
+
+// isVP9Track reports whether the shared template track is VP9 video.
+func isVP9Track(t *webrtc.TrackLocalStaticRTP) bool {
+	return t.Kind() == webrtc.RTPCodecTypeVideo &&
+		strings.EqualFold(t.Codec().MimeType, webrtc.MimeTypeVP9)
+}
+
+// resolvedTrackID returns the track ID that will be (or already is) used when
+// this track is added to subscriberID's PeerConnection. For VP9 video a
+// per-subscriber track is used; for everything else the shared track's ID is
+// returned as-is.
+func (r *Room) resolvedTrackID(t *webrtc.TrackLocalStaticRTP, key, subscriberID string) string {
+	if !isVP9Track(t) {
+		return t.ID()
+	}
+	return subTrackKey(ownerOf(key), subscriberID)
+}
+
+// trackForSubscriber returns the TrackLocalStaticRTP to AddTrack for the given
+// subscriber. For VP9 video a dedicated per-subscriber track is created (and
+// cached in r.subTracks) so the forwarding loop can write TID-filtered packets
+// independently per subscriber. For all other codecs the shared track is
+// returned unchanged.
+func (r *Room) trackForSubscriber(t *webrtc.TrackLocalStaticRTP, key, subscriberID string) *webrtc.TrackLocalStaticRTP {
+	if !isVP9Track(t) {
+		return t
+	}
+	sk := subTrackKey(ownerOf(key), subscriberID)
+	r.mu.Lock()
+	st := r.subTracks[sk]
+	if st == nil {
+		var err error
+		// Track ID = subTrackKey so resolvedTrackID and have-map checks align.
+		st, err = webrtc.NewTrackLocalStaticRTP(t.Codec(), sk, ownerOf(key))
+		if err != nil {
+			r.mu.Unlock()
+			log.Printf("sfu: new sub-track %s: %v", sk, err)
+			return t
+		}
+		r.subTracks[sk] = st
+	}
+	r.mu.Unlock()
+	return st
+}
+
+// writeVP9ToSubscribers iterates all per-subscriber sub-tracks for publisherID
+// and writes pkt to each one whose target TID permits it. If the VP9 payload
+// descriptor does not carry layer info (hasLayer=false) the packet is always
+// forwarded (conservative: treat as TID 0 to avoid starving base-layer
+// subscribers).
+func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid uint8, hasLayer bool) {
+	prefix := publisherID + "/"
+	r.mu.Lock()
+	// effectiveTID = min(user choice, BWE cap). Snapshot under mu so the inner write loop stays lock-free.
+	type subEntry struct {
+		track        *webrtc.TrackLocalStaticRTP
+		effectiveTID uint8
+	}
+	var subs []subEntry
+	for sk, st := range r.subTracks {
+		if !strings.HasPrefix(sk, prefix) {
+			continue
+		}
+		subscriberID := sk[len(prefix):]
+		sub, ok := r.peers[subscriberID]
+		if !ok {
+			continue
+		}
+		targetTID, watching := sub.watching[publisherID]
+		if !watching {
+			continue
+		}
+		eff := targetTID
+		if bwCap := sub.bwCapTID.Load(); bwCap != bwCapNone && uint8(bwCap) < eff {
+			eff = uint8(bwCap)
+		}
+		subs = append(subs, subEntry{track: st, effectiveTID: eff})
+	}
+	r.mu.Unlock()
+
+	for _, s := range subs {
+		if hasLayer && tid > s.effectiveTID {
+			continue
+		}
+		if err := s.track.WriteRTP(pkt); err != nil {
+			// Non-fatal: subscriber may be mid-teardown.
+			slog.Debug("sfu: vp9 WriteRTP", "pub", publisherID, "err", err)
+		}
+	}
+}
+
+// bitrateToTIDCap returns bwCapNone above the high threshold so a healthy
+// link respects the user's chosen quality.
+func bitrateToTIDCap(bitrate int) uint32 {
+	switch {
+	case bitrate >= bweHighThresholdBps:
+		return bwCapNone
+	case bitrate >= bweMidThresholdBps:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// vp9TID parses the VP9 RTP payload descriptor and returns the temporal layer
+// ID. reuses the scratch VP9Packet across calls (caller provides it). Returns
+// (0, false) when the descriptor does not carry layer info (L=false) — callers
+// treat this as "forward unconditionally" to avoid starving base-layer
+// subscribers on packets that simply don't encode a TID.
+func vp9TID(scratch *rtpcodecs.VP9Packet, payload []byte) (tid uint8, hasLayer bool) {
+	if _, err := scratch.Unmarshal(payload); err != nil {
+		return 0, false
+	}
+	if !scratch.L {
+		return 0, false
+	}
+	return scratch.TID, true
+}
+
+// qualityToTID maps quality → VP9 target TID. Unknown values fall through to
+// tidHigh so a client typo never blocks subscription.
+func qualityToTID(quality string) uint8 {
+	switch quality {
+	case "low":
+		return 0
+	case "medium":
+		return 1
+	default:
+		return tidHigh
 	}
 }
 

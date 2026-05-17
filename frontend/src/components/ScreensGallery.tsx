@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Maximize, ScreenShare } from 'lucide-react';
+import { Maximize, ScreenShare, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { ParticipantUI } from '../types';
 
 interface Props {
   onStopSelfShare: () => void;
-  onWatch: (peerId: string) => void;
+  onWatch: (peerId: string, quality?: 'low' | 'medium' | 'high') => void;
   onUnwatch: (peerId: string) => void;
 }
 
@@ -14,11 +14,16 @@ interface ViewerProps {
   stream: MediaStream | null;
   muted: boolean;
   actions: { label: string; onClick: () => void; danger?: boolean; icon?: string }[];
+  onQualityChange?: (quality: 'medium' | 'high') => void;
 }
 
-function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
+function ScreenViewer({ label, stream, muted, actions, onQualityChange }: ViewerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const onQualityChangeRef = useRef(onQualityChange);
+  useEffect(() => {
+    onQualityChangeRef.current = onQualityChange;
+  }, [onQualityChange]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -34,14 +39,33 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
     };
   }, [stream, muted]);
 
-  // Fullscreen the wrapper div, not the <video> — Chromium otherwise
-  // overlays native media controls (timer, pause) on the fullscreen video.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    function handleFullscreenChange() {
+      const quality = document.fullscreenElement === wrap ? 'high' : 'medium';
+      onQualityChangeRef.current?.(quality);
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Chromium overlays native media controls when <video> itself goes fullscreen.
   function goFullscreen() {
     const el = wrapRef.current;
     if (!el) return;
     el.requestFullscreen().catch((err: unknown) => {
       console.warn('[screens] requestFullscreen failed:', err);
     });
+  }
+
+  function exitFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {
+        /* nothing actionable */
+      });
+    }
   }
 
   return (
@@ -76,7 +100,7 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
           ))}
         </div>
       </div>
-      <div ref={wrapRef} className="w-full bg-bg-0 border border-line fs-wrap">
+      <div ref={wrapRef} className="w-full bg-bg-0 border border-line fs-wrap relative">
         {stream ? (
           <video
             ref={videoRef}
@@ -93,6 +117,17 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
             Загружаем поток…
           </div>
         )}
+        <button
+          type="button"
+          onClick={exitFullscreen}
+          aria-label="Выйти из полного экрана"
+          title="Выйти из полного экрана"
+          className="fs-exit absolute top-3 right-3 grid place-items-center
+            w-10 h-10 rounded-none bg-black/60 text-white border border-white/30
+            hover:bg-black/80"
+        >
+          <X size={20} />
+        </button>
       </div>
     </div>
   );
@@ -158,7 +193,7 @@ export function ScreensGallery({ onStopSelfShare, onWatch, onUnwatch }: Props) {
   })();
 
   function open(id: string) {
-    onWatch(id);
+    onWatch(id, 'medium');
     setOpened((prev) => {
       const next = new Set(prev);
       next.add(id);
@@ -193,6 +228,7 @@ export function ScreensGallery({ onStopSelfShare, onWatch, onUnwatch }: Props) {
             stream={p.screenStream ?? null}
             muted={false}
             actions={[{ label: 'Закрыть', onClick: () => close(p.id) }]}
+            onQualityChange={(quality) => onWatch(p.id, quality)}
           />
         ) : (
           <ScreenPlaceholder key={p.id} name={p.display} onOpen={() => open(p.id)} />

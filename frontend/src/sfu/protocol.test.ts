@@ -16,6 +16,7 @@ import {
   type SetDisplayNamePayload,
   type PeerStatePayload,
   type SetStatePayload,
+  type WatchScreenPayload,
 } from './protocol';
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,31 @@ describe('set-state fixture', () => {
     const data = readFixture('set-state.json') as SetStatePayload;
     expect(data.selfMuted).toBe(true);
     expect(data.deafened).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: watch-screen.json  →  WatchScreenPayload (client→server, shape check)
+// ---------------------------------------------------------------------------
+
+describe('watch-screen fixture', () => {
+  it('has required WatchScreenPayload shape', () => {
+    const data = readFixture('watch-screen.json') as WatchScreenPayload;
+    expect(typeof data.peerId).toBe('string');
+    if ('quality' in data) {
+      expect(['low', 'medium', 'high']).toContain(data.quality);
+    }
+  });
+
+  it('matches exact fixture values', () => {
+    const data = readFixture('watch-screen.json') as WatchScreenPayload;
+    expect(data.peerId).toBe('11223344aabbccdd');
+    expect(data.quality).toBe('medium');
+  });
+
+  it('accepts missing quality (optional field)', () => {
+    const noQuality: WatchScreenPayload = { peerId: 'abc' };
+    expect(noQuality.quality).toBeUndefined();
   });
 });
 
