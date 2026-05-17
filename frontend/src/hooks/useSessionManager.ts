@@ -720,6 +720,40 @@ export function useSessionManager({
     };
   }, []);
 
+  const rotateRoomKeepingMic = useCallback(
+    async (slug: RoomSlug, display: string, mic: MicGraph): Promise<void> => {
+      reconnectSchedulerRef.current.reset();
+      if (screenStreamRef.current) {
+        for (const t of screenStreamRef.current.getTracks()) t.stop();
+        screenStreamRef.current = null;
+      }
+      screenSenderRef.current = null;
+      useStore.getState().setSelfScreenStream(null);
+      sfu.disconnect();
+      audio.cleanupAllRemote();
+      useStore.getState().clearParticipants();
+      peerIdRef.current = null;
+
+      useStore.getState().setRoomSlug(slug);
+      useStore.getState().loadChatRoom(slug);
+      useStore.getState().setJoinState('joining');
+      useStore.getState().setStatus('Подключаюсь…');
+      lastDisplayNameRef.current = display;
+
+      try {
+        await connectSfu(mic, display);
+        useStore.getState().setJoinState('joined');
+        useStore.getState().setStatus('Подключено', false, true);
+      } catch (error) {
+        handleLeave();
+        useStore
+          .getState()
+          .setStatus(error instanceof Error ? error.message : String(error), true);
+      }
+    },
+    [audio, connectSfu, handleLeave, sfu],
+  );
+
   const switchRoom = useCallback(
     async (slug: RoomSlug): Promise<void> => {
       const s = useStore.getState(); // snapshot read, not subscription
@@ -729,13 +763,17 @@ export function useSessionManager({
         s.setRoomSlug(slug);
         return;
       }
-      // joined — leave current room, move to new one, rejoin
       const display = lastDisplayNameRef.current || loadOrCreateDisplayName(makeGuestName);
+      const liveMic = micGraphRef.current;
+      if (liveMic) {
+        await rotateRoomKeepingMic(slug, display, liveMic);
+        return;
+      }
       handleLeave();
       useStore.getState().setRoomSlug(slug);
       await handleJoin(display);
     },
-    [handleLeave, handleJoin],
+    [handleLeave, handleJoin, rotateRoomKeepingMic],
   );
 
   return {
