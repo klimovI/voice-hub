@@ -542,6 +542,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		buf := make([]byte, 1500)
 		pkt := &rtp.Packet{}
 		var vp9pkt rtpcodecs.VP9Packet
+		var vp9DbgRecv uint64
 		for {
 			n, _, err := t.Read(buf)
 			if err != nil {
@@ -570,6 +571,11 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// VP9 keyframe = !P && B (begin-of-frame, not inter-predicted).
 			if !vp9pkt.P && vp9pkt.B {
 				lastKeyframeNS.Store(time.Now().UnixNano())
+			}
+			vp9DbgRecv++
+			if vp9DbgRecv == 1 || vp9DbgRecv%200 == 0 {
+				log.Printf("sfu: vp9 recv pub=%s ssrc=%d count=%d tid=%d hasLayer=%v key=%v",
+					p.id, pkt.SSRC, vp9DbgRecv, tid, hasLayer, !vp9pkt.P && vp9pkt.B)
 			}
 			r.writeVP9ToSubscribers(p.id, pkt, tid, hasLayer)
 		}
