@@ -12,12 +12,11 @@ interface Props {
 interface ViewerProps {
   label: string;
   stream: MediaStream | null;
-  muted: boolean;
   actions: { label: string; onClick: () => void; danger?: boolean; icon?: string }[];
   onQualityChange?: (quality: 'medium' | 'high') => void;
 }
 
-function ScreenViewer({ label, stream, muted, actions, onQualityChange }: ViewerProps) {
+function ScreenViewer({ label, stream, actions, onQualityChange }: ViewerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const onQualityChangeRef = useRef(onQualityChange);
@@ -25,19 +24,20 @@ function ScreenViewer({ label, stream, muted, actions, onQualityChange }: Viewer
     onQualityChangeRef.current = onQualityChange;
   }, [onQualityChange]);
 
+  // Screen share carries no audio (publisher captures audio:false), so the
+  // video is always muted. Required for autoplay: by the time the watch-screen
+  // renegotiation completes, the click's transient user activation has expired.
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !stream) return;
     el.srcObject = stream;
-    el.muted = muted;
-    el.playsInline = true;
     el.play().catch(() => {
-      /* autoplay can be blocked until user gesture */
+      /* autoplay blocked despite muted — should not happen on modern browsers */
     });
     return () => {
       el.srcObject = null;
     };
-  }, [stream, muted]);
+  }, [stream]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -105,6 +105,7 @@ function ScreenViewer({ label, stream, muted, actions, onQualityChange }: Viewer
           <video
             ref={videoRef}
             autoPlay
+            muted
             playsInline
             className="w-full h-full"
             style={{ aspectRatio: '16 / 9', objectFit: 'contain' }}
@@ -216,7 +217,6 @@ export function ScreensGallery({ onStopSelfShare, onWatch, onUnwatch }: Props) {
         <ScreenViewer
           label={`${selfName} · ваш экран`}
           stream={selfStream}
-          muted
           actions={[{ label: 'Завершить', onClick: onStopSelfShare, danger: true }]}
         />
       )}
@@ -226,7 +226,6 @@ export function ScreensGallery({ onStopSelfShare, onWatch, onUnwatch }: Props) {
             key={p.id}
             label={`${p.display} · экран`}
             stream={p.screenStream ?? null}
-            muted={false}
             actions={[{ label: 'Закрыть', onClick: () => close(p.id) }]}
             onQualityChange={(quality) => onWatch(p.id, quality)}
           />
