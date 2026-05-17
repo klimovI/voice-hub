@@ -369,15 +369,26 @@ func NewRoom(cfg Config) (*Room, error) {
 	})
 
 	// Interceptor chain order matters: last-added is OUTERMOST on the write
-	// path. cc/gcc's OnSent reads the TWCC header extension, so the TWCC
-	// sender — which writes the extension — must run BEFORE it (be outer).
-	// Hence: cc inner, twcc outer.
+	// path. cc/gcc's OnSent reads the TWCC header extension, so the writer
+	// that SETS the extension must wrap cc (be outer).
+	//
+	// Two distinct TWCC interceptors:
+	//   - HeaderExtensionInterceptor sets the seq# in outgoing RTP headers.
+	//   - SenderInterceptor generates RTCP feedback for INCOMING RTP and
+	//     does not touch the RTP write path.
+	// We need both: HE outboard of cc so cc.OnSent finds the extension,
+	// and Sender so publishers receive TWCC feedback for their own BWE.
 	ir.Add(ccFactory)
-	twccFactory, err := twcc.NewSenderInterceptor()
+	twccHeaderExt, err := twcc.NewHeaderExtensionInterceptor()
 	if err != nil {
 		return nil, err
 	}
-	ir.Add(twccFactory)
+	ir.Add(twccHeaderExt)
+	twccSender, err := twcc.NewSenderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+	ir.Add(twccSender)
 
 	r.api = webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
