@@ -309,6 +309,9 @@ export function useSessionManager({
     if (screenSenderRef.current) return;
     const client = sfu.getClient();
     if (!client) throw new Error('Подключитесь к комнате, чтобы делиться экраном');
+    if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
+      throw new Error('Браузер не поддерживает показ экрана');
+    }
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: 30 },
       audio: false,

@@ -61,6 +61,8 @@ export function SessionCard({
   const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
   const tileOff = 'bg-bg-0 border border-danger text-danger hover:bg-[rgba(248,113,113,0.08)]';
 
+  const screenShareSupported = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+
   return (
     <section className="card grid gap-5 p-6">
       <div className="grid gap-3">
@@ -132,7 +134,7 @@ export function SessionCard({
             <span className="flex-1 text-center">{heroLabel}</span>
           </button>
 
-          {joined && (
+          {joined && screenShareSupported && (
             <button
               id="screen-share-button"
               type="button"
