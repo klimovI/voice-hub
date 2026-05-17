@@ -18,6 +18,7 @@ interface ViewerProps {
 
 function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -33,8 +34,10 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
     };
   }, [stream, muted]);
 
+  // Fullscreen the wrapper div, not the <video> — Chromium otherwise
+  // overlays native media controls (timer, pause) on the fullscreen video.
   function goFullscreen() {
-    const el = videoRef.current;
+    const el = wrapRef.current;
     if (!el) return;
     el.requestFullscreen().catch((err: unknown) => {
       console.warn('[screens] requestFullscreen failed:', err);
@@ -73,22 +76,24 @@ function ScreenViewer({ label, stream, muted, actions }: ViewerProps) {
           ))}
         </div>
       </div>
-      {stream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="w-full bg-bg-0 border border-line"
-          style={{ aspectRatio: '16 / 9', objectFit: 'contain' }}
-        />
-      ) : (
-        <div
-          className="w-full bg-bg-0 border border-line grid place-items-center text-muted-2 text-[12px] uppercase tracking-[0.18em]"
-          style={{ aspectRatio: '16 / 9' }}
-        >
-          Загружаем поток…
-        </div>
-      )}
+      <div ref={wrapRef} className="w-full bg-bg-0 border border-line fs-wrap">
+        {stream ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full"
+            style={{ aspectRatio: '16 / 9', objectFit: 'contain' }}
+          />
+        ) : (
+          <div
+            className="w-full h-full grid place-items-center text-muted-2 text-[12px] uppercase tracking-[0.18em]"
+            style={{ aspectRatio: '16 / 9' }}
+          >
+            Загружаем поток…
+          </div>
+        )}
+      </div>
     </div>
   );
 }
