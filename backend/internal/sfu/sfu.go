@@ -343,11 +343,6 @@ func NewRoom(cfg Config) (*Room, error) {
 		return nil, err
 	}
 	ir.Add(nackFactory)
-	twccFactory, err := twcc.NewSenderInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(twccFactory)
 
 	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
@@ -372,7 +367,17 @@ func NewRoom(cfg Config) (*Room, error) {
 	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
 		r.pendingBWE = bwe
 	})
+
+	// Interceptor chain order matters: last-added is OUTERMOST on the write
+	// path. cc/gcc's OnSent reads the TWCC header extension, so the TWCC
+	// sender — which writes the extension — must run BEFORE it (be outer).
+	// Hence: cc inner, twcc outer.
 	ir.Add(ccFactory)
+	twccFactory, err := twcc.NewSenderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+	ir.Add(twccFactory)
 
 	r.api = webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
