@@ -10,9 +10,11 @@
 package sfu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -44,6 +46,16 @@ type loadClient struct {
 	// audioTrack is the local sender track (set only when withPublish).
 	audioTrack *webrtc.TrackLocalStaticSample
 
+	// answerDelay holds the server's offer in have-local-offer for the
+	// configured duration before answering — reproduces the renegotiation
+	// race window in tests.
+	answerDelay time.Duration
+
+	// signalState surfaces pion's local PC signaling transitions so tests
+	// can wait for an exact state (e.g. have-remote-offer) instead of
+	// relying on wall-clock sleeps.
+	signalState chan webrtc.SignalingState
+
 	// recvCount counts inbound signaling messages.
 	recvCount atomic.Int64
 	// rtpRecv counts RTP packets received across all remote tracks.
@@ -51,12 +63,17 @@ type loadClient struct {
 }
 
 type clientOpts struct {
-	publish bool
+	publish     bool
+	answerDelay time.Duration
 }
 
 type clientOpt func(*clientOpts)
 
 func withPublish() clientOpt { return func(o *clientOpts) { o.publish = true } }
+
+func withAnswerDelay(d time.Duration) clientOpt {
+	return func(o *clientOpts) { o.answerDelay = d }
+}
 
 func (c *loadClient) write(env protocol.Envelope) error {
 	raw, err := json.Marshal(env)
@@ -101,7 +118,21 @@ func dialClient(t testing.TB, url, displayName, clientID string, api *webrtc.API
 		t.Fatalf("new pc: %v", err)
 	}
 
-	c := &loadClient{id: clientID, pc: pc, ws: ws, ctx: ctx, cancel: cancel}
+	c := &loadClient{
+		id:          clientID,
+		pc:          pc,
+		ws:          ws,
+		ctx:         ctx,
+		cancel:      cancel,
+		answerDelay: cfg.answerDelay,
+		signalState: make(chan webrtc.SignalingState, 8),
+	}
+	pc.OnSignalingStateChange(func(s webrtc.SignalingState) {
+		select {
+		case c.signalState <- s:
+		default:
+		}
+	})
 
 	if cfg.publish {
 		track, err := webrtc.NewTrackLocalStaticSample(
@@ -201,6 +232,13 @@ func (c *loadClient) readLoop() {
 			if err := c.pc.SetLocalDescription(answer); err != nil {
 				continue
 			}
+			if c.answerDelay > 0 {
+				select {
+				case <-time.After(c.answerDelay):
+				case <-c.ctx.Done():
+					return
+				}
+			}
 			ans, _ := json.Marshal(answer)
 			_ = c.write(protocol.Envelope{Event: "answer", Data: ans})
 		case "candidate":
@@ -216,6 +254,25 @@ func (c *loadClient) readLoop() {
 func (c *loadClient) setState(selfMuted, deafened bool) error {
 	raw, _ := json.Marshal(protocol.SetStatePayload{SelfMuted: selfMuted, Deafened: deafened})
 	return c.write(protocol.Envelope{Event: "set-state", Data: raw})
+}
+
+func (c *loadClient) waitForSignalingState(t testing.TB, target webrtc.SignalingState, timeout time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		if c.pc.SignalingState() == target {
+			return
+		}
+		select {
+		case s := <-c.signalState:
+			if s == target {
+				return
+			}
+		case <-deadline.C:
+			t.Fatalf("timeout waiting for signaling state %s (current=%s)", target, c.pc.SignalingState())
+		}
+	}
 }
 
 func (c *loadClient) close() {
@@ -472,5 +529,77 @@ func BenchmarkLoadStateChurn(b *testing.B) {
 				_ = c.setState(i%2 == 0, false)
 			}
 		})
+	}
+}
+
+// lockedBuffer is a bytes.Buffer wrapped in a mutex so concurrent log
+// writes from many goroutines don't race the test reader.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestRenegotiationRaceDoesNotErrorSetLocalDescription is a regression
+// test for the offer-collision bug: when a peer's PC is still in
+// have-local-offer (waiting for its first answer) and a new event
+// triggers signalPeerConnections, syncOnePeer used to blindly call
+// CreateOffer + SetLocalDescription, which pion rejected with
+// "have-local-offer->SetLocal(offer)->have-local-offer". The dropped
+// offer was the one carrying new tracks (e.g. a screen-share subscriber
+// track), so ontrack never fired on the viewer.
+//
+// Repro: peer A connects with answerDelay so its initial answer is held
+// in flight. Peer B joins during the gap; the server tries to sync A
+// again, hitting the race. Post-fix, syncOnePeer short-circuits on
+// non-stable signaling and the answer handler re-triggers the sync.
+func TestRenegotiationRaceDoesNotErrorSetLocalDescription(t *testing.T) {
+	if testing.Short() {
+		t.Skip("load test")
+	}
+
+	logbuf := &lockedBuffer{}
+	origOut := log.Writer()
+	log.SetOutput(logbuf)
+	t.Cleanup(func() { log.SetOutput(origOut) })
+
+	_, _, url := newLoadServer(t)
+	api := newClientAPI(t)
+
+	a := dialClient(t, url, "A", "a-cid", api, withAnswerDelay(800*time.Millisecond))
+	t.Cleanup(a.close)
+
+	// A reaching have-remote-offer is direct proof that the server's
+	// initial offer landed — and therefore that the server's PC is in
+	// have-local-offer right now. Window stays open for answerDelay
+	// after A finishes SetLocalDescription.
+	a.waitForSignalingState(t, webrtc.SignalingStateHaveRemoteOffer, 3*time.Second)
+
+	b := dialClient(t, url, "B", "b-cid", api, withPublish())
+	t.Cleanup(b.close)
+
+	// Cover A's delayed answer + the re-triggered sync.
+	time.Sleep(2 * time.Second)
+
+	out := logbuf.String()
+	for _, needle := range []string{
+		"InvalidModificationError",
+		"have-local-offer->SetLocal(offer)->have-local-offer",
+		"SetLocalDescription:",
+	} {
+		if strings.Contains(out, needle) {
+			t.Fatalf("renegotiation race triggered server log containing %q\nfull server log:\n%s", needle, out)
+		}
 	}
 }

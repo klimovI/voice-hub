@@ -116,6 +116,9 @@ type peer struct {
 	out    chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// syncMu serialises syncOnePeer for this peer; caller must not hold r.mu.
+	syncMu sync.Mutex
 }
 
 // peerOutBufLen bounds per-peer outbound queue depth. Sized for the
@@ -1191,6 +1194,8 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string
 	if p.pc == nil {
 		return false
 	}
+	p.syncMu.Lock()
+	defer p.syncMu.Unlock()
 	// Peer context already cancelled (e.g. PC failed, outq full, ws closed):
 	// removePeer will fire from ServeWS's defer shortly. Skipping here avoids
 	// log spam from CreateOffer/AddTrack on a doomed PC during the brief
