@@ -241,9 +241,8 @@ type publisherRef struct {
 // subTrack carries an independent seq counter so dropped TID > cap packets
 // don't show up as RTP gaps on the subscriber leg (NACK-storm otherwise).
 type subTrack struct {
-	track    *webrtc.TrackLocalStaticRTP
-	seq      atomic.Uint32
-	dbgCount atomic.Uint64 // temp: forwarded-packet counter for debug logging
+	track *webrtc.TrackLocalStaticRTP
+	seq   atomic.Uint32
 }
 
 // Room holds the live state of all peers and forwarded tracks.
@@ -558,7 +557,6 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		buf := make([]byte, 1500)
 		pkt := &rtp.Packet{}
 		var vp9pkt rtpcodecs.VP9Packet
-		var vp9DbgRecv uint64
 		for {
 			n, _, err := t.Read(buf)
 			if err != nil {
@@ -587,11 +585,6 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// VP9 keyframe = !P && B (begin-of-frame, not inter-predicted).
 			if !vp9pkt.P && vp9pkt.B {
 				lastKeyframeNS.Store(time.Now().UnixNano())
-			}
-			vp9DbgRecv++
-			if vp9DbgRecv == 1 || vp9DbgRecv%200 == 0 {
-				log.Printf("sfu: vp9 recv pub=%s ssrc=%d count=%d tid=%d hasLayer=%v key=%v",
-					p.id, pkt.SSRC, vp9DbgRecv, tid, hasLayer, !vp9pkt.P && vp9pkt.B)
 			}
 			r.writeVP9ToSubscribers(p.id, pkt, tid, hasLayer)
 		}
@@ -732,8 +725,6 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		prevTID, alreadyWatching := p.watching[w.PeerID]
 		p.watching[w.PeerID] = targetTID
 		r.mu.Unlock()
-		log.Printf("sfu: watch-screen viewer=%s publisher=%s tid=%d already=%v",
-			p.id, w.PeerID, targetTID, alreadyWatching)
 		if alreadyWatching && prevTID == targetTID {
 			// Already subscribed at the same quality; nothing to do.
 			return
@@ -1312,8 +1303,6 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
 		}
-		log.Printf("sfu: syncOnePeer (%s) AddTrack key=%s kind=%s trackID=%s",
-			p.id, key, t.Kind(), trackToAdd.ID())
 		// Immediate PLI bounds first-frame latency to ~RTT; skip if a recent
 		// keyframe is already in-flight so we don't spike publisher bitrate.
 		if t.Kind() == webrtc.RTPCodecTypeVideo {
@@ -1457,60 +1446,37 @@ func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid ui
 	type subEntry struct {
 		state        *subTrack
 		effectiveTID uint8
-		subID        string
 	}
 	var subs []subEntry
-	var rawSubKeys, skipNoPeer, skipNoWatch int
 	for sk, st := range r.subTracks {
 		if !strings.HasPrefix(sk, prefix) {
 			continue
 		}
-		rawSubKeys++
 		subscriberID := sk[len(prefix):]
 		sub, ok := r.peers[subscriberID]
 		if !ok {
-			skipNoPeer++
 			continue
 		}
 		targetTID, watching := sub.watching[publisherID]
 		if !watching {
-			skipNoWatch++
 			continue
 		}
 		eff := targetTID
 		if bwCap := sub.bwCapTID.Load(); bwCap != bwCapNone && uint8(bwCap) < eff {
 			eff = uint8(bwCap)
 		}
-		subs = append(subs, subEntry{state: st, effectiveTID: eff, subID: subscriberID})
+		subs = append(subs, subEntry{state: st, effectiveTID: eff})
 	}
 	r.mu.Unlock()
 
-	// Debug: when keyframes arrive, log sub-fanout census so we can see if subs has entries.
-	if !pkt.Marker && hasLayer && tid == 0 {
-		// rate-limit by sampling one in ~50 base-layer packets
-	}
-	if rawSubKeys > 0 && len(subs) == 0 {
-		log.Printf("sfu: vp9 fwd-empty pub=%s rawSubKeys=%d skipNoPeer=%d skipNoWatch=%d",
-			publisherID, rawSubKeys, skipNoPeer, skipNoWatch)
-	}
-
 	for _, s := range subs {
 		if hasLayer && tid > s.effectiveTID {
-			if n := s.state.dbgCount.Add(0); false {
-				_ = n
-			}
 			continue
 		}
 		// Per-subscriber seqno: dropped packets must not leave decoder-visible gaps.
 		pkt.SequenceNumber = uint16(s.state.seq.Add(1))
 		if err := s.state.track.WriteRTP(pkt); err != nil {
-			log.Printf("sfu: vp9 WriteRTP err pub=%s sub=%s err=%v",
-				publisherID, s.subID, err)
-			continue
-		}
-		if n := s.state.dbgCount.Add(1); n == 1 || n%200 == 0 {
-			log.Printf("sfu: vp9 fwd pub=%s sub=%s subSeq=%d count=%d tid=%d eff=%d",
-				publisherID, s.subID, pkt.SequenceNumber, n, tid, s.effectiveTID)
+			slog.Debug("sfu: vp9 WriteRTP", "pub", publisherID, "err", err)
 		}
 	}
 }
