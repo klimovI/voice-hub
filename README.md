@@ -8,16 +8,11 @@
 [![Release Desktop](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml)
 [![License](https://img.shields.io/github/license/vibes-group/voice-hub)](LICENSE)
 
-Self-hosted голосовая комната для маленьких компаний. Заточена под игры: чистый звук, низкая задержка.
-
-- одна постоянная комната, 3–10 человек
-- WebRTC, embedded pion SFU + TURN в одном Go-процессе
-- шумодав на RNNoise
-- весь стейт в браузере, никаких аккаунтов
+Self-hosted голосовая комната.
 
 ## Скачать (Windows)
 
-⬇ **[Последний релиз](https://github.com/vibes-group/voice-hub/releases/latest)** → `Voice.Hub_<version>_x64-setup.exe`. Auto-update встроен.
+⬇ **[Последний релиз](https://github.com/vibes-group/voice-hub/releases/latest)**
 
 ## Локальная разработка
 
@@ -52,12 +47,3 @@ cargo install tauri-cli --version '^2'
 cargo tauri dev
 ```
 
-## Структура
-
-```
-backend/   Go: auth + статика + /ws + pion SFU + pion TURN
-frontend/  React + Vite
-src-tauri/ Tauri 2 desktop shell
-```
-
-Дальше: [DEPLOY.md](DEPLOY.md) · [AGENTS.md](AGENTS.md) · [UPDATER.md](UPDATER.md).
