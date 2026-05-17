@@ -650,7 +650,10 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		}
 		if err := p.pc.SetRemoteDescription(sd); err != nil {
 			log.Printf("sfu: set remote (%s): %v", p.id, err)
+			return
 		}
+		// Drain syncs that were skipped while signaling was non-stable.
+		r.signalPeerConnections()
 	case "candidate":
 		var c webrtc.ICECandidateInit
 		if err := json.Unmarshal(msg.Data, &c); err != nil {
@@ -1198,6 +1201,12 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string
 	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		r.removePeer(p.id)
 		return true
+	}
+	// Offer-in-flight: SetLocalDescription rejects while signaling is
+	// have-local-offer. The "answer" handler re-triggers signalPeerConnections
+	// once the remote answer lands, so dropping the attempt here is safe.
+	if p.pc.SignalingState() != webrtc.SignalingStateStable {
+		return false
 	}
 
 	bufs := syncBufsPool.Get().(*syncBufs)
