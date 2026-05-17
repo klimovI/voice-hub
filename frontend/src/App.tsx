@@ -17,7 +17,6 @@ import { AudioCard } from './components/AudioCard';
 import { HotkeyCard } from './components/HotkeyCard';
 import { ParticipantsCard } from './components/ParticipantsCard';
 import { ChatPanel } from './components/ChatPanel';
-import { ScreensGallery } from './components/ScreensGallery';
 import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
 import { PingToast } from './components/PingToast';
@@ -239,20 +238,6 @@ export function App() {
     [voiceActive, session, lurker],
   );
 
-  const handleToggleScreenShare = useCallback(() => {
-    const sharing = useStore.getState().selfScreenStream !== null;
-    if (sharing) {
-      session.stopScreenShare();
-      return;
-    }
-    session.startScreenShare().catch((err: unknown) => {
-      // Cancelled picker arrives as NotAllowedError — not an error worth showing.
-      if (err instanceof DOMException && err.name === 'NotAllowedError') return;
-      const msg = err instanceof Error ? err.message : String(err);
-      useStore.getState().setStatus(`Не удалось начать трансляцию: ${msg}`, true, true);
-    });
-  }, [session]);
-
   const handlePingUser = useCallback(
     (targetId: string): void => {
       const s = useStore.getState(); // snapshot read, not subscription
@@ -287,7 +272,6 @@ export function App() {
               onLeave={session.leave}
               onToggleSelfMute={handleToggleSelfMute}
               onToggleDeafen={handleToggleDeafen}
-              onToggleScreenShare={handleToggleScreenShare}
               displayName={displayName}
               onDisplayNameChange={handleDisplayNameChange}
             />
@@ -298,11 +282,6 @@ export function App() {
             />
           </div>
           <div className="grid gap-4 content-start">
-            <ScreensGallery
-              onStopSelfShare={handleToggleScreenShare}
-              onWatch={session.watchScreen}
-              onUnwatch={session.unwatchScreen}
-            />
             <ChatPanel roomId={roomSlug} onSend={handleChatSend} />
           </div>
           <div className="grid gap-4 content-start">

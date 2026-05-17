@@ -561,8 +561,8 @@ func (b *lockedBuffer) String() string {
 // triggers signalPeerConnections, syncOnePeer used to blindly call
 // CreateOffer + SetLocalDescription, which pion rejected with
 // "have-local-offer->SetLocal(offer)->have-local-offer". The dropped
-// offer was the one carrying new tracks (e.g. a screen-share subscriber
-// track), so ontrack never fired on the viewer.
+// offer was the one carrying new tracks, so ontrack never fired on the
+// viewer.
 //
 // Repro: peer A connects with answerDelay so its initial answer is held
 // in flight. Peer B joins during the gap; the server tries to sync A
@@ -606,9 +606,9 @@ func TestRenegotiationRaceDoesNotErrorSetLocalDescription(t *testing.T) {
 			t.Fatalf("renegotiation race triggered server log containing %q\nfull server log:\n%s", needle, out)
 		}
 	}
-	// A healthy two-peer join with one watch-screen would settle in a
-	// handful of offers per peer. Any value past the cap indicates an
-	// offer ping-pong (e.g. answer→signalPeerConnections→offer→answer→…).
+	// A healthy two-peer join should settle in a handful of offers per
+	// peer. Any value past the cap indicates an offer ping-pong
+	// (e.g. answer→signalPeerConnections→offer→answer→…).
 	const offerCap = 10
 	if got := a.offersRecv.Load(); got > offerCap {
 		t.Fatalf("peer A received %d offers (cap %d) — offer ping-pong", got, offerCap)

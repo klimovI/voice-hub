@@ -116,9 +116,6 @@ export interface AppState {
   clearParticipants: () => void;
   updateParticipant: (id: string, patch: Partial<ParticipantUI>) => void;
 
-  selfScreenStream: MediaStream | null;
-  setSelfScreenStream: (s: MediaStream | null) => void;
-
   // Ping feature
   pingSoundEnabled: boolean;
   setPingSoundEnabled: (v: boolean) => void;
@@ -304,8 +301,6 @@ export const useStore = create<AppState>((set, get) => ({
     }),
   clearParticipants: () => set({ participants: new Map() }),
 
-  selfScreenStream: null,
-  setSelfScreenStream: (s) => set({ selfScreenStream: s }),
   updateParticipant: (id, patch) =>
     set((s) => {
       const existing = s.participants.get(id);

@@ -102,12 +102,6 @@ export type SetStatePayload = {
   deafened: boolean;
 };
 
-/** Data field of "watch-screen" (C→S). A second send for the same peerId updates quality. */
-export type WatchScreenPayload = {
-  peerId: string;
-  quality?: 'low' | 'medium' | 'high';
-};
-
 // Text chat
 
 /**
@@ -188,11 +182,7 @@ export type ClientMessage =
   | { event: 'chat-send'; data: ChatSendPayload }
   | { event: 'ping'; data: { to: string } }
   /** Asks the server for a fresh offer after a publisher-side track change. */
-  | { event: 'renegotiate'; data?: undefined }
-  /** Opt in to receive a specific peer's screen-share video. Audio is unconditional. */
-  | { event: 'watch-screen'; data: WatchScreenPayload }
-  /** Opt out; server stops forwarding that peer's video to us. */
-  | { event: 'unwatch-screen'; data: { peerId: string } };
+  | { event: 'renegotiate'; data?: undefined };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 

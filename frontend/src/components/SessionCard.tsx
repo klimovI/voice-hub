@@ -1,4 +1,4 @@
-import { Mic, ScreenShare, Volume2, Wifi, WifiOff, type LucideIcon } from 'lucide-react';
+import { Mic, Volume2, Wifi, WifiOff, type LucideIcon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 interface Props {
@@ -6,7 +6,6 @@ interface Props {
   onLeave: () => void;
   onToggleSelfMute: () => void;
   onToggleDeafen: () => void;
-  onToggleScreenShare: () => void;
   displayName: string;
   onDisplayNameChange: (value: string) => void;
 }
@@ -16,7 +15,6 @@ export function SessionCard({
   onLeave,
   onToggleSelfMute,
   onToggleDeafen,
-  onToggleScreenShare,
   displayName,
   onDisplayNameChange,
 }: Props) {
@@ -24,7 +22,6 @@ export function SessionCard({
   const selfMuted = useStore((s) => s.selfMuted);
   const deafened = useStore((s) => s.deafened);
   const configReady = useStore((s) => s.configReady);
-  const sharingScreen = useStore((s) => s.selfScreenStream !== null);
 
   const joining = joinState === 'joining';
   const joined = joinState === 'joined';
@@ -60,8 +57,6 @@ export function SessionCard({
 
   const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
   const tileOff = 'bg-bg-0 border border-danger text-danger hover:bg-[rgba(248,113,113,0.08)]';
-
-  const screenShareSupported = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
   return (
     <section className="card grid gap-5 p-6">
@@ -133,24 +128,6 @@ export function SessionCard({
             <HeroIcon size={32} className="shrink-0" />
             <span className="flex-1 text-center">{heroLabel}</span>
           </button>
-
-          {joined && screenShareSupported && (
-            <button
-              id="screen-share-button"
-              type="button"
-              onClick={onToggleScreenShare}
-              aria-pressed={sharingScreen}
-              title={sharingScreen ? 'Завершить трансляцию' : 'Показать экран'}
-              className={`flex items-center p-4 transition-colors duration-150 ${
-                sharingScreen ? tileOff : tileOn
-              }`}
-            >
-              <ScreenShare size={24} className="shrink-0" />
-              <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                {sharingScreen ? 'Завершить экран' : 'Показать экран'}
-              </span>
-            </button>
-          )}
         </form>
       </div>
     </section>

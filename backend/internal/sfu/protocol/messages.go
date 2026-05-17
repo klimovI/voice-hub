@@ -126,16 +126,6 @@ type SetStatePayload struct {
 	Deafened  bool `json:"deafened"`
 }
 
-// WatchScreenPayload is the body of "watch-screen" / "unwatch-screen".
-// Subscribers opt into a publisher's screen-share video; audio is always
-// forwarded. Server clears all watch entries for a publisher on unpublish.
-// A second "watch-screen" for the same PeerID is an update; the new Quality
-// replaces the previous one. Missing Quality → server defaults to "high".
-type WatchScreenPayload struct {
-	PeerID  string `json:"peerId"`
-	Quality string `json:"quality,omitempty"`
-}
-
 // PeerStatePayload is the data field of the "peer-state" message,
 // broadcast when a peer toggles mic mute or self-deafen.
 type PeerStatePayload struct {

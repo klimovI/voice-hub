@@ -31,14 +31,6 @@ export type ConnectOptions = {
   clientId: string;
 };
 
-export type ScreenEncodingParams = {
-  maxBitrate?: number;
-  maxFramerate?: number;
-  priority?: RTCPriorityType;
-  scalabilityMode?: string;
-  degradationPreference?: RTCDegradationPreference;
-};
-
 export type SFUClient = {
   connect(opts: ConnectOptions): Promise<void>;
   disconnect(): void;
@@ -46,11 +38,6 @@ export type SFUClient = {
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
   sendPing(targetId: string): void;
-  /** Publishes a getDisplayMedia track; returns its sender, or null when not connected. */
-  startScreenShare(track: MediaStreamTrack, params?: ScreenEncodingParams): RTCRtpSender | null;
-  stopScreenShare(sender: RTCRtpSender): void;
-  watchScreen(peerId: string, quality?: 'low' | 'medium' | 'high'): void;
-  unwatchScreen(peerId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
 };
@@ -77,8 +64,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let pc: RTCPeerConnection | null = null;
   let myId: string | null = null;
   let stopped = false;
-  // Flushed in the offer handler — getParameters() yields a bound encoding only after setLocalDescription.
-  let pendingScreenParams: { sender: RTCRtpSender; params: ScreenEncodingParams } | null = null;
 
   function send(event: string, data: unknown): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -195,11 +180,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send('answer', answer);
-        if (pendingScreenParams) {
-          const { sender, params } = pendingScreenParams;
-          pendingScreenParams = null;
-          void applyScreenEncodingParams(sender, params);
-        }
         break;
       }
       case 'candidate':
@@ -227,102 +207,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function sendPing(targetId: string): void {
     send('ping', { to: targetId });
-  }
-
-  function startScreenShare(
-    track: MediaStreamTrack,
-    params?: ScreenEncodingParams,
-  ): RTCRtpSender | null {
-    if (!pc) return null;
-    // Reuse the recvonly video transceiver pion already offered; addTrack
-    // here would create a second m-line.
-    const reusable = pc.getTransceivers().find(
-      (tr) =>
-        tr.receiver.track?.kind === 'video' &&
-        (!tr.sender.track || tr.sender.track.readyState === 'ended'),
-    );
-    let sender: RTCRtpSender;
-    if (reusable) {
-      pinScreenCodecToVP9(reusable);
-      void reusable.sender.replaceTrack(track);
-      try {
-        reusable.direction = 'sendonly';
-      } catch {
-        /* some browsers reject post-negotiation direction changes */
-      }
-      sender = reusable.sender;
-    } else {
-      sender = pc.addTrack(track);
-      const created = pc.getTransceivers().find((tr) => tr.sender === sender);
-      if (created) pinScreenCodecToVP9(created);
-    }
-    if (params) {
-      pendingScreenParams = { sender, params };
-    }
-    send('renegotiate', undefined);
-    return sender;
-  }
-
-  // Belt-and-braces: server offers VP9 only, but client pin survives a future regression.
-  function pinScreenCodecToVP9(tr: RTCRtpTransceiver): void {
-    if (typeof tr.setCodecPreferences !== 'function') return;
-    if (typeof RTCRtpSender.getCapabilities !== 'function') return;
-    const caps = RTCRtpSender.getCapabilities('video');
-    if (!caps) return;
-    const vp9 = caps.codecs.filter((c) => c.mimeType === 'video/VP9');
-    if (vp9.length === 0) return;
-    try {
-      tr.setCodecPreferences(vp9);
-    } catch {
-      /* server offer lacks VP9, or transceiver mid-renegotiation — accept whatever browser picks */
-    }
-  }
-
-  async function applyScreenEncodingParams(
-    sender: RTCRtpSender,
-    params: ScreenEncodingParams,
-  ): Promise<void> {
-    try {
-      const p = sender.getParameters();
-      if (!p.encodings || p.encodings.length === 0) return;
-      // scalabilityMode is in lib.dom but not on RTCRtpEncodingParameters yet (TS 5.5).
-      const enc = p.encodings[0] as RTCRtpEncodingParameters & { scalabilityMode?: string };
-      if (params.maxBitrate !== undefined) enc.maxBitrate = params.maxBitrate;
-      if (params.maxFramerate !== undefined) enc.maxFramerate = params.maxFramerate;
-      if (params.priority !== undefined) enc.priority = params.priority;
-      if (params.scalabilityMode !== undefined) enc.scalabilityMode = params.scalabilityMode;
-      if (params.degradationPreference !== undefined) {
-        p.degradationPreference = params.degradationPreference;
-      }
-      await sender.setParameters(p);
-    } catch (err) {
-      console.warn('[screens] setParameters failed:', err);
-    }
-  }
-
-  function stopScreenShare(sender: RTCRtpSender): void {
-    if (!pc) return;
-    if (pendingScreenParams && pendingScreenParams.sender === sender) {
-      pendingScreenParams = null;
-    }
-    void sender.replaceTrack(null);
-    const tr = pc.getTransceivers().find((t) => t.sender === sender);
-    if (tr) {
-      try {
-        tr.direction = 'recvonly';
-      } catch {
-        /* ignore */
-      }
-    }
-    send('renegotiate', undefined);
-  }
-
-  function watchScreen(peerId: string, quality?: 'low' | 'medium' | 'high'): void {
-    send('watch-screen', { peerId, ...(quality !== undefined ? { quality } : {}) });
-  }
-
-  function unwatchScreen(peerId: string): void {
-    send('unwatch-screen', { peerId });
   }
 
   function getPeerConnection(): RTCPeerConnection | null {
@@ -363,7 +247,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       }
       pc = null;
     }
-    pendingScreenParams = null;
     myId = null;
   }
 
@@ -374,10 +257,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     sendSetState,
     sendChat,
     sendPing,
-    startScreenShare,
-    stopScreenShare,
-    watchScreen,
-    unwatchScreen,
     getPeerConnection,
     getId,
   };
