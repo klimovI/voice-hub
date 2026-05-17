@@ -241,8 +241,9 @@ type publisherRef struct {
 // subTrack carries an independent seq counter so dropped TID > cap packets
 // don't show up as RTP gaps on the subscriber leg (NACK-storm otherwise).
 type subTrack struct {
-	track *webrtc.TrackLocalStaticRTP
-	seq   atomic.Uint32
+	track    *webrtc.TrackLocalStaticRTP
+	seq      atomic.Uint32
+	dbgCount atomic.Uint64 // temp: forwarded-packet counter for debug logging
 }
 
 // Room holds the live state of all peers and forwarded tracks.
@@ -709,6 +710,8 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		prevTID, alreadyWatching := p.watching[w.PeerID]
 		p.watching[w.PeerID] = targetTID
 		r.mu.Unlock()
+		log.Printf("sfu: watch-screen viewer=%s publisher=%s tid=%d already=%v",
+			p.id, w.PeerID, targetTID, alreadyWatching)
 		if alreadyWatching && prevTID == targetTID {
 			// Already subscribed at the same quality; nothing to do.
 			return
@@ -1287,6 +1290,8 @@ func (r *Room) syncOnePeer(p *peer, watching map[string]uint8, tracks map[string
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
 		}
+		log.Printf("sfu: syncOnePeer (%s) AddTrack key=%s kind=%s trackID=%s",
+			p.id, key, t.Kind(), trackToAdd.ID())
 		// Immediate PLI bounds first-frame latency to ~RTT; skip if a recent
 		// keyframe is already in-flight so we don't spike publisher bitrate.
 		if t.Kind() == webrtc.RTPCodecTypeVideo {
@@ -1461,6 +1466,11 @@ func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid ui
 		pkt.SequenceNumber = uint16(s.state.seq.Add(1))
 		if err := s.state.track.WriteRTP(pkt); err != nil {
 			slog.Debug("sfu: vp9 WriteRTP", "pub", publisherID, "err", err)
+			continue
+		}
+		if n := s.state.dbgCount.Add(1); n == 1 || n%200 == 0 {
+			log.Printf("sfu: vp9 fwd pub=%s subSeq=%d count=%d tid=%d eff=%d",
+				publisherID, pkt.SequenceNumber, n, tid, s.effectiveTID)
 		}
 	}
 }
