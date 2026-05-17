@@ -44,6 +44,15 @@ func AccessLog(trusted []netip.Prefix, next http.Handler) http.Handler {
 	})
 }
 
+// SecurityHeaders denies camera/geo/payment via Permissions-Policy so
+// enumerateDevices() in the audio UI doesn't trigger Chromium's violation warning.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), payment=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequireAuthHTML gates HTML routes behind a valid session. Public assets
 // (login page, favicons, Vite bundles) pass through without a cookie.
 // Unauthenticated requests to gated paths are redirected to /login.html.

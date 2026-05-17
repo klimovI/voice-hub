@@ -40,7 +40,6 @@ func (p *playoutDelayInterceptor) BindLocalStream(
 		return writer
 	}
 	return interceptor.RTPWriterFunc(func(h *rtp.Header, payload []byte, a interceptor.Attributes) (int, error) {
-		// Header is shared across the fan-out — clear stale ext from prior subscriber.
 		h.ClearExtensions()
 		_ = h.SetExtension(extID, playoutDelayPayload[:])
 		return writer.Write(h, payload, a)

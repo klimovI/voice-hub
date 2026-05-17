@@ -135,7 +135,7 @@ func main() {
 	log.Printf("frontend version: %s", version)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir))))
+	mux.Handle("/", middleware.SecurityHeaders(middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir)))))
 	mux.HandleFunc("GET /healthz", handler.Health())
 	mux.HandleFunc("GET /api/version", handler.Version(version))
 	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{

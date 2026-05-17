@@ -10,6 +10,7 @@ package sfu
 import (
 	"context"
 	"crypto/rand"
+	mathrand "math/rand/v2"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -234,6 +235,13 @@ type publisherRef struct {
 	lastKeyframeNS *atomic.Int64
 }
 
+// subTrack carries an independent seq counter so dropped TID > cap packets
+// don't show up as RTP gaps on the subscriber leg (NACK-storm otherwise).
+type subTrack struct {
+	track *webrtc.TrackLocalStaticRTP
+	seq   atomic.Uint32
+}
+
 // Room holds the live state of all peers and forwarded tracks.
 type Room struct {
 	mu    sync.Mutex
@@ -242,13 +250,12 @@ type Room struct {
 	// publish both audio and screen-share video concurrently.
 	tracks     map[string]*webrtc.TrackLocalStaticRTP
 	publishers map[string]publisherRef
-	// subTracks holds per-subscriber TrackLocalStaticRTP instances for VP9
-	// video. Keyed by subTrackKey(publisherID, subscriberID). These are the
-	// actual tracks added to each subscriber's PeerConnection; the shared
-	// entry in r.tracks serves only as the negotiation template/existence
-	// signal. Audio continues to use the shared track.
+	// subTracks holds per-subscriber state for VP9 forwarding. Keyed by
+	// subTrackKey(publisherID, subscriberID). Each entry's track is added to
+	// the subscriber's PC; the shared entry in r.tracks serves only as a
+	// negotiation template. Audio continues to use the shared track.
 	// Guarded by mu.
-	subTracks  map[string]*webrtc.TrackLocalStaticRTP
+	subTracks map[string]*subTrack
 	cfg        Config
 	api        *webrtc.API
 	closed     atomic.Bool
@@ -356,7 +363,7 @@ func NewRoom(cfg Config) (*Room, error) {
 		peers:      make(map[string]*peer),
 		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
 		publishers: make(map[string]publisherRef),
-		subTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
+		subTracks:  make(map[string]*subTrack),
 		cfg:        cfg,
 	}
 	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
@@ -1377,18 +1384,20 @@ func (r *Room) trackForSubscriber(t *webrtc.TrackLocalStaticRTP, key, subscriber
 	r.mu.Lock()
 	st := r.subTracks[sk]
 	if st == nil {
-		var err error
 		// Track ID = subTrackKey so resolvedTrackID and have-map checks align.
-		st, err = webrtc.NewTrackLocalStaticRTP(t.Codec(), sk, ownerOf(key))
+		track, err := webrtc.NewTrackLocalStaticRTP(t.Codec(), sk, ownerOf(key))
 		if err != nil {
 			r.mu.Unlock()
 			log.Printf("sfu: new sub-track %s: %v", sk, err)
 			return t
 		}
+		st = &subTrack{track: track}
+		// Random uint16 seed so subscriber-side seqno history isn't predictable.
+		st.seq.Store(uint32(mathrand.Uint32N(1 << 16)))
 		r.subTracks[sk] = st
 	}
 	r.mu.Unlock()
-	return st
+	return st.track
 }
 
 // writeVP9ToSubscribers iterates all per-subscriber sub-tracks for publisherID
@@ -1401,7 +1410,7 @@ func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid ui
 	r.mu.Lock()
 	// effectiveTID = min(user choice, BWE cap). Snapshot under mu so the inner write loop stays lock-free.
 	type subEntry struct {
-		track        *webrtc.TrackLocalStaticRTP
+		state        *subTrack
 		effectiveTID uint8
 	}
 	var subs []subEntry
@@ -1422,7 +1431,7 @@ func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid ui
 		if bwCap := sub.bwCapTID.Load(); bwCap != bwCapNone && uint8(bwCap) < eff {
 			eff = uint8(bwCap)
 		}
-		subs = append(subs, subEntry{track: st, effectiveTID: eff})
+		subs = append(subs, subEntry{state: st, effectiveTID: eff})
 	}
 	r.mu.Unlock()
 
@@ -1430,8 +1439,9 @@ func (r *Room) writeVP9ToSubscribers(publisherID string, pkt *rtp.Packet, tid ui
 		if hasLayer && tid > s.effectiveTID {
 			continue
 		}
-		if err := s.track.WriteRTP(pkt); err != nil {
-			// Non-fatal: subscriber may be mid-teardown.
+		// Per-subscriber seqno: dropped packets must not leave decoder-visible gaps.
+		pkt.SequenceNumber = uint16(s.state.seq.Add(1))
+		if err := s.state.track.WriteRTP(pkt); err != nil {
 			slog.Debug("sfu: vp9 WriteRTP", "pub", publisherID, "err", err)
 		}
 	}
