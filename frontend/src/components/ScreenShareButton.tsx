@@ -7,6 +7,13 @@ interface Props {
   onStop: () => void;
 }
 
+// Android Chrome and a few mobile browsers ship MediaDevices without
+// getDisplayMedia. Calling it throws "not a function"; hide the entry point
+// entirely so the user doesn't see a control that can't deliver.
+const screenCaptureSupported =
+  typeof navigator !== 'undefined' &&
+  typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+
 /**
  * Single in-bar button that toggles screen-share publishing. Greyed out
  * outside the joined state. Label flips on `myStatus`; the transient
@@ -16,6 +23,8 @@ interface Props {
 export function ScreenShareButton({ onStart, onStop }: Props) {
   const joinState = useStore((s) => s.joinState);
   const myStatus = useScreenShareStore((s) => s.myStatus);
+
+  if (!screenCaptureSupported) return null;
 
   const joined = joinState === 'joined';
   const busy = myStatus === 'starting' || myStatus === 'stopping';

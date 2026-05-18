@@ -95,6 +95,7 @@ export type UseSessionManagerReturn = {
   subscribeScreenShare: (publisherId: string) => void;
   /** Unsubscribe from a peer's share (called from focused close). */
   unsubscribeScreenShare: (publisherId: string) => void;
+  selectScreenShareLayer: (publisherId: string, temporalLayer: 0 | 1 | 2) => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
   /**
@@ -802,6 +803,13 @@ export function useSessionManager({
     [sfu],
   );
 
+  const selectScreenShareLayer = useCallback(
+    (publisherId: string, temporalLayer: 0 | 1 | 2): void => {
+      sfu.getClient()?.selectScreenShareLayer(publisherId, temporalLayer);
+    },
+    [sfu],
+  );
+
   return {
     join: handleJoin,
     leave: handleLeave,
@@ -818,6 +826,7 @@ export function useSessionManager({
     stopScreenShare,
     subscribeScreenShare,
     unsubscribeScreenShare,
+    selectScreenShareLayer,
     getRoomId,
     handleChatReceive,
     handlePingReceive,

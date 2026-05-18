@@ -273,6 +273,14 @@ export function App() {
     share.setFocused(null);
   }, [session]);
 
+  const handleSelectQuality = useCallback(
+    (q: 0 | 1 | 2) => {
+      const focused = useScreenShareStore.getState().focusedId;
+      if (focused) session.selectScreenShareLayer(focused, q);
+    },
+    [session],
+  );
+
   // Drop focus on -ended (publisher stopped while focused).
   const focusedId = useScreenShareStore((s) => s.focusedId);
   const focusedStillShared = useScreenShareStore((s) =>
@@ -314,7 +322,7 @@ export function App() {
   return (
     <>
       <PingToast />
-      <ScreenShareFocused onClose={handleFocusedClose} />
+      <ScreenShareFocused onClose={handleFocusedClose} onSelectQuality={handleSelectQuality} />
       <main
         className="grid gap-4 mx-auto
           w-[min(1560px,100%)] px-5 pt-5 pb-12
