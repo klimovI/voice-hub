@@ -11,6 +11,7 @@
 // engine id.
 
 import type { EngineKind } from '../types';
+import { resolveAudioContextCtor } from './context';
 import { isCaptureEngine } from './engine';
 import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
@@ -31,9 +32,7 @@ export interface MicGraph {
 }
 
 export function createLocalAudioContext(): AudioContext {
-  const AudioContextCtor =
-    (window as Window & typeof globalThis).AudioContext ??
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const AudioContextCtor = resolveAudioContextCtor();
   if (!AudioContextCtor) throw new Error('Browser does not support AudioContext');
   try {
     return new AudioContextCtor({ sampleRate: 48000 });

@@ -221,7 +221,10 @@ export type ScreenCodecPreference = {
   expiresAt: number;
 };
 
-export function loadScreenCodecPreference(bucket: string, now = Date.now()): ScreenCodecPreference | null {
+export function loadScreenCodecPreference(
+  bucket: string,
+  now = Date.now(),
+): ScreenCodecPreference | null {
   try {
     const raw = localStorage.getItem(KEYS.screenCodecPreference);
     if (!raw) return null;

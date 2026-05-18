@@ -202,11 +202,7 @@ export type ChatPayload = {
 // See backend file for the lifecycle / state-machine notes; this file only
 // names the wire shapes.
 
-export type ScreenShareReason =
-  | 'not-found'
-  | 'invalid-token'
-  | 'already-publishing'
-  | 'internal';
+export type ScreenShareReason = 'not-found' | 'invalid-token' | 'already-publishing' | 'internal';
 
 export type ScreenShareStartPayload = {
   sdp: string;
@@ -365,7 +361,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         data === null ||
         typeof (data as Record<string, unknown>).id !== 'string'
       ) {
-        console.warn("[protocol] malformed peer payload:", event, data);
+        console.warn('[protocol] malformed peer payload:', event, data);
         return null;
       }
       return { event, data: data as PeerInfo };

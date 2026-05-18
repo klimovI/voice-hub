@@ -1,9 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
-import {
-  selectChatOnlyParticipants,
-  selectVoiceParticipants,
-  useStore,
-} from '../store/useStore';
+import { selectChatOnlyParticipants, selectVoiceParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
 import { useRoomPeers } from '../hooks/useRoomPeers';
 import { ROOM_SLUGS, ROOM_LABELS, type RoomSlug } from '../rooms';

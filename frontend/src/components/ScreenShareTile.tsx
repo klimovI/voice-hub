@@ -13,7 +13,9 @@ interface Props {
  * SFU start forwarding video, so idle peers cost zero bandwidth).
  */
 export function ScreenShareTile({ publisherId, hasSystemAudio, onClick }: Props) {
-  const display = useStore((s) => s.participants.get(publisherId)?.display ?? `user-${publisherId}`);
+  const display = useStore(
+    (s) => s.participants.get(publisherId)?.display ?? `user-${publisherId}`,
+  );
 
   return (
     <button

@@ -43,7 +43,10 @@ function asOutboundVideoStats(value: unknown): OutboundVideoStats | null {
   return null;
 }
 
-function codecFromStats(report: RTCStatsReport, outbound: OutboundVideoStats): ScreenVideoCodec | null {
+function codecFromStats(
+  report: RTCStatsReport,
+  outbound: OutboundVideoStats,
+): ScreenVideoCodec | null {
   if (!outbound.codecId) return null;
   const codec = report.get(outbound.codecId) as CodecStats | undefined;
   const mime = codec?.mimeType?.split('/')[1]?.toUpperCase();

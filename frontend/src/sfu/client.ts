@@ -20,13 +20,11 @@ import {
   isScreenVideoCodec,
   primeScreenCodecProfile,
 } from '../screenshare/codec';
-import { startScreenShareHealthMonitor, type ScreenShareHealthMonitor } from '../screenshare/health';
 import {
-  SCREEN_FPS,
-  SCREEN_HEIGHT,
-  SCREEN_MAX_BITRATE,
-  SCREEN_WIDTH,
-} from '../screenshare/params';
+  startScreenShareHealthMonitor,
+  type ScreenShareHealthMonitor,
+} from '../screenshare/health';
+import { SCREEN_FPS, SCREEN_HEIGHT, SCREEN_MAX_BITRATE, SCREEN_WIDTH } from '../screenshare/params';
 
 export const SCREEN_SHARE_NO_CODEC = 'SCREEN_SHARE_NO_CODEC';
 
@@ -239,11 +237,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         }
       }, 10000);
 
-      ws = new WebSocket(opts.wsUrl);
+      const socket = new WebSocket(opts.wsUrl);
+      ws = socket;
 
-      ws.onopen = () => {
+      socket.onopen = () => {
         on.onState('connecting');
-        ws!.send(
+        socket.send(
           JSON.stringify({
             event: 'hello',
             data: { displayName: opts.displayName ?? '', clientId: opts.clientId },
@@ -251,7 +250,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         );
       };
 
-      ws.onerror = (event) => {
+      socket.onerror = (event) => {
         on.onError(event);
         if (!resolved) {
           resolved = true;
@@ -260,11 +259,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         }
       };
 
-      ws.onclose = () => {
+      socket.onclose = () => {
         if (!stopped) on.onState('closed');
       };
 
-      ws.onmessage = async (event) => {
+      socket.onmessage = async (event) => {
         const msg = parseServerMessage(event.data as string);
         if (!msg) return;
         try {
@@ -976,10 +975,11 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
         }
       }, 10000);
 
-      ws = new WebSocket(opts.wsUrl);
+      const socket = new WebSocket(opts.wsUrl);
+      ws = socket;
 
-      ws.onopen = () => {
-        ws!.send(
+      socket.onopen = () => {
+        socket.send(
           JSON.stringify({
             event: 'hello',
             data: { displayName: opts.displayName, clientId: opts.clientId, chatOnly: true },
@@ -987,7 +987,7 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
         );
       };
 
-      ws.onerror = (event) => {
+      socket.onerror = (event) => {
         on.onError(event);
         if (!resolved) {
           resolved = true;
@@ -996,11 +996,11 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
         }
       };
 
-      ws.onclose = () => {
+      socket.onclose = () => {
         if (!stopped) on.onClose();
       };
 
-      ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         const msg = parseServerMessage(event.data as string);
         if (!msg) return;
         switch (msg.event) {

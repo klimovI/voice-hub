@@ -2,6 +2,8 @@
 // <audio> element is muted and used only to keep the stream alive.
 // Volume can exceed 100% (WebAudio gain).
 
+import { resolveAudioContextCtor } from './context';
+
 export interface RemoteParticipantAudio {
   audioEl: HTMLAudioElement;
   gainNode: GainNode;
@@ -11,10 +13,7 @@ export interface RemoteParticipantAudio {
 }
 
 export function createRemoteAudioContext(): AudioContext {
-  const Ctor =
-    (window as Window & typeof globalThis).AudioContext ??
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new Ctor({ sampleRate: 48000 });
+  const ctx = new (resolveAudioContextCtor())({ sampleRate: 48000 });
   ctx.resume().catch((err: unknown) => console.warn('[remote-audio] ctx resume failed:', err));
   return ctx;
 }

@@ -1,12 +1,4 @@
-import {
-  memo,
-  useRef,
-  useMemo,
-  useEffect,
-  useState,
-  useCallback,
-  type ReactNode,
-} from 'react';
+import { memo, useRef, useMemo, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { selectSelfPeerId, useStore, type ChatMessage } from '../store/useStore';
 import { CHAT_MAX_BYTES } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';

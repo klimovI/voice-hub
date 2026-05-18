@@ -14,8 +14,7 @@ interface Props {
 // getDisplayMedia. Calling it throws "not a function"; hide the entry point
 // entirely so the user doesn't see a control that can't deliver.
 const screenCaptureSupported =
-  typeof navigator !== 'undefined' &&
-  typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+  typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
 /**
  * Single in-bar button that toggles screen-share publishing. Greyed out

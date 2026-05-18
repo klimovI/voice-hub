@@ -152,11 +152,15 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
             className={`group relative grid place-items-center ${isLurker ? 'bg-bg-3 text-muted' : 'bg-accent text-accent-ink'} font-extrabold text-[20px] uppercase shrink-0 border-2 border-transparent transition-[border-color] duration-150 ${avatarRing} ${pingCoolingDown ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent cursor-pointer'}`}
             style={{ width: 40, height: 40 }}
           >
-            <span className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${pingCoolingDown ? '' : 'group-hover:opacity-0'}`}>
+            <span
+              className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${pingCoolingDown ? '' : 'group-hover:opacity-0'}`}
+            >
               {initial}
             </span>
             {!pingCoolingDown && (
-              <span className={`absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${isLurker ? 'text-accent' : 'text-accent-ink'}`}>
+              <span
+                className={`absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${isLurker ? 'text-accent' : 'text-accent-ink'}`}
+              >
                 <Bell size={20} />
               </span>
             )}

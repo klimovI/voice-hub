@@ -232,7 +232,6 @@ export function AudioCard({
           </div>
         )}
       </div>
-
     </section>
   );
 }

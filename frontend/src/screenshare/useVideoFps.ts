@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 
-export function useVideoFps(videoRef: React.RefObject<HTMLVideoElement | null>, stream: MediaStream | null) {
+export function useVideoFps(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  stream: MediaStream | null,
+) {
   const [fps, setFps] = useState<number | null>(null);
 
   useEffect(() => {
