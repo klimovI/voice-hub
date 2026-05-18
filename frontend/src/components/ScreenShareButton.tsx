@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
@@ -23,6 +24,7 @@ const screenCaptureSupported =
 export function ScreenShareButton({ onStart, onStop }: Props) {
   const joinState = useStore((s) => s.joinState);
   const myStatus = useScreenShareStore((s) => s.myStatus);
+  const myStream = useScreenShareStore((s) => s.myStream);
 
   if (!screenCaptureSupported) return null;
 
@@ -45,14 +47,40 @@ export function ScreenShareButton({ onStart, onStop }: Props) {
   const Icon = publishing ? ScreenShareOff : ScreenShare;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={!joined || busy}
-      className={`btn w-full ${publishing ? 'btn-danger' : 'btn-secondary'}`}
-    >
-      <Icon size={16} strokeWidth={2.25} />
-      <span>{label}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={!joined || busy}
+        className={`btn w-full ${publishing ? 'btn-danger' : 'btn-secondary'}`}
+      >
+        <Icon size={16} strokeWidth={2.25} />
+        <span>{label}</span>
+      </button>
+      {myStream && <SelfPreview stream={myStream} />}
+    </>
+  );
+}
+
+function SelfPreview({ stream }: { stream: MediaStream }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.srcObject = stream;
+    // muted required for autoplay; this is a local preview, no audio needed.
+    el.muted = true;
+    el.play().catch(() => {});
+  }, [stream]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      className="w-full aspect-video rounded bg-black object-contain"
+    />
   );
 }

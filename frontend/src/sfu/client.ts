@@ -40,6 +40,9 @@ export type SFUHandlers = {
     stream: MediaStream;
     kind: 'video' | 'audio';
   }) => void;
+  /** Publisher-side: local capture stream available (preview). Fires once
+   * `getDisplayMedia` resolves, before the SDP round-trip completes. */
+  onScreenShareSelfStarted: (data: { stream: MediaStream }) => void;
   /** Publisher-side: the publisher session has stopped (track ended, user cancel, server stop). */
   onScreenShareSelfStopped: () => void;
   onError: (err: unknown) => void;
@@ -141,6 +144,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onScreenShareEnded: handlers.onScreenShareEnded ?? noop,
     onScreenShareError: handlers.onScreenShareError ?? noop,
     onScreenShareTrack: handlers.onScreenShareTrack ?? noop,
+    onScreenShareSelfStarted: handlers.onScreenShareSelfStarted ?? noop,
     onScreenShareSelfStopped: handlers.onScreenShareSelfStopped ?? noop,
     onError: handlers.onError ?? noop,
   };
@@ -525,6 +529,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubPC = newPC;
     screenPubStream = stream;
     screenPubStopped = false;
+    on.onScreenShareSelfStarted({ stream });
 
     const videoSender = newPC.addTrack(videoTrack, stream);
     screenPubVideoSender = videoSender;
@@ -624,6 +629,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         screenPubInitialParams = null;
         screenPubStopped = false;
       }
+      on.onScreenShareSelfStopped();
       throw err;
     }
   }

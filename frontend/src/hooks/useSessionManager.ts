@@ -574,8 +574,13 @@ export function useSessionManager({
           if (kind === 'video') store.attachFocusedVideo(publisherId, stream);
           else store.attachFocusedAudio(publisherId, stream);
         },
+        onScreenShareSelfStarted: ({ stream }) => {
+          useScreenShareStore.getState().setMyStream(stream);
+        },
         onScreenShareSelfStopped: () => {
-          useScreenShareStore.getState().setMyStatus('idle');
+          const store = useScreenShareStore.getState();
+          store.setMyStatus('idle');
+          store.setMyStream(null);
         },
         onError: () => {
           // onState handles user-visible errors
@@ -841,7 +846,9 @@ export function useSessionManager({
       // startScreenShare. Set it on success.
       useScreenShareStore.getState().setMyStatus('publishing');
     } catch (err) {
-      useScreenShareStore.getState().setMyStatus('idle');
+      const store = useScreenShareStore.getState();
+      store.setMyStatus('idle');
+      store.setMyStream(null);
       // User cancelling the picker raises a DOMException with name "NotAllowedError"
       // or "AbortError" — neither should produce a noisy app error.
       const name = err instanceof DOMException ? err.name : '';

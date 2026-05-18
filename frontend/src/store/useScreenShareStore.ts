@@ -33,6 +33,9 @@ export type ScreenShareState = {
 
   myStatus: MyShareStatus;
   setMyStatus: (s: MyShareStatus) => void;
+
+  myStream: MediaStream | null;
+  setMyStream: (stream: MediaStream | null) => void;
 };
 
 export const useScreenShareStore = create<ScreenShareState>((set) => ({
@@ -91,4 +94,7 @@ export const useScreenShareStore = create<ScreenShareState>((set) => ({
 
   myStatus: 'idle',
   setMyStatus: (s) => set({ myStatus: s }),
+
+  myStream: null,
+  setMyStream: (stream) => set({ myStream: stream }),
 }));
