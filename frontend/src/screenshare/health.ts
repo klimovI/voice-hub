@@ -1,6 +1,5 @@
-import { saveScreenCodecPreference } from '../utils/storage';
 import { SCREEN_FPS } from './params';
-import { screenCodecBucket, type ScreenVideoCodec } from './codec';
+import { rememberScreenCodecDemotion, type ScreenVideoCodec } from './codec';
 
 type OutboundVideoStats = {
   id: string;
@@ -29,7 +28,6 @@ const MAX_WALL_MS = 12_000;
 const BAD_SAMPLE_THRESHOLD = 5;
 const FPS_FLOOR = SCREEN_FPS * 0.7;
 const ENCODE_BUDGET_SECONDS = (1 / SCREEN_FPS) * 0.8;
-const PREFERENCE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function asOutboundVideoStats(value: unknown): OutboundVideoStats | null {
   const stat = value as Partial<OutboundVideoStats>;
@@ -53,15 +51,6 @@ function codecFromStats(
   if (mime === 'AV1') return 'av1';
   if (mime === 'VP9') return 'vp9';
   return null;
-}
-
-function rememberVP9(reason: string): void {
-  saveScreenCodecPreference({
-    codec: 'vp9',
-    bucket: screenCodecBucket(),
-    reason,
-    expiresAt: Date.now() + PREFERENCE_TTL_MS,
-  });
 }
 
 export function startScreenShareHealthMonitor(
@@ -129,7 +118,7 @@ export function startScreenShareHealthMonitor(
         badSamples += 1;
       }
       if (badSamples >= BAD_SAMPLE_THRESHOLD) {
-        rememberVP9(cpuLimited ? 'cpu' : fpsLimited ? 'fps' : 'encode-time');
+        rememberScreenCodecDemotion('vp9');
         stop();
       }
     } finally {

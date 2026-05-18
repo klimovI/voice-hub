@@ -48,8 +48,6 @@ export const KEYS = {
   pingWindowFlashEnabled: 'voice-hub.ping-window-flash-enabled',
   // Selected room slug
   roomSlug: 'voice-hub.room-slug',
-  // Screen-share codec override, written when AV1 proves CPU-bound locally.
-  screenCodecPreference: 'voice-hub.screen-codec-preference.v1',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].
@@ -212,45 +210,6 @@ export function loadScreenAudioVolume(clientId: string): number | null {
 export function saveScreenAudioVolume(clientId: string, volume: number): void {
   if (!clientId) return;
   localStorage.setItem(SCREEN_AUDIO_VOLUME_PREFIX + clientId, String(volume));
-}
-
-export type ScreenCodecPreference = {
-  codec: 'vp9';
-  bucket: string;
-  reason: string;
-  expiresAt: number;
-};
-
-export function loadScreenCodecPreference(
-  bucket: string,
-  now = Date.now(),
-): ScreenCodecPreference | null {
-  try {
-    const raw = localStorage.getItem(KEYS.screenCodecPreference);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ScreenCodecPreference>;
-    if (
-      parsed.codec !== 'vp9' ||
-      parsed.bucket !== bucket ||
-      typeof parsed.reason !== 'string' ||
-      typeof parsed.expiresAt !== 'number' ||
-      parsed.expiresAt <= now
-    ) {
-      localStorage.removeItem(KEYS.screenCodecPreference);
-      return null;
-    }
-    return parsed as ScreenCodecPreference;
-  } catch {
-    return null;
-  }
-}
-
-export function saveScreenCodecPreference(pref: ScreenCodecPreference): void {
-  try {
-    localStorage.setItem(KEYS.screenCodecPreference, JSON.stringify(pref));
-  } catch {
-    /* best effort */
-  }
 }
 
 export function loadPeerLabel(clientId: string): string {

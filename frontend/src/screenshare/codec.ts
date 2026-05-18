@@ -1,4 +1,3 @@
-import { loadScreenCodecPreference } from '../utils/storage';
 import { SCREEN_FPS, SCREEN_HEIGHT, SCREEN_MAX_BITRATE, SCREEN_WIDTH } from './params';
 
 export type ScreenVideoCodec = 'av1' | 'vp9';
@@ -20,13 +19,14 @@ const WEB_CODECS: Record<ScreenVideoCodec, string> = {
 
 let supportProbe: Promise<ScreenCodecSupport> | null = null;
 let lastSupport: ScreenCodecSupport | null = null;
+let demotedCodec: ScreenVideoCodec | null = null;
 
 export function isScreenVideoCodec(value: unknown): value is ScreenVideoCodec {
   return value === 'av1' || value === 'vp9';
 }
 
-export function screenCodecBucket(): string {
-  return `${SCREEN_WIDTH}x${SCREEN_HEIGHT}@${SCREEN_FPS}`;
+export function rememberScreenCodecDemotion(codec: ScreenVideoCodec): void {
+  demotedCodec = codec;
 }
 
 function normalizeCodec(codec: Codec): ScreenVideoCodec | null {
@@ -108,8 +108,7 @@ export function getScreenCodecSupportSync(): ScreenCodecSupport {
 }
 
 export function chooseScreenCodec(support = getScreenCodecSupportSync()): ScreenVideoCodec | null {
-  const persisted = loadScreenCodecPreference(screenCodecBucket());
-  if (persisted && support.send.has(persisted.codec)) return persisted.codec;
+  if (demotedCodec && support.send.has(demotedCodec)) return demotedCodec;
   for (const codec of CODEC_PRIORITY) {
     if (support.send.has(codec)) return codec;
   }
