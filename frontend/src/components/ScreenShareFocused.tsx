@@ -3,6 +3,7 @@ import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
+import { formatQualityLabel } from '../screenshare/labels';
 
 interface Props {
   /** Called when user dismisses the overlay — owner unsubscribes from SFU. */
@@ -22,6 +23,9 @@ export function ScreenShareFocused({ onClose }: Props) {
   const audioStream = useScreenShareStore((s) => s.focusedAudioStream);
   const hasSystemAudio = useScreenShareStore((s) =>
     focusedId ? (s.shares.get(focusedId)?.hasSystemAudio ?? false) : false,
+  );
+  const videoCodec = useScreenShareStore((s) =>
+    focusedId ? (s.shares.get(focusedId)?.videoCodec ?? null) : null,
   );
   const shareStillLive = useScreenShareStore((s) =>
     s.focusedId ? s.shares.has(s.focusedId) : false,
@@ -134,6 +138,11 @@ export function ScreenShareFocused({ onClose }: Props) {
               {qualityLabel}
             </span>
           )}
+          {videoCodec && (
+            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
+              {videoCodec.toUpperCase()}
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-2">
           {hasSystemAudio && !ended && (
@@ -192,12 +201,4 @@ export function ScreenShareFocused({ onClose }: Props) {
       <audio ref={audioRef} />
     </div>
   );
-}
-
-function formatQualityLabel(h: number): string {
-  if (h >= 1400) return '1440p';
-  if (h >= 1000) return '1080p';
-  if (h >= 680) return '720p';
-  if (h >= 400) return '480p';
-  return `${h}p`;
 }

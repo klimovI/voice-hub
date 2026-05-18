@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
+import { formatQualityLabel } from '../screenshare/labels';
 
 interface Props {
   onStart: () => void | Promise<void>;
@@ -25,6 +26,7 @@ export function ScreenShareButton({ onStart, onStop }: Props) {
   const joinState = useStore((s) => s.joinState);
   const myStatus = useScreenShareStore((s) => s.myStatus);
   const myStream = useScreenShareStore((s) => s.myStream);
+  const myVideoCodec = useScreenShareStore((s) => s.myVideoCodec);
 
   if (!screenCaptureSupported) return null;
 
@@ -57,13 +59,20 @@ export function ScreenShareButton({ onStart, onStop }: Props) {
         <Icon size={16} strokeWidth={2.25} />
         <span>{label}</span>
       </button>
-      {myStream && <SelfPreview stream={myStream} />}
+      {myStream && <SelfPreview stream={myStream} videoCodec={myVideoCodec} />}
     </>
   );
 }
 
-function SelfPreview({ stream }: { stream: MediaStream }) {
+function SelfPreview({
+  stream,
+  videoCodec,
+}: {
+  stream: MediaStream;
+  videoCodec: 'av1' | 'vp9' | null;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -72,15 +81,46 @@ function SelfPreview({ stream }: { stream: MediaStream }) {
     // muted required for autoplay; this is a local preview, no audio needed.
     el.muted = true;
     el.play().catch(() => {});
+
+    setVideoSize(null);
+    const update = () => {
+      if (!el.videoWidth || !el.videoHeight) return;
+      setVideoSize({ w: el.videoWidth, h: el.videoHeight });
+    };
+    update();
+    el.addEventListener('loadedmetadata', update);
+    el.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('loadedmetadata', update);
+      el.removeEventListener('resize', update);
+    };
   }, [stream]);
 
+  const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+
   return (
-    <video
-      ref={videoRef}
-      autoPlay
-      playsInline
-      muted
-      className="w-full aspect-video rounded bg-black object-contain"
-    />
+    <div className="relative">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full aspect-video rounded bg-black object-contain"
+      />
+      {(qualityLabel || videoCodec) && (
+        <div className="absolute left-2 top-2 flex items-center gap-1">
+          {qualityLabel && (
+            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
+              {qualityLabel}
+            </span>
+          )}
+          {videoCodec && (
+            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
+              {videoCodec.toUpperCase()}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -580,8 +580,8 @@ export function useSessionManager({
           if (kind === 'video') store.attachFocusedVideo(publisherId, stream);
           else store.attachFocusedAudio(publisherId, stream);
         },
-        onScreenShareSelfStarted: ({ stream }) => {
-          useScreenShareStore.getState().setMyStream(stream);
+        onScreenShareSelfStarted: ({ stream, videoCodec }) => {
+          useScreenShareStore.getState().setMyStream(stream, videoCodec);
         },
         onScreenShareSelfStopped: () => {
           const store = useScreenShareStore.getState();

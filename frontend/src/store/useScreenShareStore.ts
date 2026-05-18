@@ -8,11 +8,13 @@
 
 import { create } from 'zustand';
 
+export type ScreenVideoCodec = 'av1' | 'vp9';
+
 /** One active screen share announced by the server. */
 export type ScreenShare = {
   publisherId: string;
   hasSystemAudio: boolean;
-  videoCodec?: 'av1' | 'vp9';
+  videoCodec?: ScreenVideoCodec;
 };
 
 /** Local publisher state — independent from the shares map (which lists what's
@@ -36,7 +38,8 @@ export type ScreenShareState = {
   setMyStatus: (s: MyShareStatus) => void;
 
   myStream: MediaStream | null;
-  setMyStream: (stream: MediaStream | null) => void;
+  myVideoCodec: ScreenVideoCodec | null;
+  setMyStream: (stream: MediaStream | null, codec?: ScreenVideoCodec | null) => void;
 };
 
 export const useScreenShareStore = create<ScreenShareState>((set) => ({
@@ -97,5 +100,6 @@ export const useScreenShareStore = create<ScreenShareState>((set) => ({
   setMyStatus: (s) => set({ myStatus: s }),
 
   myStream: null,
-  setMyStream: (stream) => set({ myStream: stream }),
+  myVideoCodec: null,
+  setMyStream: (stream, codec = null) => set({ myStream: stream, myVideoCodec: codec }),
 }));

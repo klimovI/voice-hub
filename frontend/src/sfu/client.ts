@@ -58,7 +58,7 @@ export type SFUHandlers = {
   }) => void;
   /** Publisher-side: local capture stream available (preview). Fires once
    * `getDisplayMedia` resolves, before the SDP round-trip completes. */
-  onScreenShareSelfStarted: (data: { stream: MediaStream }) => void;
+  onScreenShareSelfStarted: (data: { stream: MediaStream; videoCodec: ScreenVideoCodec }) => void;
   /** Publisher-side: the publisher session has stopped (track ended, user cancel, server stop). */
   onScreenShareSelfStopped: () => void;
   onError: (err: unknown) => void;
@@ -572,7 +572,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubPC = newPC;
     screenPubStream = stream;
     screenPubStopped = false;
-    on.onScreenShareSelfStarted({ stream });
+    on.onScreenShareSelfStarted({ stream, videoCodec: selectedCodec });
 
     const videoSender = newPC.addTrack(videoTrack, stream);
     screenPubVideoSender = videoSender;
