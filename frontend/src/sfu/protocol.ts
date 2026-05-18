@@ -83,7 +83,10 @@ export type PeerInfo = {
    * system-audio Opus track. Meaningful only when screenSharing=true.
    */
   screenSharingHasAudio?: boolean;
+  screenSharingVideoCodec?: ScreenVideoCodec;
 };
+
+export type ScreenVideoCodec = 'av1' | 'vp9';
 
 // Server → Client payloads
 
@@ -222,6 +225,7 @@ export type ScreenShareResumePayload = {
 export type ScreenShareAvailablePayload = {
   publisherId: string;
   hasSystemAudio: boolean;
+  videoCodec?: ScreenVideoCodec;
 };
 
 export type ScreenShareEndedPayload = {
@@ -312,6 +316,10 @@ export type ClientMessage =
  */
 function isPCKind(v: unknown): v is PCKind {
   return v === 'audio' || v === 'screen-pub' || v === 'screen-sub';
+}
+
+function isScreenVideoCodec(v: unknown): v is ScreenVideoCodec {
+  return v === 'av1' || v === 'vp9';
 }
 
 export function parseServerMessage(raw: string): ServerMessage | null {
@@ -448,7 +456,8 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         typeof data !== 'object' ||
         data === null ||
         typeof d.publisherId !== 'string' ||
-        typeof d.hasSystemAudio !== 'boolean'
+        typeof d.hasSystemAudio !== 'boolean' ||
+        ('videoCodec' in d && !isScreenVideoCodec(d.videoCodec))
       ) {
         console.warn("[protocol] malformed 'screen-share-available' payload:", data);
         return null;

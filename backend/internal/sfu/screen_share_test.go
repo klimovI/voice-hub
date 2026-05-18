@@ -32,12 +32,14 @@ func newResumeTestRoom(t *testing.T, token string) (*Room, *peer, *ScreenShareSe
 		PublisherID:    pub.id,
 		SessionToken:   token,
 		HasSystemAudio: false,
+		VideoCodec:     protocol.ScreenVideoCodecAV1,
 		subscribers:    make(map[string]*screenSubscriber),
 		ctx:            ctx,
 		cancel:         cancelSess,
 	}
 	pub.screenSession = session
 	pub.screenSharing = true
+	pub.screenSharingVideoCodec = session.VideoCodec
 	room.peers[pub.id] = pub
 	room.screenSessionsByToken[token] = session
 
@@ -192,7 +194,7 @@ loop:
 			case "screen-share-available":
 				var d protocol.ScreenShareAvailableData
 				_ = json.Unmarshal(env.Data, &d)
-				if d.PublisherID == newPub.id {
+				if d.PublisherID == newPub.id && d.VideoCodec == protocol.ScreenVideoCodecAV1 {
 					availSeen = true
 				}
 			}
@@ -428,6 +430,29 @@ func TestEvalAutoDowngradeAfterSustainedLoss(t *testing.T) {
 	}
 	if sub.highLossSince.Load() != 0 {
 		t.Error("highLossSince should reset after a flip")
+	}
+}
+
+func TestRunAutoDowngradeTickSkipsVP9Fallback(t *testing.T) {
+	t.Parallel()
+	session := &ScreenShareSession{
+		PublisherID: "pub",
+		VideoCodec:  protocol.ScreenVideoCodecVP9,
+		subscribers: make(map[string]*screenSubscriber),
+	}
+	sub := newTestSub("s1", 2, 120)
+	session.subscribers[sub.peerID] = sub
+	room := &Room{}
+	t0 := time.Now()
+
+	room.runAutoDowngradeTick(session, t0)
+	room.runAutoDowngradeTick(session, t0.Add(autoDowngradeHighWindow+time.Second))
+
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("VP9 target layer changed: %d, want 2", sub.targetTemp.Load())
+	}
+	if sub.highLossSince.Load() != 0 {
+		t.Error("VP9 fallback should not arm temporal downgrade timers")
 	}
 }
 

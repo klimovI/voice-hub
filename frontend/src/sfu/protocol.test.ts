@@ -357,6 +357,9 @@ describe('parseServerMessage', () => {
     const msg = parseServerMessage(envelope('screen-share-available', data));
     expect(msg).not.toBeNull();
     expect(msg!.event).toBe('screen-share-available');
+    if (msg && msg.event === 'screen-share-available') {
+      expect(msg.data.videoCodec).toBe('av1');
+    }
   });
 
   it('parses screen-share-error fixture', () => {

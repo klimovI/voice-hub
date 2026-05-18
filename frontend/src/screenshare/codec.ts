@@ -1,7 +1,149 @@
+import { loadScreenCodecPreference } from '../utils/storage';
+import { SCREEN_FPS, SCREEN_HEIGHT, SCREEN_MAX_BITRATE, SCREEN_WIDTH } from './params';
+
+export type ScreenVideoCodec = 'av1' | 'vp9';
+
 type Codec = RTCRtpCodec & { mimeType: string };
 
-// AV1 only — server's MediaEngine registers only AV1. Loud negotiation
-// failure preferable to silent fallback that hides a misconfigured client.
-export function filterAV1<T extends Codec>(codecs: readonly T[]): T[] {
-  return codecs.filter((codec) => codec.mimeType.split('/')[1]?.toUpperCase() === 'AV1');
+export type ScreenCodecSupport = {
+  send: ReadonlySet<ScreenVideoCodec>;
+  receive: ReadonlySet<ScreenVideoCodec>;
+  av1HardwareLikely: boolean | null;
+  vp9HardwareLikely: boolean | null;
+};
+
+const CODEC_PRIORITY: ScreenVideoCodec[] = ['av1', 'vp9'];
+const WEB_CODECS: Record<ScreenVideoCodec, string> = {
+  av1: 'av01.0.13M.08',
+  vp9: 'vp09.00.51.08',
+};
+
+let supportProbe: Promise<ScreenCodecSupport> | null = null;
+let lastSupport: ScreenCodecSupport | null = null;
+
+export function isScreenVideoCodec(value: unknown): value is ScreenVideoCodec {
+  return value === 'av1' || value === 'vp9';
+}
+
+export function screenCodecBucket(): string {
+  return `${SCREEN_WIDTH}x${SCREEN_HEIGHT}@${SCREEN_FPS}`;
+}
+
+function normalizeCodec(codec: Codec): ScreenVideoCodec | null {
+  switch (codec.mimeType.split('/')[1]?.toUpperCase()) {
+    case 'AV1':
+      return 'av1';
+    case 'VP9':
+      return 'vp9';
+    default:
+      return null;
+  }
+}
+
+function supportedCodecSet(codecs: readonly Codec[] | undefined): ReadonlySet<ScreenVideoCodec> {
+  const out = new Set<ScreenVideoCodec>();
+  for (const codec of codecs ?? []) {
+    const normalized = normalizeCodec(codec);
+    if (normalized) out.add(normalized);
+  }
+  return out;
+}
+
+function senderVideoCapabilities(): RTCRtpCapabilities | null {
+  return globalThis.RTCRtpSender?.getCapabilities?.('video') ?? null;
+}
+
+function receiverVideoCapabilities(): RTCRtpCapabilities | null {
+  return globalThis.RTCRtpReceiver?.getCapabilities?.('video') ?? null;
+}
+
+async function probeHardware(codec: ScreenVideoCodec): Promise<boolean | null> {
+  const videoEncoder = globalThis.VideoEncoder;
+  if (!videoEncoder?.isConfigSupported) return null;
+  try {
+    const result = await videoEncoder.isConfigSupported({
+      codec: WEB_CODECS[codec],
+      hardwareAcceleration: 'prefer-hardware',
+      width: SCREEN_WIDTH,
+      height: SCREEN_HEIGHT,
+      framerate: SCREEN_FPS,
+      bitrate: SCREEN_MAX_BITRATE,
+    });
+    return result.supported ?? false;
+  } catch {
+    return null;
+  }
+}
+
+export function primeScreenCodecProfile(): Promise<ScreenCodecSupport> {
+  if (supportProbe) return supportProbe;
+  supportProbe = (async () => {
+    const senderCaps = senderVideoCapabilities();
+    const receiverCaps = receiverVideoCapabilities();
+    const [av1HardwareLikely, vp9HardwareLikely] = await Promise.all([
+      probeHardware('av1'),
+      probeHardware('vp9'),
+    ]);
+    lastSupport = {
+      send: supportedCodecSet(senderCaps?.codecs as Codec[] | undefined),
+      receive: supportedCodecSet(receiverCaps?.codecs as Codec[] | undefined),
+      av1HardwareLikely,
+      vp9HardwareLikely,
+    };
+    return lastSupport;
+  })();
+  return supportProbe;
+}
+
+export function getScreenCodecSupportSync(): ScreenCodecSupport {
+  if (lastSupport) return lastSupport;
+  const senderCaps = senderVideoCapabilities();
+  const receiverCaps = receiverVideoCapabilities();
+  return {
+    send: supportedCodecSet(senderCaps?.codecs as Codec[] | undefined),
+    receive: supportedCodecSet(receiverCaps?.codecs as Codec[] | undefined),
+    av1HardwareLikely: null,
+    vp9HardwareLikely: null,
+  };
+}
+
+export function chooseScreenCodec(support = getScreenCodecSupportSync()): ScreenVideoCodec | null {
+  const persisted = loadScreenCodecPreference(screenCodecBucket());
+  if (persisted && support.send.has(persisted.codec)) return persisted.codec;
+  for (const codec of CODEC_PRIORITY) {
+    if (support.send.has(codec)) return codec;
+  }
+  return null;
+}
+
+export function canReceiveScreenCodec(codec: ScreenVideoCodec): boolean {
+  return getScreenCodecSupportSync().receive.has(codec);
+}
+
+export function orderScreenCodecs<T extends Codec>(
+  codecs: readonly T[],
+  preferred: ScreenVideoCodec,
+): T[] {
+  return [...codecs].sort((a, b) => {
+    const ac = normalizeCodec(a);
+    const bc = normalizeCodec(b);
+    const score = (codec: ScreenVideoCodec | null): number => {
+      if (codec === preferred) return 0;
+      const idx = codec ? CODEC_PRIORITY.indexOf(codec) : -1;
+      return idx >= 0 ? idx + 1 : 99;
+    };
+    return score(ac) - score(bc);
+  });
+}
+
+export function applyScreenCodecPreferences(
+  transceiver: RTCRtpTransceiver,
+  caps: RTCRtpCapabilities,
+  codec: ScreenVideoCodec,
+): void {
+  const ordered = orderScreenCodecs(caps.codecs as Codec[], codec).filter((c) => {
+    const normalized = normalizeCodec(c);
+    return codec === 'vp9' ? normalized === 'vp9' : normalized !== null;
+  });
+  if (ordered.length > 0) transceiver.setCodecPreferences(ordered);
 }

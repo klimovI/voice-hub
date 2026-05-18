@@ -120,13 +120,14 @@ type peer struct {
 	//    (nil when not sharing).
 	//  - screenSubs holds this peer's subscriber-side PCs, keyed by the
 	//    PUBLISHER's peer ID (one entry per publisher we're focused on).
-	//  - screenSharing / screenSharingHasAudio mirror the matching PeerInfo
+	//  - screenSharing / screenSharingHasAudio / screenSharingVideoCodec mirror the matching PeerInfo
 	//    fields so peer-info broadcasts stay in sync without re-reading
 	//    screenSession (avoids touching session under r.mu).
-	screenSession         *ScreenShareSession
-	screenSubs            map[string]*screenSubPC
-	screenSharing         bool
-	screenSharingHasAudio bool
+	screenSession           *ScreenShareSession
+	screenSubs              map[string]*screenSubPC
+	screenSharing           bool
+	screenSharingHasAudio   bool
+	screenSharingVideoCodec protocol.ScreenVideoCodec
 }
 
 // peerOutBufLen bounds per-peer outbound queue depth. Sized for the
@@ -296,10 +297,9 @@ func NewRoom(cfg Config) (*Room, error) {
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, err
 	}
-	// AV1 is the only video codec — registered for screen share. Target
-	// browsers (Chrome / Edge / WebView2) all support AV1 encode for WebRTC.
-	// PT 45 mirrors Chrome defaults so publisher SDPs are byte-comparable
-	// to what dev tools show.
+	// Screen-share video codecs. AV1 stays preferred by client-side codec
+	// ordering; VP9 is registered as the compatibility fallback when AV1 is
+	// absent or has proven CPU-bound on this client.
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeAV1,
@@ -307,6 +307,15 @@ func NewRoom(cfg Config) (*Room, error) {
 			SDPFmtpLine: "level-idx=5;profile=0;tier=0",
 		},
 		PayloadType: 45,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, err
+	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:  webrtc.MimeTypeVP9,
+			ClockRate: 90000,
+		},
+		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, err
 	}
@@ -353,11 +362,11 @@ func NewRoom(cfg Config) (*Room, error) {
 	}
 
 	r := &Room{
-		peers:      make(map[string]*peer),
+		peers:                 make(map[string]*peer),
 		tracks:                make(map[string]*webrtc.TrackLocalStaticRTP),
 		publishers:            make(map[string]publisherRef),
 		screenSessionsByToken: make(map[string]*ScreenShareSession),
-		cfg:        cfg,
+		cfg:                   cfg,
 	}
 	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
 		r.pendingBWE = bwe
@@ -502,8 +511,8 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		b, err := json.Marshal(protocol.CandidateEnvelope{
-			PC:                 protocol.PCAudio,
-			ICECandidateInit:   c.ToJSON(),
+			PC:               protocol.PCAudio,
+			ICECandidateInit: c.ToJSON(),
 		})
 		if err != nil {
 			log.Printf("sfu: marshal ICE candidate (%s): %v", p.id, err)
@@ -770,14 +779,15 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 // since this function does not access room state directly.
 func peerInfo(p *peer) protocol.PeerInfo {
 	return protocol.PeerInfo{
-		ID:                    p.id,
-		DisplayName:           p.displayName,
-		ClientID:              p.clientID,
-		SelfMuted:             p.selfMuted,
-		Deafened:              p.deafened,
-		ChatOnly:              p.chatOnly,
-		ScreenSharing:         p.screenSharing,
-		ScreenSharingHasAudio: p.screenSharingHasAudio,
+		ID:                      p.id,
+		DisplayName:             p.displayName,
+		ClientID:                p.clientID,
+		SelfMuted:               p.selfMuted,
+		Deafened:                p.deafened,
+		ChatOnly:                p.chatOnly,
+		ScreenSharing:           p.screenSharing,
+		ScreenSharingHasAudio:   p.screenSharingHasAudio,
+		ScreenSharingVideoCodec: p.screenSharingVideoCodec,
 	}
 }
 
@@ -1293,8 +1303,8 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		return true
 	}
 	sd, err := json.Marshal(protocol.OfferEnvelope{
-		PC:                  protocol.PCAudio,
-		SessionDescription:  offer,
+		PC:                 protocol.PCAudio,
+		SessionDescription: offer,
 	})
 	if err != nil {
 		log.Printf("sfu: syncOnePeer (%s) marshal offer: %v", p.id, err)

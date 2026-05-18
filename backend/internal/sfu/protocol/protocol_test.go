@@ -177,6 +177,7 @@ var fixtureCases = []fixtureCase{
 		payload: protocol.ScreenShareAvailableData{
 			PublisherID:    "11223344aabbccdd",
 			HasSystemAudio: true,
+			VideoCodec:     protocol.ScreenVideoCodecAV1,
 		},
 	},
 	{

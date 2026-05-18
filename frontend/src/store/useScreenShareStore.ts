@@ -12,6 +12,7 @@ import { create } from 'zustand';
 export type ScreenShare = {
   publisherId: string;
   hasSystemAudio: boolean;
+  videoCodec?: 'av1' | 'vp9';
 };
 
 /** Local publisher state — independent from the shares map (which lists what's

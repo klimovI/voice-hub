@@ -1,4 +1,5 @@
 {
   "publisherId": "11223344aabbccdd",
-  "hasSystemAudio": true
+  "hasSystemAudio": true,
+  "videoCodec": "av1"
 }

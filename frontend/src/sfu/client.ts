@@ -11,8 +11,16 @@ import {
   type ScreenShareAvailablePayload,
   type ScreenShareEndedPayload,
   type ScreenShareErrorPayload,
+  type ScreenVideoCodec,
 } from './protocol';
-import { filterAV1 } from '../screenshare/codec';
+import {
+  applyScreenCodecPreferences,
+  canReceiveScreenCodec,
+  chooseScreenCodec,
+  isScreenVideoCodec,
+  primeScreenCodecProfile,
+} from '../screenshare/codec';
+import { startScreenShareHealthMonitor, type ScreenShareHealthMonitor } from '../screenshare/health';
 import {
   SCREEN_FPS,
   SCREEN_HEIGHT,
@@ -172,6 +180,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let screenPubStopped = false;
   let screenPubToken: string | null = null;
   let screenPubVideoSender: RTCRtpSender | null = null;
+  let screenPubHealthMonitor: ScreenShareHealthMonitor | null = null;
   // Tracks the L1T3 / bitrate-caps setParameters call kicked off by the
   // signaling-state watcher in startScreenShare. encode-pause / encode-resume
   // must observe its completion, otherwise getParameters() races and
@@ -186,6 +195,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     reject: (err: Error) => void;
   } | null = null;
   const screenSubs = new Map<string, RTCPeerConnection>();
+  const screenShareCodecs = new Map<string, ScreenVideoCodec>();
+
+  void primeScreenCodecProfile();
 
   function send(event: string, data: unknown): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -318,6 +330,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     for (const id of Array.from(screenSubs.keys())) {
       teardownScreenSub(id);
     }
+    screenShareCodecs.clear();
     // A stale resume continuation belongs to the previous WS — fail it so the
     // caller doesn't get a spurious resolve against the new connection.
     if (resumeContinuation) {
@@ -338,15 +351,27 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     switch (msg.event) {
       case 'welcome':
         myId = msg.data.id;
+        screenShareCodecs.clear();
+        for (const peer of msg.data.peers) {
+          if (peer.screenSharing && isScreenVideoCodec(peer.screenSharingVideoCodec)) {
+            screenShareCodecs.set(peer.id, peer.screenSharingVideoCodec);
+          }
+        }
         on.onWelcome(msg.data);
         break;
       case 'peer-joined':
         on.onPeerJoined(msg.data);
         break;
       case 'peer-left':
+        screenShareCodecs.delete(msg.data.id);
         on.onPeerLeft(msg.data);
         break;
       case 'peer-info':
+        if (msg.data.screenSharing && isScreenVideoCodec(msg.data.screenSharingVideoCodec)) {
+          screenShareCodecs.set(msg.data.id, msg.data.screenSharingVideoCodec);
+        } else if (!msg.data.screenSharing) {
+          screenShareCodecs.delete(msg.data.id);
+        }
         on.onPeerInfo(msg.data);
         break;
       case 'peer-state':
@@ -376,10 +401,14 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         }
         break;
       case 'screen-share-available':
+        if (isScreenVideoCodec(msg.data.videoCodec)) {
+          screenShareCodecs.set(msg.data.publisherId, msg.data.videoCodec);
+        }
         on.onScreenShareAvailable(msg.data);
         break;
       case 'screen-share-ended':
         // Tear down our local subscriber PC for that publisher, if any.
+        screenShareCodecs.delete(msg.data.publisherId);
         teardownScreenSub(msg.data.publisherId);
         on.onScreenShareEnded(msg.data);
         break;
@@ -502,10 +531,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   async function startScreenShare(): Promise<void> {
     if (screenPubPC) throw new Error('sfu-client: already publishing screen share');
 
-    // Fail loud before getDisplayMedia: without AV1 in send caps, SDP would
-    // silently negotiate an inactive video m-line (server registers AV1 only).
     const caps = RTCRtpSender.getCapabilities('video');
-    if (!caps || filterAV1(caps.codecs).length === 0) {
+    const selectedCodec = chooseScreenCodec();
+    if (!caps || !selectedCodec) {
       throw new Error(SCREEN_SHARE_NO_CODEC);
     }
 
@@ -551,12 +579,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     if (audioTrack) newPC.addTrack(audioTrack, stream);
 
     // Codec preferences must be set BEFORE createOffer so the resulting SDP
-    // lists AV1 first. setCodecPreferences on the matching transceiver, not
-    // on the PC.
+    // lists the selected screen codec first. setCodecPreferences belongs to
+    // the matching transceiver, not the PC.
     const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
     if (tx) {
-      const ordered = filterAV1(caps.codecs);
-      if (ordered.length > 0) tx.setCodecPreferences(ordered);
+      applyScreenCodecPreferences(tx, caps, selectedCodec);
     }
 
     newPC.addEventListener('icecandidate', (ev) => {
@@ -606,7 +633,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
             }
             params.encodings[0] = {
               ...params.encodings[0],
-              scalabilityMode: 'L1T3',
+              ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
               maxBitrate: SCREEN_MAX_BITRATE,
               maxFramerate: SCREEN_FPS,
               priority: 'high',
@@ -614,6 +641,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
             screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
               console.warn('[sfu] setParameters on screen video failed', err);
             });
+            screenPubHealthMonitor?.stop();
+            screenPubHealthMonitor = startScreenShareHealthMonitor(videoSender, selectedCodec);
           } catch (err) {
             console.warn('[sfu] setParameters on screen video failed', err);
           }
@@ -638,6 +667,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         screenPubPC = null;
         screenPubStream = null;
         screenPubVideoSender = null;
+        screenPubHealthMonitor?.stop();
+        screenPubHealthMonitor = null;
         screenPubInitialParams = null;
         screenPubStopped = false;
       }
@@ -664,6 +695,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubStream = null;
     screenPubToken = null;
     screenPubVideoSender = null;
+    screenPubHealthMonitor?.stop();
+    screenPubHealthMonitor = null;
     screenPubInitialParams = null;
     on.onScreenShareSelfStopped();
   }
@@ -745,6 +778,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function subscribeScreenShare(publisherId: string): void {
     if (screenSubs.has(publisherId)) return;
+    const codec = screenShareCodecs.get(publisherId);
+    if (codec && !canReceiveScreenCodec(codec)) {
+      on.onScreenShareError({ publisherId, reason: 'internal' });
+      return;
+    }
     const subPC = new RTCPeerConnection({ iceServers });
     screenSubs.set(publisherId, subPC);
 

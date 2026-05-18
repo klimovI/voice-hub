@@ -451,6 +451,7 @@ export function useSessionManager({
               share.upsertShare({
                 publisherId: p.id,
                 hasSystemAudio: p.screenSharingHasAudio ?? false,
+                videoCodec: p.screenSharingVideoCodec,
               });
             }
           }
@@ -467,6 +468,7 @@ export function useSessionManager({
           chatOnly,
           screenSharing,
           screenSharingHasAudio,
+          screenSharingVideoCodec,
         }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
           getStore().upsertParticipant({
@@ -487,6 +489,7 @@ export function useSessionManager({
             useScreenShareStore.getState().upsertShare({
               publisherId: id,
               hasSystemAudio: screenSharingHasAudio ?? false,
+              videoCodec: screenSharingVideoCodec,
             });
           }
         },
@@ -504,6 +507,7 @@ export function useSessionManager({
           clientId,
           screenSharing,
           screenSharingHasAudio,
+          screenSharingVideoCodec,
         }) => {
           const patch: {
             display?: string;
@@ -524,6 +528,7 @@ export function useSessionManager({
             share.upsertShare({
               publisherId: id,
               hasSystemAudio: screenSharingHasAudio ?? false,
+              videoCodec: screenSharingVideoCodec,
             });
           } else {
             share.removeShare(id);
@@ -541,8 +546,8 @@ export function useSessionManager({
             audio.attachRemoteStream(peerId, stream);
           }
         },
-        onScreenShareAvailable: ({ publisherId, hasSystemAudio }) => {
-          useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio });
+        onScreenShareAvailable: ({ publisherId, hasSystemAudio, videoCodec }) => {
+          useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio, videoCodec });
         },
         onScreenShareEnded: ({ publisherId }) => {
           const store = useScreenShareStore.getState();
@@ -856,7 +861,7 @@ export function useSessionManager({
       if (name === 'NotAllowedError' || name === 'AbortError') return;
       if (err instanceof Error && err.message === SCREEN_SHARE_NO_CODEC) {
         getStore().setStatus(
-          'Браузер не поддерживает кодек AV1 для демонстрации экрана.',
+          'Браузер не поддерживает кодеки AV1/VP9 для демонстрации экрана.',
           true,
           true,
         );

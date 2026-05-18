@@ -32,6 +32,16 @@ const (
 	PCScreenSub PCKind = "screen-sub"
 )
 
+// ScreenVideoCodec is the normalized video codec name used by screen-share
+// signaling. SDP still carries exact codec parameters; this value is a small
+// UI/subscription hint for clients before they create a subscriber PC.
+type ScreenVideoCodec string
+
+const (
+	ScreenVideoCodecAV1 ScreenVideoCodec = "av1"
+	ScreenVideoCodecVP9 ScreenVideoCodec = "vp9"
+)
+
 // OfferEnvelope is the data field of every "offer" message. PC discriminates
 // the target PeerConnection. PublisherID is set only when PC=screen-sub and
 // names the publisher whose stream this subscriber PC is being offered.
@@ -56,9 +66,9 @@ type AnswerEnvelope struct {
 // shape ({candidate, sdpMid, sdpMLineIndex, usernameFragment}) is preserved
 // at the top level via embedding.
 type CandidateEnvelope struct {
-	PC                       PCKind `json:"pc"`
-	PublisherID              string `json:"publisherId,omitempty"`
-	webrtc.ICECandidateInit         // {candidate, sdpMid, sdpMLineIndex, usernameFragment}
+	PC                      PCKind `json:"pc"`
+	PublisherID             string `json:"publisherId,omitempty"`
+	webrtc.ICECandidateInit        // {candidate, sdpMid, sdpMLineIndex, usernameFragment}
 }
 
 // Envelope is the top-level JSON wrapper for every signaling message.
@@ -86,14 +96,15 @@ type Envelope struct {
 // track from this peer. Lurkers never receive media, so this flag is their
 // only signal that a share is active.
 type PeerInfo struct {
-	ID                    string `json:"id"`
-	DisplayName           string `json:"displayName,omitempty"`
-	ClientID              string `json:"clientId,omitempty"`
-	SelfMuted             bool   `json:"selfMuted,omitempty"`
-	Deafened              bool   `json:"deafened,omitempty"`
-	ChatOnly              bool   `json:"chatOnly,omitempty"`
-	ScreenSharing         bool   `json:"screenSharing,omitempty"`
-	ScreenSharingHasAudio bool   `json:"screenSharingHasAudio,omitempty"`
+	ID                      string           `json:"id"`
+	DisplayName             string           `json:"displayName,omitempty"`
+	ClientID                string           `json:"clientId,omitempty"`
+	SelfMuted               bool             `json:"selfMuted,omitempty"`
+	Deafened                bool             `json:"deafened,omitempty"`
+	ChatOnly                bool             `json:"chatOnly,omitempty"`
+	ScreenSharing           bool             `json:"screenSharing,omitempty"`
+	ScreenSharingHasAudio   bool             `json:"screenSharingHasAudio,omitempty"`
+	ScreenSharingVideoCodec ScreenVideoCodec `json:"screenSharingVideoCodec,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -386,8 +397,9 @@ type ScreenShareStartedData struct {
 // receipt of -start), so subscribers only render a tile once media is
 // actually wired up and ready to forward.
 type ScreenShareAvailableData struct {
-	PublisherID    string `json:"publisherId"`
-	HasSystemAudio bool   `json:"hasSystemAudio"`
+	PublisherID    string           `json:"publisherId"`
+	HasSystemAudio bool             `json:"hasSystemAudio"`
+	VideoCodec     ScreenVideoCodec `json:"videoCodec,omitempty"`
 }
 
 // ScreenShareEndedData — S→all. Sent on publisher stop, grace expiry, or

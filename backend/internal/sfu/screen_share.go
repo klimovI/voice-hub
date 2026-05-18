@@ -69,6 +69,7 @@ type ScreenShareSession struct {
 	// filter on (temporal-layer dropping + per-sub seqno rewrite). MimeType
 	// empty until SetRemoteDescription populated the publisher's transceivers.
 	videoCodec webrtc.RTPCodecCapability
+	VideoCodec protocol.ScreenVideoCodec
 	AudioTrack *webrtc.TrackLocalStaticRTP // shared across subs; nil when HasSystemAudio=false
 
 	publisherPC *webrtc.PeerConnection
@@ -156,6 +157,21 @@ func newSessionToken() (string, error) {
 		return "", err
 	}
 	return base64.RawStdEncoding.EncodeToString(b[:]), nil
+}
+
+func screenVideoCodecFromCapability(codec webrtc.RTPCodecCapability) protocol.ScreenVideoCodec {
+	switch codec.MimeType {
+	case webrtc.MimeTypeAV1:
+		return protocol.ScreenVideoCodecAV1
+	case webrtc.MimeTypeVP9:
+		return protocol.ScreenVideoCodecVP9
+	default:
+		return ""
+	}
+}
+
+func (s *ScreenShareSession) supportsTemporalFiltering() bool {
+	return s.VideoCodec == protocol.ScreenVideoCodecAV1
 }
 
 // handleScreenShareStart is the entry point for the publisher's first
@@ -278,6 +294,14 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
 		return
 	}
+	session.VideoCodec = screenVideoCodecFromCapability(session.videoCodec)
+	if session.VideoCodec == "" {
+		log.Printf("sfu: screen-share-start (%s) unsupported video codec: %s", p.id, session.videoCodec.MimeType)
+		pc.Close()
+		cancel()
+		r.sendScreenShareError(p, "", protocol.ReasonInternal)
+		return
+	}
 
 	// Publisher PC connection state: cancel session on failure / close.
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -330,10 +354,13 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	p.screenSession = session
 	p.screenSharing = true
 	p.screenSharingHasAudio = data.HasSystemAudio
+	p.screenSharingVideoCodec = session.VideoCodec
 	r.screenSessionsByToken[token] = session
 	r.mu.Unlock()
 
-	go r.autoDowngradeLoop(session)
+	if session.supportsTemporalFiltering() {
+		go r.autoDowngradeLoop(session)
+	}
 
 	// Order matters: -started carries the resume token, the answer carries
 	// the SDP. Both go through the same FIFO writeLoop, so writing -started
@@ -386,6 +413,7 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 	availableData, _ := json.Marshal(protocol.ScreenShareAvailableData{
 		PublisherID:    session.PublisherID,
 		HasSystemAudio: session.HasSystemAudio,
+		VideoCodec:     session.VideoCodec,
 	})
 	availableEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-available", Data: availableData})
 
@@ -634,14 +662,18 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 
-	// Clamp the subscriber's hinted temporal layer to [0, 2] — L1T3 caps at 2.
-	// Higher hints silently downgrade so a misbehaving client can't request
-	// out-of-range layers (which the chain tracker would then never satisfy).
+	// Clamp the subscriber's hinted temporal layer to [0, 2] — AV1 L1T3 caps
+	// at 2. VP9 fallback is treated as single-layer today: we keep target at
+	// full quality and skip auto-downgrade, so one slow viewer cannot drive
+	// meaningless layer changes or keyframe churn for everyone else.
 	target := int32(data.PreferredTemporalLayer)
 	if target < 0 {
 		target = 0
 	}
 	if target > 2 {
+		target = 2
+	}
+	if !session.supportsTemporalFiltering() {
 		target = 2
 	}
 	subEntry := &screenSubscriber{
@@ -854,6 +886,9 @@ func (r *Room) autoDowngradeLoop(session *ScreenShareSession) {
 }
 
 func (r *Room) runAutoDowngradeTick(session *ScreenShareSession, now time.Time) {
+	if !session.supportsTemporalFiltering() {
+		return
+	}
 	session.mu.RLock()
 	subs := make([]*screenSubscriber, 0, len(session.subscribers))
 	for _, s := range session.subscribers {
@@ -1035,6 +1070,7 @@ func (r *Room) endScreenShareSession(session *ScreenShareSession, reason string)
 		pubPeer.screenSession = nil
 		pubPeer.screenSharing = false
 		pubPeer.screenSharingHasAudio = false
+		pubPeer.screenSharingVideoCodec = ""
 	}
 	if pubPeer != nil {
 		// Snapshot peerInfo while still under r.mu — fields it reads
@@ -1192,6 +1228,7 @@ func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeD
 	p.screenSession = session
 	p.screenSharing = true
 	p.screenSharingHasAudio = session.HasSystemAudio
+	p.screenSharingVideoCodec = session.VideoCodec
 	others := make([]*peer, 0, len(r.peers))
 	for _, op := range r.peers {
 		if op.id != p.id {
@@ -1224,6 +1261,7 @@ func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeD
 	availData, _ := json.Marshal(protocol.ScreenShareAvailableData{
 		PublisherID:    p.id,
 		HasSystemAudio: session.HasSystemAudio,
+		VideoCodec:     session.VideoCodec,
 	})
 	availEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-available", Data: availData})
 
