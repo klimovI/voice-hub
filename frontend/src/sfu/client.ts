@@ -79,6 +79,32 @@ export type SFUClient = {
   unsubscribeScreenShare(publisherId: string): void;
   /** True when this client is currently publishing a share. */
   isPublishingScreenShare(): boolean;
+  /**
+   * Hint the SFU which temporal layer this subscriber wants. Higher layer =
+   * higher frame rate (and slightly higher bitrate). L1T3 caps at 2.
+   *
+   * The server treats it as a cap, not a guarantee: subscriber-side BWE may
+   * still drive the effective rate down. No-op if not subscribed to this
+   * publisher.
+   */
+  selectScreenShareLayer(publisherId: string, temporalLayer: 0 | 1 | 2): void;
+  /**
+   * Opaque resume token issued by the SFU on screen-share-start (or after a
+   * successful resume). Persists for the lifetime of the SFU-side session.
+   * Callers should snapshot it before disconnect and feed it into
+   * resumeScreenShare after reconnect.
+   */
+  getScreenShareToken(): string | null;
+  /**
+   * Reattach the still-live publisher PC to a freshly reconnected WebSocket.
+   * Sends screen-share-resume {token}; on success the server replies with
+   * screen-share-started and the client issues an ICE-restart offer to
+   * re-establish transport against the new WS-pinned session.
+   *
+   * Rejects if the publisher PC isn't alive locally (you have nothing to
+   * resume), or if the server returns invalid-token.
+   */
+  resumeScreenShare(token: string): Promise<void>;
 };
 
 function noop(): void {
@@ -117,6 +143,15 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let screenPubPC: RTCPeerConnection | null = null;
   let screenPubStream: MediaStream | null = null;
   let screenPubStopped = false;
+  let screenPubToken: string | null = null;
+  // resumeContinuation is set while resumeScreenShare is in flight: it resolves
+  // the awaiting promise on the next screen-share-started (success) or rejects
+  // on screen-share-error. Plain inline state — only one resume can be in
+  // flight at a time, just like one publisher PC at a time.
+  let resumeContinuation: {
+    resolve: () => void;
+    reject: (err: Error) => void;
+  } | null = null;
   const screenSubs = new Map<string, RTCPeerConnection>();
 
   function send(event: string, data: unknown): void {
@@ -240,9 +275,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         await handleCandidate(msg.data);
         break;
       case 'screen-share-started':
-        // sessionToken is delivered here, but Stage 1 resume is server-side
-        // stub (always rejects). Stash → Stage 2. For now: no-op.
-        void msg.data.sessionToken;
+        screenPubToken = msg.data.sessionToken;
+        if (resumeContinuation) {
+          const cont = resumeContinuation;
+          resumeContinuation = null;
+          cont.resolve();
+        }
         break;
       case 'screen-share-available':
         on.onScreenShareAvailable(msg.data);
@@ -256,6 +294,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         // Best-effort cleanup of the relevant local state. The handler may
         // also revert UI state.
         if (msg.data.publisherId) teardownScreenSub(msg.data.publisherId);
+        if (resumeContinuation) {
+          const cont = resumeContinuation;
+          resumeContinuation = null;
+          cont.reject(new Error(`screen-share-error: ${msg.data.reason}`));
+        }
         on.onScreenShareError(msg.data);
         break;
       case 'screen-share-encode-pause':
@@ -506,7 +549,63 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     }
     screenPubPC = null;
     screenPubStream = null;
+    screenPubToken = null;
     on.onScreenShareSelfStopped();
+  }
+
+  function getScreenShareToken(): string | null {
+    return screenPubToken;
+  }
+
+  async function resumeScreenShare(token: string): Promise<void> {
+    if (!screenPubPC) {
+      throw new Error('sfu-client: no live publisher PC to resume');
+    }
+    if (resumeContinuation) {
+      throw new Error('sfu-client: resume already in flight');
+    }
+
+    const settled = new Promise<void>((resolve, reject) => {
+      resumeContinuation = { resolve, reject };
+    });
+    send('screen-share-resume', { sessionToken: token });
+
+    // Server-side: validates token → re-broadcasts -ended/-available → sends
+    // screen-share-started back to us. On success the message handler resolves
+    // settled; on screen-share-error it rejects.
+    const timeoutId = setTimeout(() => {
+      if (resumeContinuation) {
+        const cont = resumeContinuation;
+        resumeContinuation = null;
+        cont.reject(new Error('sfu-client: screen-share-resume timeout'));
+      }
+    }, 10000);
+
+    try {
+      await settled;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    // ICE restart: the publisher PC is still alive, but the WS just
+    // reconnected — likely the network reattached and the existing ICE
+    // candidates are stale. createOffer with iceRestart asks the browser to
+    // gather fresh candidates and renegotiate transport.
+    const pcRef = screenPubPC;
+    if (!pcRef) {
+      throw new Error('sfu-client: publisher PC vanished mid-resume');
+    }
+    const offer = await pcRef.createOffer({ iceRestart: true });
+    await pcRef.setLocalDescription(offer);
+    send('offer', { pc: 'screen-pub', type: offer.type, sdp: offer.sdp ?? '' });
+  }
+
+  function selectScreenShareLayer(
+    publisherId: string,
+    temporalLayer: 0 | 1 | 2,
+  ): void {
+    if (!screenSubs.has(publisherId)) return;
+    send('screen-share-layer-select', { publisherId, temporalLayer });
   }
 
   function isPublishingScreenShare(): boolean {
@@ -641,6 +740,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     subscribeScreenShare,
     unsubscribeScreenShare,
     isPublishingScreenShare,
+    selectScreenShareLayer,
+    getScreenShareToken,
+    resumeScreenShare,
   };
 }
 

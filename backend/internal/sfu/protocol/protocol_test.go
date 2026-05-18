@@ -144,6 +144,15 @@ var fixtureCases = []fixtureCase{
 			SessionDescription: webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: "v=0\r\n"},
 		},
 	},
+	// offer-screen-pub is the C→S offer for screen-share ICE restart on
+	// resume. New in Stage 2 — clients never sent "offer" before.
+	{
+		name: "offer-screen-pub",
+		payload: protocol.OfferEnvelope{
+			PC:                 protocol.PCScreenPub,
+			SessionDescription: webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "v=0\r\n"},
+		},
+	},
 	{
 		name: "candidate-screen-pub",
 		payload: protocol.CandidateEnvelope{

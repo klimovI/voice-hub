@@ -262,6 +262,13 @@ type Room struct {
 	// pending at a time; further exhaustions while pending are no-ops
 	// (the in-flight retry already covers the latest state).
 	resyncPending atomic.Bool
+
+	// screenSessionsByToken indexes every live ScreenShareSession by its
+	// server-issued resume token. Lookup happens on screen-share-resume
+	// against a freshly reconnected publisher, whose peer ID changed due to
+	// clientId eviction. Token is opaque-and-secret, so it doubles as the
+	// auth check that this peer owns the session. Guarded by r.mu.
+	screenSessionsByToken map[string]*ScreenShareSession
 }
 
 func NewRoom(cfg Config) (*Room, error) {
@@ -358,8 +365,9 @@ func NewRoom(cfg Config) (*Room, error) {
 
 	r := &Room{
 		peers:      make(map[string]*peer),
-		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
-		publishers: make(map[string]publisherRef),
+		tracks:                make(map[string]*webrtc.TrackLocalStaticRTP),
+		publishers:            make(map[string]publisherRef),
+		screenSessionsByToken: make(map[string]*ScreenShareSession),
 		cfg:        cfg,
 	}
 	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
@@ -730,6 +738,16 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		p.lastRenegotiateAt = time.Now()
 		r.mu.Unlock()
 		r.signalPeerConnections()
+	case "offer":
+		// Currently only used for screen-share ICE restart after resume —
+		// the publisher's PC stayed alive across WS reconnect, and they
+		// renegotiate transport against the rebound session. Audio uses the
+		// SFU-as-offerer path; clients never send "offer" for audio.
+		var env protocol.OfferEnvelope
+		if err := json.Unmarshal(msg.Data, &env); err != nil {
+			return
+		}
+		r.handleClientOffer(p, env)
 	case "screen-share-start":
 		var d protocol.ScreenShareStartData
 		if err := json.Unmarshal(msg.Data, &d); err != nil {

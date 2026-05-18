@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"log"
+	mathrand "math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/rtcp"
@@ -18,6 +20,11 @@ import (
 	"voice-hub/backend/internal/sfu/dd"
 	"voice-hub/backend/internal/sfu/protocol"
 )
+
+// seqSeed returns a random uint16-range value to seed a per-subscriber RTP
+// sequence number. Non-cryptographic: only collision-avoidance matters; the
+// stream is authenticated separately via SRTP.
+func seqSeed() uint32 { return mathrand.Uint32() & 0xffff }
 
 // screenShareGracePeriod is the window during which a publisher's session
 // survives a WS disconnect. Stage 1 always tears the session down on grace
@@ -40,16 +47,26 @@ type ScreenShareSession struct {
 	SessionToken   string
 	HasSystemAudio bool
 
-	VideoTrack *webrtc.TrackLocalStaticRTP
-	AudioTrack *webrtc.TrackLocalStaticRTP // nil when HasSystemAudio=false
+	// videoCodec is the negotiated video codec capability captured at start.
+	// Per-subscriber video tracks are minted from this template at subscribe
+	// time so each subscriber gets an independent fan-out lane the SFU can
+	// filter on (temporal-layer dropping + per-sub seqno rewrite). MimeType
+	// empty until SetRemoteDescription populated the publisher's transceivers.
+	videoCodec webrtc.RTPCodecCapability
+	AudioTrack *webrtc.TrackLocalStaticRTP // shared across subs; nil when HasSystemAudio=false
 
 	publisherPC *webrtc.PeerConnection
 	room        *Room
 
-	// parser produces DD descriptors per packet for Stage 2 layer dropping.
-	// Stage 1 uses the no-op parser; the call still happens so the hot path
-	// shape doesn't change when we swap implementations.
+	// parser produces DD descriptors per packet. Owned by the session, read
+	// serially from forwardVideo — not safe for concurrent use.
 	parser dd.Parser
+
+	// ddExtID is the negotiated RTP header extension ID for the DD URI. Set
+	// once per session inside the video OnTrack callback from the receiver's
+	// HeaderExtensions list; zero until the first OnTrack fires. Read by
+	// forwardVideo to pull DD bytes off each inbound packet.
+	ddExtID atomic.Uint32
 
 	mu          sync.RWMutex
 	subscribers map[string]*screenSubscriber // key = subscriber peer ID
@@ -64,11 +81,46 @@ type ScreenShareSession struct {
 	closed bool
 }
 
+// screenSubscriber holds the per-publisher subscriber state on the SFU side.
+//
+// videoTrack is per-subscriber (not shared from session) so the forward loop
+// can drop temporal layers for one viewer without starving others.
+// seqCounter is a monotonically incrementing RTP seqno generator: every
+// packet handed to videoTrack.WriteRTP has its SequenceNumber rewritten so
+// the subscriber never sees gaps from dropped frames. NACK responder caches
+// by SSRC+seq, so contiguous seqs keep the responder useful for genuine
+// packet loss on the wire.
+//
+// targetTemp is the highest temporal layer this subscriber accepts (0..2 for
+// L1T3). Atomic so layer-select handlers can update it without taking the
+// session-wide lock the forwarder holds while iterating subscribers.
+//
+// chain tracks DD chain integrity for the chosen target. It's owned by the
+// forward goroutine — no concurrent access from layer-select. SetChain on
+// targetTemp updates is dispatched via a flag the forwarder checks.
 type screenSubscriber struct {
 	peerID      string
 	pc          *webrtc.PeerConnection
+	videoTrack  *webrtc.TrackLocalStaticRTP
 	videoSender *webrtc.RTPSender
 	audioSender *webrtc.RTPSender // nil when session has no audio
+
+	targetTemp atomic.Int32
+	chainGen   atomic.Int32 // bumped by SetTargetTemp; forwarder reads to detect re-arm
+	lastGen    int32        // forwarder-local mirror of chainGen
+	seqCounter atomic.Uint32
+	chain      *ChainTracker
+}
+
+// SetTargetTemp updates the subscriber's allowed temporal layer and signals
+// the forwarder to re-arm the chain tracker on the next packet. Called from
+// the layer-select handler on the WS goroutine, so we cannot mutate the chain
+// tracker here directly (it's not concurrency-safe). Bumping the generation
+// counter is the rendezvous: forwarder sees the change and calls
+// chain.SetChain(layer) before evaluating the next packet.
+func (s *screenSubscriber) SetTargetTemp(layer int32) {
+	s.targetTemp.Store(layer)
+	s.chainGen.Add(1)
 }
 
 // newSessionToken returns a base64 (no padding) string of 32 random bytes.
@@ -157,9 +209,11 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		return
 	}
 
-	// Pre-create fan-out tracks from the negotiated codecs so subscribers can
-	// attach before the publisher's first RTP packet lands. Read codecs from
-	// the transceivers populated by SetRemoteDescription.
+	// Capture negotiated codecs. Video: snapshot capability only — the actual
+	// fan-out track is per-subscriber so the SFU can drop temporal layers
+	// independently for each viewer and rewrite RTP sequence numbers to
+	// avoid NACK storms over deliberate gaps. Audio: shared track minted now,
+	// added directly to every subscriber PC (no layer dropping for audio).
 	for _, tr := range pc.GetTransceivers() {
 		recv := tr.Receiver()
 		if recv == nil {
@@ -176,15 +230,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		codec := params.Codecs[0].RTPCodecCapability
 		switch track.Kind() {
 		case webrtc.RTPCodecTypeVideo:
-			vt, err := webrtc.NewTrackLocalStaticRTP(codec, "screen-video", p.id)
-			if err != nil {
-				log.Printf("sfu: screen-share-start (%s) new video track: %v", p.id, err)
-				pc.Close()
-				cancel()
-				r.sendScreenShareError(p, "", protocol.ReasonInternal)
-				return
-			}
-			session.VideoTrack = vt
+			session.videoCodec = codec
 		case webrtc.RTPCodecTypeAudio:
 			if !data.HasSystemAudio {
 				continue
@@ -200,7 +246,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 			session.AudioTrack = at
 		}
 	}
-	if session.VideoTrack == nil {
+	if session.videoCodec.MimeType == "" {
 		log.Printf("sfu: screen-share-start (%s) no video transceiver in offer", p.id)
 		pc.Close()
 		cancel()
@@ -232,9 +278,22 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		_ = p.write(protocol.Envelope{Event: "candidate", Data: b})
 	})
 
-	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+	pc.OnTrack(func(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		switch remote.Kind() {
 		case webrtc.RTPCodecTypeVideo:
+			// DD ext ID is per-PC: the publisher's MediaEngine has agreed an
+			// ID with us during SDP negotiation. The receiver's GetParameters
+			// reflects that negotiated state, so we pull the ID once here
+			// and store it for the lifetime of the session. Subscriber PCs
+			// negotiate their own IDs independently — we strip the publisher
+			// extension on forward and let pion re-insert the right ID on
+			// each subscriber side.
+			for _, ext := range receiver.GetParameters().HeaderExtensions {
+				if ext.URI == dd.RTPExtensionURI {
+					session.ddExtID.Store(uint32(ext.ID))
+					break
+				}
+			}
 			r.firstScreenVideoReady(p, session)
 			session.forwardVideo(remote)
 		case webrtc.RTPCodecTypeAudio:
@@ -246,6 +305,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	p.screenSession = session
 	p.screenSharing = true
 	p.screenSharingHasAudio = data.HasSystemAudio
+	r.screenSessionsByToken[token] = session
 	r.mu.Unlock()
 
 	// Order matters: -started carries the resume token, the answer carries
@@ -313,12 +373,19 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 }
 
 // forwardVideo reads RTP from the publisher's remote video track and writes
-// to the session VideoTrack. Stage 1: forward every packet; the no-op DD
-// parser produces nil descriptors and chain/layer logic stays off.
+// to every active subscriber's per-sub video track. Layer-dropping and chain
+// integrity gate each write per subscriber. A parse error is non-fatal — the
+// loop falls back to permissive forwarding so video doesn't blackhole if a
+// publisher sends bytes the parser cannot make sense of (a re-bootstrap
+// frame will recover the parser later).
 //
 // ReadRTP is blocking and respects ctx via remote close: when the publisher
 // PC closes (graceful or failure), Read returns io.EOF and the loop exits.
 // We don't select on session.ctx — pion does not surface ctx through Read.
+//
+// The subscriber slice is snapshotted under s.mu.RLock to keep pion-internal
+// locks in WriteRTP from crossing s.mu, which would deadlock on teardown
+// because OnConnectionStateChange acquires s.mu while holding pc internals.
 func (s *ScreenShareSession) forwardVideo(remote *webrtc.TrackRemote) {
 	for {
 		pkt, _, err := remote.ReadRTP()
@@ -328,20 +395,62 @@ func (s *ScreenShareSession) forwardVideo(remote *webrtc.TrackRemote) {
 			}
 			return
 		}
-		_, _ = s.parser.Parse(extDD(pkt))
+		desc, parseErr := s.parser.Parse(s.extDD(pkt))
+		if parseErr != nil {
+			// Malformed DD bytes — keep forwarding so video doesn't blackhole,
+			// but log so we notice if real publishers start to misbehave. A
+			// keyframe-bearing packet that re-attaches structure will re-arm
+			// the parser, so noise here is bounded.
+			log.Printf("sfu: screen forwardVideo (%s) DD parse: %v", s.PublisherID, parseErr)
+			desc = nil
+		}
 
-		out := *pkt
-		// Strip RTP extensions: pion negotiates extension IDs on a per-PC
-		// basis. Subscriber PCs will have different IDs (or none), so leaving
-		// the publisher's extension bytes would corrupt the subscriber-side
-		// parse. The DD parse above already extracted what we need.
-		out.Extension = false
-		out.Extensions = nil
-		if err := s.VideoTrack.WriteRTP(&out); err != nil {
-			if !errors.Is(err, io.ErrClosedPipe) {
-				log.Printf("sfu: screen forwardVideo (%s) write: %v", s.PublisherID, err)
-			}
+		s.mu.RLock()
+		subs := make([]*screenSubscriber, 0, len(s.subscribers))
+		for _, sub := range s.subscribers {
+			subs = append(subs, sub)
+		}
+		s.mu.RUnlock()
+
+		for _, sub := range subs {
+			sub.maybeForward(pkt, desc, s.PublisherID)
+		}
+	}
+}
+
+// maybeForward gates one inbound RTP packet against the subscriber's target
+// temporal layer and chain integrity. Forwarded packets carry rewritten
+// SequenceNumber so the subscriber never sees gaps from deliberate drops —
+// real wire loss still produces gaps, which is what NACK is for.
+func (sub *screenSubscriber) maybeForward(pkt *rtp.Packet, desc *dd.Descriptor, pubID string) {
+	if g := sub.chainGen.Load(); g != sub.lastGen {
+		sub.lastGen = g
+		sub.chain.SetChain(int(sub.targetTemp.Load()))
+	}
+
+	if desc != nil {
+		if int32(desc.TemporalLayer) > sub.targetTemp.Load() {
 			return
+		}
+		if !sub.chain.Allow(desc) {
+			return
+		}
+	}
+
+	out := *pkt
+	// Strip RTP extensions: the publisher negotiated extension IDs that
+	// subscribers did not. Leaving the publisher's extension block would
+	// cause subscribers to misparse. DD info we needed was already extracted
+	// upstream into desc.
+	out.Extension = false
+	out.Extensions = nil
+	// Rewrite SequenceNumber per-subscriber so dropped packets don't surface
+	// as gaps — gaps would trigger NACK storms that the responder cache can
+	// never satisfy (we never had the dropped packets to retransmit).
+	out.SequenceNumber = uint16(sub.seqCounter.Add(1))
+	if err := sub.videoTrack.WriteRTP(&out); err != nil {
+		if !errors.Is(err, io.ErrClosedPipe) {
+			log.Printf("sfu: screen forwardVideo (%s→%s) write: %v", pubID, sub.peerID, err)
 		}
 	}
 }
@@ -367,14 +476,21 @@ func (s *ScreenShareSession) forwardAudio(remote *webrtc.TrackRemote) {
 	}
 }
 
-// extDD looks up the Dependency Descriptor RTP extension by its negotiated
-// ID. Stage 2 will populate the ID from the receiver's HeaderExtensions
-// post-OnTrack and walk pkt.GetExtensionIDs() / pkt.GetExtension(id), since
-// pion's rtp.Extension keeps its id/payload unexported.
+// extDD pulls the DD extension bytes off pkt using the negotiated ID cached
+// on the session. Returns nil when no ID has been observed yet (i.e. before
+// OnTrack reads it from receiver.GetParameters().HeaderExtensions) or when
+// the packet doesn't carry that extension.
 //
-// Stage 1: the no-op parser ignores its input, so returning nil here keeps
-// the hot path branch-free without forcing a parameter-lookup-per-packet.
-func extDD(_ *rtp.Packet) []byte { return nil }
+// pion's rtp.Packet.GetExtension handles both one-byte (RFC5285) and two-byte
+// header extension forms, so callers do not need to branch on form. The DD
+// payload is often >16 bytes (two-byte form required) for bootstrap packets.
+func (s *ScreenShareSession) extDD(pkt *rtp.Packet) []byte {
+	id := uint8(s.ddExtID.Load())
+	if id == 0 {
+		return nil
+	}
+	return pkt.GetExtension(id)
+}
 
 // addSubscriber creates a new subscriber PC for the given peer, attaches the
 // session's fan-out tracks, generates an offer, and writes it back. The
@@ -416,7 +532,17 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 
-	videoSender, err := pc.AddTrack(session.VideoTrack)
+	// One TrackLocalStaticRTP per subscriber so layer-dropping for this viewer
+	// does not affect the others. Codec capability comes from the publisher's
+	// negotiated transceiver, captured at handleScreenShareStart time.
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(session.videoCodec, "screen-video", session.PublisherID)
+	if err != nil {
+		pc.Close()
+		log.Printf("sfu: screen subscribe (%s→%s) new video track: %v", sub.id, data.PublisherID, err)
+		r.sendScreenShareError(sub, data.PublisherID, protocol.ReasonInternal)
+		return
+	}
+	videoSender, err := pc.AddTrack(videoTrack)
 	if err != nil {
 		pc.Close()
 		log.Printf("sfu: screen subscribe (%s→%s) add video: %v", sub.id, data.PublisherID, err)
@@ -471,12 +597,29 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 
+	// Clamp the subscriber's hinted temporal layer to [0, 2] — L1T3 caps at 2.
+	// Higher hints silently downgrade so a misbehaving client can't request
+	// out-of-range layers (which the chain tracker would then never satisfy).
+	target := int32(data.PreferredTemporalLayer)
+	if target < 0 {
+		target = 0
+	}
+	if target > 2 {
+		target = 2
+	}
 	subEntry := &screenSubscriber{
 		peerID:      sub.id,
 		pc:          pc,
+		videoTrack:  videoTrack,
 		videoSender: videoSender,
 		audioSender: audioSender,
+		chain:       NewChainTracker(int(target)),
 	}
+	subEntry.targetTemp.Store(target)
+	// Seed the per-sub seqno from a random uint16 so subscribers reconnecting
+	// to a fresh session don't see a suspicious 0-restart that some receivers
+	// misclassify as a stream restart (and reset jitter buffer state).
+	subEntry.seqCounter.Store(uint32(uint16(seqSeed())))
 	session.mu.Lock()
 	if session.closed {
 		session.mu.Unlock()
@@ -655,6 +798,7 @@ func (r *Room) endScreenShareSession(session *ScreenShareSession, reason string)
 	}
 
 	r.mu.Lock()
+	delete(r.screenSessionsByToken, session.SessionToken)
 	pubPeer := r.peers[session.PublisherID]
 	var info protocol.PeerInfo
 	var havePubInfo bool
@@ -734,31 +878,255 @@ func (r *Room) startScreenShareGrace(session *ScreenShareSession) {
 	}()
 }
 
-// handleScreenShareResume — Stage 1 stub.
+// handleScreenShareResume rebinds an orphaned screen-share session (publisher
+// WS died, grace timer still armed) to the freshly reconnected publisher
+// peer p. Token is the auth check: it was issued at the original start and
+// only the legitimate publisher has it.
 //
-// Real resume would rebind a session to a new peer (the reconnected publisher
-// gets a new peer.id from newPeerID() and goes through clientId-eviction).
-// That rebinding requires:
-//   - sessions indexed by token in a Room-level map (not on peer)
-//   - re-broadcasting peer-info / screen-share-available under the new ID
-//   - tearing down stale subscriber PCs that point at the old publisher ID
+// Sequence:
+//  1. Lookup session by token (Room-level map). Missing → invalid-token.
+//     Already attached to a live peer → invalid-token (defense-in-depth
+//     against a replay attempt while the original publisher is still up).
+//  2. Cancel the grace timer.
+//  3. Drop all current subscribers server-side: their PCs were pointing at
+//     the old publisher peer ID, and the subscribers will need to attach
+//     fresh under the new ID anyway. Closing here avoids leaking PCs and
+//     ensures the SFU's view matches what the clients will rebuild.
+//  4. Migrate the session onto the new peer (id, screenSession pointer,
+//     screenSharing flags).
+//  5. Re-broadcast peer-info (new publisher's identity carries the share
+//     flags), screen-share-ended (old id, so subscribers tear their local
+//     UI down), screen-share-available (new id, so subscribers can re-
+//     subscribe by clicking the new tile).
+//  6. Send screen-share-started with the SAME token so the client doesn't
+//     need to re-roll its state. The token stays valid for the lifetime
+//     of the session.
 //
-// Out of Stage 1 scope (tracked as a follow-up task). For Stage 1 we always
-// reject the token so the client re-runs screen-share-start fresh after
-// reconnect. Subscribers see -ended (broadcast on grace expiry) then a new
-// -available a moment later.
+// After this, the publisher is expected to send an ICE-restart "offer" event
+// (pc=screen-pub) so the existing PC's transport reattaches to the new WS's
+// IP/port. The offer router in sfu.go handles that path against
+// session.publisherPC.SetRemoteDescription.
 func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeData) {
-	_ = data
-	log.Printf("sfu: screen-share-resume (%s) stage-1 stub — rejecting", p.id)
-	r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
+	// Race control: two concurrent resumes for the same token must not both
+	// succeed. We make the session.PublisherID claim atomic with the
+	// in-use check by mutating it under r.mu — the second goroutine then
+	// observes r.peers[session.PublisherID] == p (the first claimer) and
+	// rejects. session.mu is acquired nested for the grace cancel + subs
+	// swap; r.mu is the outer lock so this nesting matches the rest of the
+	// file (peer state lives under r.mu, session state under session.mu).
+	r.mu.Lock()
+	session, ok := r.screenSessionsByToken[data.SessionToken]
+	if !ok {
+		r.mu.Unlock()
+		log.Printf("sfu: screen-share-resume (%s): unknown token", p.id)
+		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
+		return
+	}
+	// Refuse if some other live peer claims this session — a second client
+	// presenting the same token while the original is still up, OR a second
+	// concurrent resume that lost the race to the first one.
+	if existing, ok := r.peers[session.PublisherID]; ok && existing != p {
+		r.mu.Unlock()
+		log.Printf("sfu: screen-share-resume (%s): token in use by %s", p.id, session.PublisherID)
+		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
+		return
+	}
+	if p.screenSession != nil && p.screenSession != session {
+		r.mu.Unlock()
+		log.Printf("sfu: screen-share-resume (%s): peer already owns another session", p.id)
+		r.sendScreenShareError(p, "", protocol.ReasonAlreadyPublishing)
+		return
+	}
+
+	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		r.mu.Unlock()
+		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
+		return
+	}
+	oldPubID := session.PublisherID
+	// Claim BEFORE releasing r.mu. Any concurrent resume that reaches the
+	// r.peers[session.PublisherID] check above will now see p in that slot
+	// and reject. Also flip the peer-side flags here so the broadcast block
+	// below reads a fully consistent peer state.
+	session.PublisherID = p.id
+	graceCancel := session.graceCancel
+	session.graceCancel = nil
+	staleSubs := make([]*screenSubscriber, 0, len(session.subscribers))
+	for _, s := range session.subscribers {
+		staleSubs = append(staleSubs, s)
+	}
+	session.subscribers = make(map[string]*screenSubscriber)
+	session.mu.Unlock()
+
+	p.screenSession = session
+	p.screenSharing = true
+	p.screenSharingHasAudio = session.HasSystemAudio
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != p.id {
+			others = append(others, op)
+		}
+	}
+	info := peerInfo(p)
+	r.mu.Unlock()
+
+	if graceCancel != nil {
+		graceCancel()
+	}
+
+	// Tear down stale subscriber PCs. Each sub's screenSubs map entry was
+	// keyed by oldPubID; clean both ends so a re-subscribe under the new ID
+	// builds fresh state.
+	for _, s := range staleSubs {
+		_ = s.pc.Close()
+		r.mu.Lock()
+		if subPeer, ok := r.peers[s.peerID]; ok && subPeer.screenSubs != nil {
+			delete(subPeer.screenSubs, oldPubID)
+		}
+		r.mu.Unlock()
+	}
+
+	infoData, _ := json.Marshal(info)
+	infoEnv, _ := json.Marshal(protocol.Envelope{Event: "peer-info", Data: infoData})
+	endedData, _ := json.Marshal(protocol.ScreenShareEndedData{PublisherID: oldPubID})
+	endedEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-ended", Data: endedData})
+	availData, _ := json.Marshal(protocol.ScreenShareAvailableData{
+		PublisherID:    p.id,
+		HasSystemAudio: session.HasSystemAudio,
+	})
+	availEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-available", Data: availData})
+
+	for _, op := range others {
+		_ = op.writeRaw(infoEnv)
+		_ = op.writeRaw(endedEnv)
+		_ = op.writeRaw(availEnv)
+	}
+
+	if r.cfg.OnPeerUpdated != nil {
+		r.cfg.OnPeerUpdated(info)
+	}
+
+	startedData, _ := json.Marshal(protocol.ScreenShareStartedData{SessionToken: session.SessionToken})
+	_ = p.write(protocol.Envelope{Event: "screen-share-started", Data: startedData})
+
+	log.Printf("sfu: screen-share-resume %s→%s subs-teardown=%d", oldPubID, p.id, len(staleSubs))
 }
 
-// handleScreenShareLayerSelect is a no-op in Stage 1 (no layer dropping).
-// The client may send it; we accept-and-ignore so older publishers don't
-// produce error log spam. Real handling lands in Stage 2.
+// handleClientOffer routes a client-initiated offer (currently only used for
+// screen-share publisher ICE restart on resume) to the right PC. The offer
+// envelope carries the discriminator field "pc"; for screen-pub we feed it
+// into the publisher PC's SetRemoteDescription / CreateAnswer cycle and reply
+// with an answer carrying pc=screen-pub.
+//
+// Other discriminators are protocol errors: audio uses SFU-as-offerer, and
+// screen-sub never sees a client offer (clients always answer those).
+func (r *Room) handleClientOffer(p *peer, env protocol.OfferEnvelope) {
+	if env.PC != protocol.PCScreenPub {
+		log.Printf("sfu: client offer with unsupported pc=%q from %s", env.PC, p.id)
+		return
+	}
+	r.mu.Lock()
+	session := p.screenSession
+	r.mu.Unlock()
+	if session == nil {
+		log.Printf("sfu: client offer screen-pub from %s with no session", p.id)
+		r.sendScreenShareError(p, "", protocol.ReasonNotFound)
+		return
+	}
+
+	if err := session.publisherPC.SetRemoteDescription(env.SessionDescription); err != nil {
+		log.Printf("sfu: client offer screen-pub (%s) set remote: %v", p.id, err)
+		r.sendScreenShareError(p, "", protocol.ReasonInternal)
+		return
+	}
+	answer, err := session.publisherPC.CreateAnswer(nil)
+	if err != nil {
+		log.Printf("sfu: client offer screen-pub (%s) create answer: %v", p.id, err)
+		r.sendScreenShareError(p, "", protocol.ReasonInternal)
+		return
+	}
+	if err := session.publisherPC.SetLocalDescription(answer); err != nil {
+		log.Printf("sfu: client offer screen-pub (%s) set local: %v", p.id, err)
+		r.sendScreenShareError(p, "", protocol.ReasonInternal)
+		return
+	}
+	answerEnv := protocol.AnswerEnvelope{
+		PC:                 protocol.PCScreenPub,
+		SessionDescription: answer,
+	}
+	data, err := json.Marshal(answerEnv)
+	if err != nil {
+		return
+	}
+	_ = p.write(protocol.Envelope{Event: "answer", Data: data})
+}
+
+// handleScreenShareLayerSelect updates a subscriber's temporal-layer cap. The
+// chain tracker is re-armed on the forwarder side via chainGen; until the
+// publisher sends a fresh structure-bearing keyframe, forwarding to this
+// subscriber stays gated. We immediately PLI the publisher so that keyframe
+// arrives within an RTT instead of waiting for intervalpli (~1s default).
+//
+// Out-of-range or unknown publisher: silent drop. Clients are advisory hints,
+// the server is not obligated to acknowledge.
 func (r *Room) handleScreenShareLayerSelect(p *peer, data protocol.ScreenShareLayerSelectData) {
-	_ = p
-	_ = data
+	target := int32(data.TemporalLayer)
+	if target < 0 || target > 2 {
+		return
+	}
+
+	r.mu.Lock()
+	pubPeer := r.peers[data.PublisherID]
+	var session *ScreenShareSession
+	if pubPeer != nil {
+		session = pubPeer.screenSession
+	}
+	r.mu.Unlock()
+	if session == nil {
+		return
+	}
+
+	session.mu.RLock()
+	subEntry := session.subscribers[p.id]
+	session.mu.RUnlock()
+	if subEntry == nil {
+		return
+	}
+	if subEntry.targetTemp.Load() == target {
+		return
+	}
+	subEntry.SetTargetTemp(target)
+
+	// Pull the publisher's video SSRC so PLI MediaSSRC names the right stream.
+	// Same lookup the keyframe-on-subscribe RTCP forwarder does; encapsulate
+	// it here to keep the call site short.
+	pubSSRC := screenPublisherVideoSSRC(session)
+	if pubSSRC == 0 {
+		return
+	}
+	_ = session.publisherPC.WriteRTCP([]rtcp.Packet{
+		&rtcp.PictureLossIndication{MediaSSRC: pubSSRC},
+	})
+}
+
+// screenPublisherVideoSSRC returns the SSRC of the publisher PC's inbound
+// video stream, or 0 if no video receiver has produced a track yet (e.g.
+// session created but first OnTrack hasn't fired). Used to address RTCP PLIs
+// back to the publisher.
+func screenPublisherVideoSSRC(session *ScreenShareSession) uint32 {
+	for _, tr := range session.publisherPC.GetTransceivers() {
+		recv := tr.Receiver()
+		if recv == nil {
+			continue
+		}
+		t := recv.Track()
+		if t != nil && t.Kind() == webrtc.RTPCodecTypeVideo {
+			return uint32(t.SSRC())
+		}
+	}
+	return 0
 }
 
 // sendScreenShareError marshals and writes a screen-share-error envelope.

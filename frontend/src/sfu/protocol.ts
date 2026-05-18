@@ -282,6 +282,12 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { event: 'hello'; data: HelloPayload }
+  /**
+   * Client-initiated offer. Used only for screen-share ICE restart on resume
+   * (pc='screen-pub'). Audio uses the SFU-as-offerer path; clients never send
+   * 'offer' for audio.
+   */
+  | { event: 'offer'; data: OfferEnvelope }
   | { event: 'answer'; data: AnswerEnvelope }
   | { event: 'candidate'; data: CandidateEnvelope }
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
