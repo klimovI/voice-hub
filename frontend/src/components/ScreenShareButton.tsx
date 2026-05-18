@@ -40,14 +40,7 @@ export function ScreenShareButton({ onStart, onStop }: Props) {
       type="button"
       onClick={handleClick}
       disabled={!joined || busy}
-      className={`flex items-center gap-2 w-full justify-center
-        rounded-md px-3 py-2 text-sm font-medium transition
-        ${
-          publishing
-            ? 'bg-red-600/90 hover:bg-red-600 text-white'
-            : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-100'
-        }
-        disabled:opacity-50 disabled:cursor-not-allowed`}
+      className={`btn w-full ${publishing ? 'btn-danger' : 'btn-secondary'}`}
     >
       <Icon size={16} strokeWidth={2.25} />
       <span>{label}</span>
