@@ -5,3 +5,7 @@ export function formatQualityLabel(h: number): string {
   if (h >= 400) return '480p';
   return `${h}p`;
 }
+
+export function formatFpsLabel(fps: number): string {
+  return `${Math.round(fps)}fps`;
+}

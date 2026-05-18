@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
-import { formatQualityLabel } from '../screenshare/labels';
+import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
+import { useVideoFps } from '../screenshare/useVideoFps';
 
 interface Props {
   onStart: () => void | Promise<void>;
@@ -73,6 +74,7 @@ function SelfPreview({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+  const fps = useVideoFps(videoRef, stream);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -97,6 +99,7 @@ function SelfPreview({
   }, [stream]);
 
   const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+  const fpsLabel = fps !== null ? formatFpsLabel(fps) : null;
 
   return (
     <div className="relative">
@@ -107,16 +110,21 @@ function SelfPreview({
         muted
         className="w-full aspect-video rounded bg-black object-contain"
       />
-      {(qualityLabel || videoCodec) && (
+      {(videoCodec || qualityLabel || fpsLabel) && (
         <div className="absolute left-2 top-2 flex items-center gap-1">
+          {videoCodec && (
+            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
+              {videoCodec.toUpperCase()}
+            </span>
+          )}
           {qualityLabel && (
             <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
               {qualityLabel}
             </span>
           )}
-          {videoCodec && (
+          {fpsLabel && (
             <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
-              {videoCodec.toUpperCase()}
+              {fpsLabel}
             </span>
           )}
         </div>

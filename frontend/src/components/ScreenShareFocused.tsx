@@ -3,7 +3,8 @@ import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
-import { formatQualityLabel } from '../screenshare/labels';
+import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
+import { useVideoFps } from '../screenshare/useVideoFps';
 
 interface Props {
   /** Called when user dismisses the overlay — owner unsubscribes from SFU. */
@@ -38,6 +39,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+  const fps = useVideoFps(videoRef, videoStream);
 
   const initialVolume = useMemo(() => {
     if (!publisherClientId) return 1;
@@ -126,6 +128,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   if (!focusedId) return null;
 
   const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+  const fpsLabel = fps !== null ? formatFpsLabel(fps) : null;
   const ended = !shareStillLive;
 
   return (
@@ -133,14 +136,19 @@ export function ScreenShareFocused({ onClose }: Props) {
       <header className="flex items-center justify-between px-4 py-2 text-zinc-200">
         <span className="text-sm font-medium truncate flex items-center gap-2">
           Экран · {display}
+          {videoCodec && (
+            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
+              {videoCodec.toUpperCase()}
+            </span>
+          )}
           {qualityLabel && (
             <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
               {qualityLabel}
             </span>
           )}
-          {videoCodec && (
+          {fpsLabel && (
             <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
-              {videoCodec.toUpperCase()}
+              {fpsLabel}
             </span>
           )}
         </span>
