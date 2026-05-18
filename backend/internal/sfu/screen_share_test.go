@@ -281,3 +281,101 @@ func TestResumeRaceOnlyOneWins(t *testing.T) {
 		t.Fatalf("race: starts=%d errs=%d, want exactly 1 of each", starts.Load(), errs.Load())
 	}
 }
+
+// expectEncodeLayers waits for an encode-pause / encode-resume envelope and
+// returns the Layers slice. Fails the test on timeout.
+func expectEncodeLayers(t *testing.T, p *peer, event string, timeout time.Duration) []int {
+	t.Helper()
+	env, ok := waitFor(t, p, event, timeout)
+	if !ok {
+		t.Fatalf("expected %s", event)
+	}
+	var payload struct {
+		Layers []int `json:"layers"`
+	}
+	if err := json.Unmarshal(env.Data, &payload); err != nil {
+		t.Fatalf("unmarshal %s: %v", event, err)
+	}
+	return payload.Layers
+}
+
+// TestSendScreenEncodePauseWritesToPublisher confirms the helper writes the
+// expected envelope to the publisher's outbound queue and that absent
+// publishers are a no-op (not a panic).
+func TestSendScreenEncodePauseWritesToPublisher(t *testing.T) {
+	t.Parallel()
+	room, pub, _, cleanup := newResumeTestRoom(t, "tok")
+	defer cleanup()
+
+	room.sendScreenEncodePause(pub.id, allScreenEncodeLayers)
+	layers := expectEncodeLayers(t, pub, "screen-share-encode-pause", 200*time.Millisecond)
+	if len(layers) != 3 || layers[0] != 0 || layers[2] != 2 {
+		t.Errorf("layers = %v, want [0 1 2]", layers)
+	}
+
+	// No-op for unknown publisher — must not panic, must not block on a
+	// channel that doesn't exist.
+	room.sendScreenEncodePause("ghost", allScreenEncodeLayers)
+}
+
+// TestRemoveScreenSubscriberEmitsPauseOnLastUnsubscribe verifies the 1→0
+// transition routes a pause to the publisher, and that prior unsubscribes
+// while other subs remain do NOT emit pause.
+func TestRemoveScreenSubscriberEmitsPauseOnLastUnsubscribe(t *testing.T) {
+	t.Parallel()
+	room, pub, session, cleanup := newResumeTestRoom(t, "tok")
+	defer cleanup()
+
+	subA, cancelA := newTestPeer("sub-A", "A")
+	subB, cancelB := newTestPeer("sub-B", "B")
+	defer cancelA()
+	defer cancelB()
+	room.peers[subA.id] = subA
+	room.peers[subB.id] = subB
+
+	// Seed two subscribers directly on the session. screenSubs is left nil
+	// so removeScreenSubscriber skips the PC close path (no real pion PC in
+	// this fixture).
+	session.mu.Lock()
+	session.subscribers[subA.id] = &screenSubscriber{peerID: subA.id}
+	session.subscribers[subB.id] = &screenSubscriber{peerID: subB.id}
+	session.mu.Unlock()
+
+	// First unsubscribe: subscribers go 2→1. No pause.
+	room.removeScreenSubscriber(subA, pub.id, "test")
+	if _, ok := waitFor(t, pub, "screen-share-encode-pause", 100*time.Millisecond); ok {
+		t.Fatal("encode-pause emitted while subB still subscribed")
+	}
+
+	// Last unsubscribe: 1→0. Pause must arrive.
+	room.removeScreenSubscriber(subB, pub.id, "test")
+	layers := expectEncodeLayers(t, pub, "screen-share-encode-pause", 200*time.Millisecond)
+	if len(layers) != 3 {
+		t.Errorf("layers = %v, want full L1T3 set", layers)
+	}
+}
+
+// TestRemoveScreenSubscriberIdempotent verifies that a duplicate
+// removeScreenSubscriber call (e.g. unsubscribe handler raced with
+// OnConnectionStateChange) does not produce a second pause.
+func TestRemoveScreenSubscriberIdempotent(t *testing.T) {
+	t.Parallel()
+	room, pub, session, cleanup := newResumeTestRoom(t, "tok")
+	defer cleanup()
+
+	sub, cancelSub := newTestPeer("sub", "S")
+	defer cancelSub()
+	room.peers[sub.id] = sub
+
+	session.mu.Lock()
+	session.subscribers[sub.id] = &screenSubscriber{peerID: sub.id}
+	session.mu.Unlock()
+
+	room.removeScreenSubscriber(sub, pub.id, "first")
+	_ = expectEncodeLayers(t, pub, "screen-share-encode-pause", 200*time.Millisecond)
+
+	room.removeScreenSubscriber(sub, pub.id, "second")
+	if _, ok := waitFor(t, pub, "screen-share-encode-pause", 100*time.Millisecond); ok {
+		t.Fatal("second pause emitted on idempotent removeScreenSubscriber")
+	}
+}

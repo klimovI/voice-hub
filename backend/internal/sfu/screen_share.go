@@ -31,6 +31,11 @@ func seqSeed() uint32 { return mathrand.Uint32() & 0xffff }
 // expiry; Stage 2 will add real token-validated reattach.
 const screenShareGracePeriod = 5 * time.Second
 
+// allScreenEncodeLayers names the full L1T3 temporal-layer set. Used for
+// "full pause" / "full resume" dynacast — selective per-layer pause is
+// out of scope until BWE-driven auto-downgrade lands.
+var allScreenEncodeLayers = []int{0, 1, 2}
+
 // ScreenShareSession owns one publisher's screen-share state. Lifecycle:
 //
 //	create  →ScreenShareSession.start (in screen-share-start handler)
@@ -370,6 +375,16 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 	if r.cfg.OnPeerUpdated != nil {
 		r.cfg.OnPeerUpdated(info)
 	}
+
+	// Dynacast initial state: until the first subscriber clicks the tile,
+	// the encoder has no audience — pause it so a publisher in a quiet room
+	// doesn't burn CPU on encoded frames the SFU drops on the floor.
+	session.mu.RLock()
+	idle := len(session.subscribers) == 0
+	session.mu.RUnlock()
+	if idle {
+		r.sendScreenEncodePause(session.PublisherID, allScreenEncodeLayers)
+	}
 }
 
 // forwardVideo reads RTP from the publisher's remote video track and writes
@@ -628,6 +643,7 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 	session.subscribers[sub.id] = subEntry
+	firstSubscriber := len(session.subscribers) == 1
 	session.mu.Unlock()
 
 	r.mu.Lock()
@@ -654,6 +670,15 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 	_ = sub.write(protocol.Envelope{Event: "offer", Data: b})
+
+	// Dynacast: wake the publisher's encoder on 0→1 and ask for a fresh
+	// keyframe so the new subscriber doesn't wait up to a full GOP for the
+	// next intra. Done after the offer is on the wire so a deferred resume
+	// doesn't race the answer back from the publisher.
+	if firstSubscriber {
+		r.sendScreenEncodeResume(session.PublisherID, allScreenEncodeLayers)
+		session.requestKeyframe()
+	}
 }
 
 // forwardScreenRTCPToPublisher relays PLI/FIR from a subscriber's sender to
@@ -712,6 +737,61 @@ func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sender 
 	}
 }
 
+// sendScreenEncodePause notifies the publisher that the listed temporal
+// layers can stop encoding. Layers=[0,1,2] means full pause. No-op if the
+// publisher peer is no longer in the room (grace mode or already torn down).
+func (r *Room) sendScreenEncodePause(publisherID string, layers []int) {
+	r.sendScreenEncodeEnvelope(publisherID, "screen-share-encode-pause",
+		protocol.ScreenShareEncodePauseData{Layers: layers})
+}
+
+// sendScreenEncodeResume is the counterpart: tells the publisher to resume
+// encoding the listed layers.
+func (r *Room) sendScreenEncodeResume(publisherID string, layers []int) {
+	r.sendScreenEncodeEnvelope(publisherID, "screen-share-encode-resume",
+		protocol.ScreenShareEncodeResumeData{Layers: layers})
+}
+
+func (r *Room) sendScreenEncodeEnvelope(publisherID, event string, payload any) {
+	r.mu.Lock()
+	pubPeer := r.peers[publisherID]
+	r.mu.Unlock()
+	if pubPeer == nil {
+		return
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("sfu: %s marshal (%s): %v", event, publisherID, err)
+		return
+	}
+	_ = pubPeer.write(protocol.Envelope{Event: event, Data: raw})
+}
+
+// requestKeyframe sends a PLI to the publisher so the next RTP packet carries
+// an intra frame. Called on dynacast resume so the first subscriber after
+// pause doesn't wait up to a full GOP for decodable video. No-op when the
+// publisher's video receiver has no SSRC yet (pre-OnTrack).
+func (s *ScreenShareSession) requestKeyframe() {
+	var pubSSRC uint32
+	for _, tr := range s.publisherPC.GetTransceivers() {
+		recv := tr.Receiver()
+		if recv == nil {
+			continue
+		}
+		track := recv.Track()
+		if track != nil && track.Kind() == webrtc.RTPCodecTypeVideo {
+			pubSSRC = uint32(track.SSRC())
+			break
+		}
+	}
+	if pubSSRC == 0 {
+		return
+	}
+	_ = s.publisherPC.WriteRTCP([]rtcp.Packet{
+		&rtcp.PictureLossIndication{MediaSSRC: pubSSRC},
+	})
+}
+
 // handleScreenShareUnsubscribe is the client-initiated path. It defers
 // to removeScreenSubscriber, which is also the cleanup path for the
 // connection-state-failed branch.
@@ -741,10 +821,17 @@ func (r *Room) removeScreenSubscriber(sub *peer, publisherID, reason string) {
 	if subPC != nil {
 		_ = subPC.pc.Close()
 	}
+	wentIdle := false
 	if session != nil {
 		session.mu.Lock()
-		delete(session.subscribers, sub.id)
+		if _, ok := session.subscribers[sub.id]; ok {
+			delete(session.subscribers, sub.id)
+			wentIdle = len(session.subscribers) == 0
+		}
 		session.mu.Unlock()
+	}
+	if wentIdle {
+		r.sendScreenEncodePause(publisherID, allScreenEncodeLayers)
 	}
 
 	log.Printf("sfu: screen unsubscribe (%s→%s) %s", sub.id, publisherID, reason)

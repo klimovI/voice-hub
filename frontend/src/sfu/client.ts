@@ -107,6 +107,21 @@ export type SFUClient = {
   resumeScreenShare(token: string): Promise<void>;
 };
 
+// Full L1T3 temporal-layer set. The dynacast contract carries a layers list
+// per pause/resume; only the full set is wired today (partial pause = future
+// BWE-driven downgrade). Keep the constant local — it mirrors backend
+// `allScreenEncodeLayers` in voice-hub/backend/internal/sfu/screen_share.go.
+const ALL_SCREEN_ENCODE_LAYERS = [0, 1, 2] as const;
+
+function isFullLayerSet(layers: number[]): boolean {
+  if (layers.length !== ALL_SCREEN_ENCODE_LAYERS.length) return false;
+  const sorted = [...layers].sort();
+  for (let i = 0; i < ALL_SCREEN_ENCODE_LAYERS.length; i++) {
+    if (sorted[i] !== ALL_SCREEN_ENCODE_LAYERS[i]) return false;
+  }
+  return true;
+}
+
 function noop(): void {
   /* no-op */
 }
@@ -144,6 +159,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let screenPubStream: MediaStream | null = null;
   let screenPubStopped = false;
   let screenPubToken: string | null = null;
+  let screenPubVideoSender: RTCRtpSender | null = null;
+  // Tracks the L1T3 / bitrate-caps setParameters call kicked off by the
+  // signaling-state watcher in startScreenShare. encode-pause / encode-resume
+  // must observe its completion, otherwise getParameters() races and
+  // active=true/false lands on an encoding without scalabilityMode set.
+  let screenPubInitialParams: Promise<void> | null = null;
   // resumeContinuation is set while resumeScreenShare is in flight: it resolves
   // the awaiting promise on the next screen-share-started (success) or rejects
   // on screen-share-error. Plain inline state — only one resume can be in
@@ -302,8 +323,18 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         on.onScreenShareError(msg.data);
         break;
       case 'screen-share-encode-pause':
+        if (!isFullLayerSet(msg.data.layers)) {
+          console.warn('[sfu] partial encode-pause not supported, layers=', msg.data.layers);
+          break;
+        }
+        void applyScreenEncodeActive(false);
+        break;
       case 'screen-share-encode-resume':
-        // Dynacast not implemented in Stage 1 publisher; ignore.
+        if (!isFullLayerSet(msg.data.layers)) {
+          console.warn('[sfu] partial encode-resume not supported, layers=', msg.data.layers);
+          break;
+        }
+        void applyScreenEncodeActive(true);
         break;
     }
   }
@@ -434,6 +465,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubStopped = false;
 
     const videoSender = newPC.addTrack(videoTrack, stream);
+    screenPubVideoSender = videoSender;
     if (audioTrack) newPC.addTrack(audioTrack, stream);
 
     // Codec preferences must be set BEFORE createOffer so the resulting SDP
@@ -503,7 +535,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
               maxFramerate: 60,
               priority: 'high',
             } as RTCRtpEncodingParameters;
-            void videoSender.setParameters(params);
+            screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
+              console.warn('[sfu] setParameters on screen video failed', err);
+            });
           } catch (err) {
             console.warn('[sfu] setParameters on screen video failed', err);
           }
@@ -527,6 +561,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       if (screenPubPC === newPC) {
         screenPubPC = null;
         screenPubStream = null;
+        screenPubVideoSender = null;
+        screenPubInitialParams = null;
         screenPubStopped = false;
       }
       throw err;
@@ -550,7 +586,31 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubPC = null;
     screenPubStream = null;
     screenPubToken = null;
+    screenPubVideoSender = null;
+    screenPubInitialParams = null;
     on.onScreenShareSelfStopped();
+  }
+
+  async function applyScreenEncodeActive(active: boolean): Promise<void> {
+    if (screenPubInitialParams) {
+      try {
+        await screenPubInitialParams;
+      } catch {
+        // already logged in the watcher
+      }
+    }
+    const sender = screenPubVideoSender;
+    if (!sender) return;
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    params.encodings[0] = { ...params.encodings[0], active };
+    try {
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn('[sfu] setParameters(active) on screen video failed', err);
+    }
   }
 
   function getScreenShareToken(): string | null {

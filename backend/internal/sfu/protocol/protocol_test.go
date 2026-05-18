@@ -214,7 +214,7 @@ var fixtureCases = []fixtureCase{
 	},
 	{
 		name:    "screen-share-encode-pause",
-		payload: protocol.ScreenShareEncodePauseData{Layers: []int{2}},
+		payload: protocol.ScreenShareEncodePauseData{Layers: []int{0, 1, 2}},
 	},
 	{
 		name:    "screen-share-encode-resume",
