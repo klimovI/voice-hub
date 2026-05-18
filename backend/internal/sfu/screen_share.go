@@ -41,10 +41,10 @@ var allScreenEncodeLayers = []int{0, 1, 2}
 // publisher's encoder doesn't yo-yo on transient blips.
 const (
 	autoDowngradePollInterval = 2 * time.Second
-	autoDowngradeHighLossPM   = 80               // 8% in per-mille — sustained drop triggers downgrade
-	autoDowngradeLowLossPM    = 20               // 2% — sustained quiet triggers upgrade
+	autoDowngradeHighLossPM   = 80              // 8% in per-mille — sustained drop triggers downgrade
+	autoDowngradeLowLossPM    = 20              // 2% — sustained quiet triggers upgrade
 	autoDowngradeHighWindow   = 3 * time.Second // observe high loss this long before stepping down
-	autoDowngradeLowWindow    = 5 * time.Second  // and this long of calm before stepping back up
+	autoDowngradeLowWindow    = 5 * time.Second // and this long of calm before stepping back up
 )
 
 // ScreenShareSession owns one publisher's screen-share state. Lifecycle:

@@ -23,6 +23,7 @@ import {
   loadPeerVolume,
 } from '../utils/storage';
 import type { ChatPayload, PingPayload, ScreenShareReason } from '../sfu/protocol';
+import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
 import { flashFavicon } from '../utils/favicon';
@@ -853,9 +854,17 @@ export function useSessionManager({
       // or "AbortError" — neither should produce a noisy app error.
       const name = err instanceof DOMException ? err.name : '';
       if (name === 'NotAllowedError' || name === 'AbortError') return;
+      if (err instanceof Error && err.message === SCREEN_SHARE_NO_CODEC) {
+        getStore().setStatus(
+          'Браузер не поддерживает кодек AV1 для демонстрации экрана.',
+          true,
+          true,
+        );
+        return;
+      }
       throw err;
     }
-  }, [sfu]);
+  }, [sfu, getStore]);
 
   const stopScreenShare = useCallback((): void => {
     const client = sfu.getClient();

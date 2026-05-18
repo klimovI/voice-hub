@@ -12,7 +12,15 @@ import {
   type ScreenShareEndedPayload,
   type ScreenShareErrorPayload,
 } from './protocol';
-import { orderCodecsAV1First } from '../screenshare/codec';
+import { filterAV1 } from '../screenshare/codec';
+import {
+  SCREEN_FPS,
+  SCREEN_HEIGHT,
+  SCREEN_MAX_BITRATE,
+  SCREEN_WIDTH,
+} from '../screenshare/params';
+
+export const SCREEN_SHARE_NO_CODEC = 'SCREEN_SHARE_NO_CODEC';
 
 export type SFUHandlers = {
   onState: (state: string) => void;
@@ -494,13 +502,20 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   async function startScreenShare(): Promise<void> {
     if (screenPubPC) throw new Error('sfu-client: already publishing screen share');
 
+    // Fail loud before getDisplayMedia: without AV1 in send caps, SDP would
+    // silently negotiate an inactive video m-line (server registers AV1 only).
+    const caps = RTCRtpSender.getCapabilities('video');
+    if (!caps || filterAV1(caps.codecs).length === 0) {
+      throw new Error(SCREEN_SHARE_NO_CODEC);
+    }
+
     // The user's picker click is the gesture context. Any await between this
     // line and getDisplayMedia would break the gesture chain on some browsers.
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        frameRate: { ideal: 60, max: 60 },
-        width: { ideal: 2560 },
-        height: { ideal: 1440 },
+        frameRate: { ideal: SCREEN_FPS, max: SCREEN_FPS },
+        width: { ideal: SCREEN_WIDTH },
+        height: { ideal: SCREEN_HEIGHT },
         displaySurface: 'monitor',
       },
       audio: true,
@@ -538,13 +553,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     // Codec preferences must be set BEFORE createOffer so the resulting SDP
     // lists AV1 first. setCodecPreferences on the matching transceiver, not
     // on the PC.
-    const caps = RTCRtpSender.getCapabilities('video');
-    if (caps) {
-      const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
-      if (tx) {
-        const ordered = orderCodecsAV1First(caps.codecs);
-        if (ordered.length > 0) tx.setCodecPreferences(ordered);
-      }
+    const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
+    if (tx) {
+      const ordered = filterAV1(caps.codecs);
+      if (ordered.length > 0) tx.setCodecPreferences(ordered);
     }
 
     newPC.addEventListener('icecandidate', (ev) => {
@@ -595,8 +607,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
             params.encodings[0] = {
               ...params.encodings[0],
               scalabilityMode: 'L1T3',
-              maxBitrate: 5_000_000,
-              maxFramerate: 60,
+              maxBitrate: SCREEN_MAX_BITRATE,
+              maxFramerate: SCREEN_FPS,
               priority: 'high',
             } as RTCRtpEncodingParameters;
             screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
