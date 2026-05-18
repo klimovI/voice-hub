@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './styles/main.css';
-import { useStore } from './store/useStore';
+import { useStore, selectSelfPeerId } from './store/useStore';
 import { useAudioEngine } from './hooks/useAudioEngine';
 import { preloadEngine } from './audio/engine';
 import { useSFU } from './hooks/useSFU';
@@ -283,6 +283,33 @@ export function App() {
       useScreenShareStore.getState().setFocused(null);
     }
   }, [focusedId, focusedStillShared]);
+
+  useEffect(() => {
+    if (!focusedId) return;
+    const current = focusedId;
+    const selfId = selectSelfPeerId(useStore.getState());
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      // Don't hijack arrows while the user is typing (chat composer etc.).
+      const a = document.activeElement as HTMLElement | null;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) {
+        return;
+      }
+      const ids = Array.from(useScreenShareStore.getState().shares.keys()).filter(
+        (id) => id !== selfId,
+      );
+      if (ids.length < 2) return;
+      const idx = ids.indexOf(current);
+      if (idx < 0) return;
+      const next =
+        e.key === 'ArrowRight'
+          ? ids[(idx + 1) % ids.length]
+          : ids[(idx - 1 + ids.length) % ids.length];
+      handleTileClick(next);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusedId, handleTileClick]);
 
   return (
     <>

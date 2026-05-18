@@ -355,6 +355,31 @@ func TestRemoveScreenSubscriberEmitsPauseOnLastUnsubscribe(t *testing.T) {
 	}
 }
 
+// TestScreenShareStartRejectsDoublePublish locks in the "one screen share
+// per peer" invariant: a second screen-share-start from a peer that already
+// owns a session must return ReasonAlreadyPublishing without touching the
+// existing session.
+func TestScreenShareStartRejectsDoublePublish(t *testing.T) {
+	t.Parallel()
+	room, pub, session, cleanup := newResumeTestRoom(t, "tok")
+	defer cleanup()
+
+	room.handleScreenShareStart(pub, protocol.ScreenShareStartData{SDP: "v=0\r\n"})
+
+	env, ok := waitFor(t, pub, "screen-share-error", 200*time.Millisecond)
+	if !ok {
+		t.Fatal("expected screen-share-error on double publish")
+	}
+	var ed protocol.ScreenShareErrorData
+	_ = json.Unmarshal(env.Data, &ed)
+	if ed.Reason != protocol.ReasonAlreadyPublishing {
+		t.Errorf("reason = %q, want %q", ed.Reason, protocol.ReasonAlreadyPublishing)
+	}
+	if pub.screenSession != session {
+		t.Error("existing session pointer mutated by double publish")
+	}
+}
+
 // TestRemoveScreenSubscriberIdempotent verifies that a duplicate
 // removeScreenSubscriber call (e.g. unsubscribe handler raced with
 // OnConnectionStateChange) does not produce a second pause.
