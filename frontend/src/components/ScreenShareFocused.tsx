@@ -3,18 +3,14 @@ import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 
-export type ScreenShareQuality = 0 | 1 | 2;
-
 interface Props {
   /** Called when user dismisses the overlay — owner unsubscribes from SFU. */
   onClose: () => void;
-  /** Asks the SFU to cap the inbound stream at this temporal layer for THIS subscriber. */
-  onSelectQuality: (q: ScreenShareQuality) => void;
 }
 
 // System audio routes through a sibling <audio> element, not the voice mixer,
 // so the publisher's screen-capture audio isn't ducked by mic/output sliders.
-export function ScreenShareFocused({ onClose, onSelectQuality }: Props) {
+export function ScreenShareFocused({ onClose }: Props) {
   const focusedId = useScreenShareStore((s) => s.focusedId);
   const videoStream = useScreenShareStore((s) => s.focusedStream);
   const audioStream = useScreenShareStore((s) => s.focusedAudioStream);
@@ -29,18 +25,6 @@ export function ScreenShareFocused({ onClose, onSelectQuality }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
-  // Backend defaults a fresh subscription to T2; mirror that locally and
-  // reset on focused-publisher change.
-  const [quality, setQuality] = useState<ScreenShareQuality>(2);
-  useEffect(() => {
-    setQuality(2);
-  }, [focusedId]);
-
-  function pickQuality(q: ScreenShareQuality) {
-    if (q === quality) return;
-    setQuality(q);
-    onSelectQuality(q);
-  }
 
   useEffect(() => {
     const el = videoRef.current;
@@ -102,7 +86,6 @@ export function ScreenShareFocused({ onClose, onSelectQuality }: Props) {
           )}
         </span>
         <div className="flex items-center gap-1">
-          <QualityPicker value={quality} onChange={pickQuality} />
           {hasSystemAudio && (
             <button
               type="button"
@@ -140,44 +123,6 @@ export function ScreenShareFocused({ onClose, onSelectQuality }: Props) {
         )}
       </div>
       <audio ref={audioRef} />
-    </div>
-  );
-}
-
-const QUALITY_OPTIONS: { value: ScreenShareQuality; label: string; hint: string }[] = [
-  { value: 0, label: 'T0', hint: 'Плавно · ~15 fps' },
-  { value: 1, label: 'T1', hint: 'Средне · ~30 fps' },
-  { value: 2, label: 'T2', hint: 'Полное · 60 fps' },
-];
-
-function QualityPicker({
-  value,
-  onChange,
-}: {
-  value: ScreenShareQuality;
-  onChange: (q: ScreenShareQuality) => void;
-}) {
-  return (
-    <div className="flex items-center mr-1 border border-line">
-      {QUALITY_OPTIONS.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            title={opt.hint}
-            aria-label={`Качество ${opt.label} — ${opt.hint}`}
-            className={`px-2 py-1 text-xs font-semibold tracking-wide transition-colors ${
-              active
-                ? 'bg-accent text-accent-ink'
-                : 'text-muted hover:text-accent hover:bg-bg-3'
-            }`}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
     </div>
   );
 }

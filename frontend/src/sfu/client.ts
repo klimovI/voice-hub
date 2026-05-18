@@ -80,15 +80,6 @@ export type SFUClient = {
   /** True when this client is currently publishing a share. */
   isPublishingScreenShare(): boolean;
   /**
-   * Hint the SFU which temporal layer this subscriber wants. Higher layer =
-   * higher frame rate (and slightly higher bitrate). L1T3 caps at 2.
-   *
-   * The server treats it as a cap, not a guarantee: subscriber-side BWE may
-   * still drive the effective rate down. No-op if not subscribed to this
-   * publisher.
-   */
-  selectScreenShareLayer(publisherId: string, temporalLayer: 0 | 1 | 2): void;
-  /**
    * Opaque resume token issued by the SFU on screen-share-start (or after a
    * successful resume). Persists for the lifetime of the SFU-side session.
    * Callers should snapshot it before disconnect and feed it into
@@ -660,14 +651,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     send('offer', { pc: 'screen-pub', type: offer.type, sdp: offer.sdp ?? '' });
   }
 
-  function selectScreenShareLayer(
-    publisherId: string,
-    temporalLayer: 0 | 1 | 2,
-  ): void {
-    if (!screenSubs.has(publisherId)) return;
-    send('screen-share-layer-select', { publisherId, temporalLayer });
-  }
-
   function isPublishingScreenShare(): boolean {
     return screenPubPC !== null && !screenPubStopped;
   }
@@ -800,7 +783,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     subscribeScreenShare,
     unsubscribeScreenShare,
     isPublishingScreenShare,
-    selectScreenShareLayer,
     getScreenShareToken,
     resumeScreenShare,
   };

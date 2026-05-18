@@ -334,7 +334,6 @@ type ChatPayload struct {
 //
 //   C→S "screen-share-subscribe"  (publisherId + preferredTemporalLayer)
 //   C→S "screen-share-unsubscribe"(publisherId)
-//   C→S "screen-share-layer-select"(publisherId + temporalLayer; manual pin)
 //
 //   S→C "screen-share-encode-pause" / "screen-share-encode-resume"
 //     (publisher-side dynacast: SFU tells the publisher which layers to
@@ -416,13 +415,6 @@ type ScreenShareSubscribeData struct {
 // the per-subscriber forward state.
 type ScreenShareUnsubscribeData struct {
 	PublisherID string `json:"publisherId"`
-}
-
-// ScreenShareLayerSelectData — C→S. Explicit subscriber-side pin. Overrides
-// the BWE-driven auto-downgrade until next BWE update.
-type ScreenShareLayerSelectData struct {
-	PublisherID   string `json:"publisherId"`
-	TemporalLayer uint8  `json:"temporalLayer"`
 }
 
 // ScreenShareEncodePauseData — S→C (to publisher). Dynacast: tells the

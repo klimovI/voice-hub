@@ -380,6 +380,134 @@ func TestScreenShareStartRejectsDoublePublish(t *testing.T) {
 	}
 }
 
+// newTestSub creates a screenSubscriber with the given starting layer and
+// reports a loss reading of `lossPerMille`. Tests that walk the auto-downgrade
+// state machine drive lossPerMille / time directly.
+func newTestSub(peerID string, startTemp int32, lossPerMille uint32) *screenSubscriber {
+	s := &screenSubscriber{peerID: peerID}
+	s.targetTemp.Store(startTemp)
+	s.lossPerMille.Store(lossPerMille)
+	return s
+}
+
+func TestEvalAutoDowngradeNoChangeBelowWindow(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 2, 120) // 12% loss
+	t0 := time.Now()
+
+	if evalAutoDowngrade(sub, t0, "pub") {
+		t.Fatal("first tick should arm timer, not flip layer")
+	}
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("layer changed prematurely: %d", sub.targetTemp.Load())
+	}
+	if sub.highLossSince.Load() == 0 {
+		t.Error("highLossSince not armed on first high-loss tick")
+	}
+
+	// Still well within the 3s window.
+	if evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub") {
+		t.Fatal("flip before window elapsed")
+	}
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("layer changed at 1s: %d", sub.targetTemp.Load())
+	}
+}
+
+func TestEvalAutoDowngradeAfterSustainedLoss(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 2, 120)
+	t0 := time.Now()
+
+	evalAutoDowngrade(sub, t0, "pub")
+	if !evalAutoDowngrade(sub, t0.Add(autoDowngradeHighWindow+10*time.Millisecond), "pub") {
+		t.Fatal("expected flip after high-loss window elapsed")
+	}
+	if sub.targetTemp.Load() != 1 {
+		t.Errorf("layer = %d, want 1", sub.targetTemp.Load())
+	}
+	if sub.highLossSince.Load() != 0 {
+		t.Error("highLossSince should reset after a flip")
+	}
+}
+
+func TestEvalAutoDowngradeStaysClampedAtZero(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 0, 200) // 20% loss, but already at T0
+	t0 := time.Now()
+
+	if evalAutoDowngrade(sub, t0, "pub") {
+		t.Fatal("T0 cannot downgrade further; must not flip")
+	}
+	if evalAutoDowngrade(sub, t0.Add(autoDowngradeHighWindow+time.Second), "pub") {
+		t.Fatal("T0 still cannot downgrade after window")
+	}
+	if sub.highLossSince.Load() != 0 {
+		t.Error("highLossSince must stay cleared at floor")
+	}
+}
+
+func TestEvalAutoDowngradeUpgradeAfterCalm(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 1, 10) // 1% loss, sub at T1
+	t0 := time.Now()
+
+	evalAutoDowngrade(sub, t0, "pub")
+	if sub.lowLossSince.Load() == 0 {
+		t.Error("lowLossSince not armed on first calm tick")
+	}
+	// Mid-window — no flip yet.
+	if evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub") {
+		t.Fatal("upgraded before window elapsed")
+	}
+	if !evalAutoDowngrade(sub, t0.Add(autoDowngradeLowWindow+10*time.Millisecond), "pub") {
+		t.Fatal("expected upgrade after low-loss window")
+	}
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("layer = %d, want 2", sub.targetTemp.Load())
+	}
+}
+
+func TestEvalAutoDowngradeMidBandResetsStreaks(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 2, 120) // start high
+	t0 := time.Now()
+	evalAutoDowngrade(sub, t0, "pub")
+	if sub.highLossSince.Load() == 0 {
+		t.Fatal("highLossSince not armed")
+	}
+
+	// Drop into mid-band. The high-loss streak must clear so a future high
+	// excursion has to start over.
+	sub.lossPerMille.Store(50)
+	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub")
+	if sub.highLossSince.Load() != 0 {
+		t.Error("highLossSince must reset on mid-band reading")
+	}
+	if sub.lowLossSince.Load() != 0 {
+		t.Error("lowLossSince must also be zero — mid-band, neither streak")
+	}
+}
+
+func TestEvalAutoDowngradeFlapDoesNotFlip(t *testing.T) {
+	t.Parallel()
+	sub := newTestSub("s1", 2, 0)
+	t0 := time.Now()
+
+	// 1s @ 12%, then 1s @ 1%, then 1s @ 12%. Total wall time = 3s but no
+	// continuous high-loss streak of 3s, so layer must stay at 2.
+	sub.lossPerMille.Store(120)
+	evalAutoDowngrade(sub, t0, "pub")
+	sub.lossPerMille.Store(10)
+	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub")
+	sub.lossPerMille.Store(120)
+	evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub")
+	evalAutoDowngrade(sub, t0.Add(3*time.Second), "pub")
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("layer flipped on flap: %d, want 2", sub.targetTemp.Load())
+	}
+}
+
 // TestRemoveScreenSubscriberIdempotent verifies that a duplicate
 // removeScreenSubscriber call (e.g. unsubscribe handler raced with
 // OnConnectionStateChange) does not produce a second pause.

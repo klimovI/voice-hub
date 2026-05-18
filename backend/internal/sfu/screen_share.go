@@ -36,6 +36,17 @@ const screenShareGracePeriod = 5 * time.Second
 // out of scope until BWE-driven auto-downgrade lands.
 var allScreenEncodeLayers = []int{0, 1, 2}
 
+// Auto-downgrade thresholds. Hysteresis windows are deliberately asymmetric:
+// fast reaction down when the network hurts, slow climb back up so the
+// publisher's encoder doesn't yo-yo on transient blips.
+const (
+	autoDowngradePollInterval = 2 * time.Second
+	autoDowngradeHighLossPM   = 80               // 8% in per-mille — sustained drop triggers downgrade
+	autoDowngradeLowLossPM    = 20               // 2% — sustained quiet triggers upgrade
+	autoDowngradeHighWindow   = 3 * time.Second // observe high loss this long before stepping down
+	autoDowngradeLowWindow    = 5 * time.Second  // and this long of calm before stepping back up
+)
+
 // ScreenShareSession owns one publisher's screen-share state. Lifecycle:
 //
 //	create  →ScreenShareSession.start (in screen-share-start handler)
@@ -115,6 +126,15 @@ type screenSubscriber struct {
 	lastGen    int32        // forwarder-local mirror of chainGen
 	seqCounter atomic.Uint32
 	chain      *ChainTracker
+
+	// Auto-downgrade signal. lossPerMille is updated from the last ReceiverReport
+	// seen on this subscriber's video sender (FractionLost is a 0..255 fraction,
+	// we store ‰ for cheaper int comparisons). The two "since" timestamps are
+	// unix-nano hysteresis windows — zero means "no streak yet". The decision
+	// loop runs every 2s and reads these atomics without locks.
+	lossPerMille  atomic.Uint32
+	highLossSince atomic.Int64
+	lowLossSince  atomic.Int64
 }
 
 // SetTargetTemp updates the subscriber's allowed temporal layer and signals
@@ -312,6 +332,8 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	p.screenSharingHasAudio = data.HasSystemAudio
 	r.screenSessionsByToken[token] = session
 	r.mu.Unlock()
+
+	go r.autoDowngradeLoop(session)
 
 	// Order matters: -started carries the resume token, the answer carries
 	// the SDP. Both go through the same FIFO writeLoop, so writing -started
@@ -653,9 +675,12 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 	}
 	r.mu.Unlock()
 
-	go r.forwardScreenRTCPToPublisher(session, videoSender)
+	// Only the video sender's RTCP path collects loss — audio-side RR would
+	// overwrite lossPerMille with Opus stats and confuse the temporal-layer
+	// decision loop.
+	go r.forwardScreenRTCPToPublisher(session, subEntry, videoSender, true)
 	if audioSender != nil {
-		go r.forwardScreenRTCPToPublisher(session, audioSender)
+		go r.forwardScreenRTCPToPublisher(session, subEntry, audioSender, false)
 	}
 
 	offerEnv := protocol.OfferEnvelope{
@@ -688,7 +713,12 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 // recovery from packet loss. Same idea as forwardSubscriberRTCP for audio,
 // but the publisher's MediaSSRC is the screen-share video sender's, not the
 // long-lived publisher SSRC tracked in r.publishers.
-func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sender *webrtc.RTPSender) {
+//
+// On the same RTCP path we also harvest ReceiverReport.FractionLost into the
+// subscriber's lossPerMille — the auto-downgrade loop consumes it lock-free.
+// Only enabled when collectLoss=true (i.e. the video-sender goroutine); the
+// audio path passes false so its RR does not clobber the video-side signal.
+func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sub *screenSubscriber, sender *webrtc.RTPSender, collectLoss bool) {
 	buf := make([]byte, 1500)
 	for {
 		n, _, err := sender.Read(buf)
@@ -701,9 +731,27 @@ func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sender 
 		}
 		var forward []rtcp.Packet
 		for _, pkt := range pkts {
-			switch pkt.(type) {
+			switch p := pkt.(type) {
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
 				forward = append(forward, pkt)
+			case *rtcp.ReceiverReport:
+				if collectLoss && sub != nil && len(p.Reports) > 0 {
+					// A compound RR may carry blocks for both video and audio
+					// SSRCs (RFC 3550 §6.4.1). Without matching by SSRC the
+					// "first" block is ambiguous, so take the worst loss
+					// across all blocks — conservative bias toward downgrade
+					// when any leg of the connection is hurting.
+					var worst uint8
+					for _, rep := range p.Reports {
+						if rep.FractionLost > worst {
+							worst = rep.FractionLost
+						}
+					}
+					// FractionLost is fixed-point /256 (RFC 3550 §6.4.1) —
+					// convert to per-mille for the int comparisons in the
+					// decision loop. 8% = 80, etc.
+					sub.lossPerMille.Store(uint32(worst) * 1000 / 256)
+				}
 			}
 		}
 		if len(forward) == 0 {
@@ -783,6 +831,107 @@ func (s *ScreenShareSession) requestKeyframe() {
 		&rtcp.PictureLossIndication{MediaSSRC: pubSSRC},
 	})
 	log.Printf("sfu: screen PLI pub=%s ssrc=%d", s.PublisherID, pubSSRC)
+}
+
+// autoDowngradeLoop polls every subscriber's lossPerMille once per
+// autoDowngradePollInterval and applies hysteretic temporal-layer changes.
+//
+// The decision is delegated to evalAutoDowngrade so tests can drive it with
+// a fake clock. Layer changes go through SetTargetTemp (already concurrency-
+// safe) and a single PLI per session per tick — the publisher will issue one
+// keyframe even if several subscribers crossed thresholds simultaneously.
+func (r *Room) autoDowngradeLoop(session *ScreenShareSession) {
+	t := time.NewTicker(autoDowngradePollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-session.ctx.Done():
+			return
+		case now := <-t.C:
+			r.runAutoDowngradeTick(session, now)
+		}
+	}
+}
+
+func (r *Room) runAutoDowngradeTick(session *ScreenShareSession, now time.Time) {
+	session.mu.RLock()
+	subs := make([]*screenSubscriber, 0, len(session.subscribers))
+	for _, s := range session.subscribers {
+		subs = append(subs, s)
+	}
+	session.mu.RUnlock()
+
+	anyChange := false
+	for _, sub := range subs {
+		if evalAutoDowngrade(sub, now, session.PublisherID) {
+			anyChange = true
+		}
+	}
+	if anyChange {
+		session.requestKeyframe()
+	}
+}
+
+// evalAutoDowngrade reads sub.lossPerMille, advances the hysteresis windows,
+// and may call SetTargetTemp. Returns true when the target temporal layer
+// actually changed (caller PLIs once per tick if any sub flipped).
+//
+// The pubID parameter is only used for log lines — passing it in keeps the
+// function free of *Room and trivial to unit-test.
+func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool {
+	loss := sub.lossPerMille.Load()
+	target := sub.targetTemp.Load()
+	nowNs := now.UnixNano()
+
+	if loss >= autoDowngradeHighLossPM {
+		// Streak of low quality. Cancel any pending upgrade timer.
+		sub.lowLossSince.Store(0)
+		if target == 0 {
+			sub.highLossSince.Store(0) // nothing more to downgrade to
+			return false
+		}
+		since := sub.highLossSince.Load()
+		if since == 0 {
+			sub.highLossSince.Store(nowNs)
+			return false
+		}
+		if time.Duration(nowNs-since) < autoDowngradeHighWindow {
+			return false
+		}
+		sub.SetTargetTemp(target - 1)
+		sub.highLossSince.Store(0)
+		log.Printf("sfu: auto-downgrade sub=%s pub=%s temp=%d→%d loss=%d‰",
+			sub.peerID, pubID, target, target-1, loss)
+		return true
+	}
+
+	if loss <= autoDowngradeLowLossPM {
+		// Streak of clean reception. Cancel any pending downgrade timer.
+		sub.highLossSince.Store(0)
+		if target >= 2 {
+			sub.lowLossSince.Store(0)
+			return false
+		}
+		since := sub.lowLossSince.Load()
+		if since == 0 {
+			sub.lowLossSince.Store(nowNs)
+			return false
+		}
+		if time.Duration(nowNs-since) < autoDowngradeLowWindow {
+			return false
+		}
+		sub.SetTargetTemp(target + 1)
+		sub.lowLossSince.Store(0)
+		log.Printf("sfu: auto-upgrade sub=%s pub=%s temp=%d→%d loss=%d‰",
+			sub.peerID, pubID, target, target+1, loss)
+		return true
+	}
+
+	// Mid-band: neither degrading enough to step down nor calm enough to step
+	// up — reset both streaks so a future excursion has to re-prove itself.
+	sub.highLossSince.Store(0)
+	sub.lowLossSince.Store(0)
+	return false
 }
 
 // handleScreenShareUnsubscribe is the client-initiated path. It defers
@@ -1141,45 +1290,6 @@ func (r *Room) handleClientOffer(p *peer, env protocol.OfferEnvelope) {
 		return
 	}
 	_ = p.write(protocol.Envelope{Event: "answer", Data: data})
-}
-
-// handleScreenShareLayerSelect updates a subscriber's temporal-layer cap. The
-// chain tracker is re-armed on the forwarder side via chainGen; until the
-// publisher sends a fresh structure-bearing keyframe, forwarding to this
-// subscriber stays gated. We immediately PLI the publisher so that keyframe
-// arrives within an RTT instead of waiting for intervalpli (~1s default).
-//
-// Out-of-range or unknown publisher: silent drop. Clients are advisory hints,
-// the server is not obligated to acknowledge.
-func (r *Room) handleScreenShareLayerSelect(p *peer, data protocol.ScreenShareLayerSelectData) {
-	target := int32(data.TemporalLayer)
-	if target < 0 || target > 2 {
-		return
-	}
-
-	r.mu.Lock()
-	pubPeer := r.peers[data.PublisherID]
-	var session *ScreenShareSession
-	if pubPeer != nil {
-		session = pubPeer.screenSession
-	}
-	r.mu.Unlock()
-	if session == nil {
-		return
-	}
-
-	session.mu.RLock()
-	subEntry := session.subscribers[p.id]
-	session.mu.RUnlock()
-	if subEntry == nil {
-		return
-	}
-	if subEntry.targetTemp.Load() == target {
-		return
-	}
-	subEntry.SetTargetTemp(target)
-	log.Printf("sfu: screen layer-select sub=%s pub=%s temp=%d", p.id, data.PublisherID, target)
-	session.requestKeyframe()
 }
 
 // screenPublisherVideoSSRC returns the SSRC of the publisher PC's inbound

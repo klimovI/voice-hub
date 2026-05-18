@@ -206,13 +206,6 @@ var fixtureCases = []fixtureCase{
 		payload: protocol.ScreenShareUnsubscribeData{PublisherID: "11223344aabbccdd"},
 	},
 	{
-		name: "screen-share-layer-select",
-		payload: protocol.ScreenShareLayerSelectData{
-			PublisherID:   "11223344aabbccdd",
-			TemporalLayer: 1,
-		},
-	},
-	{
 		name:    "screen-share-encode-pause",
 		payload: protocol.ScreenShareEncodePauseData{Layers: []int{0, 1, 2}},
 	},

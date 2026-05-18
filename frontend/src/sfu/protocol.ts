@@ -242,11 +242,6 @@ export type ScreenShareUnsubscribePayload = {
   publisherId: string;
 };
 
-export type ScreenShareLayerSelectPayload = {
-  publisherId: string;
-  temporalLayer: number;
-};
-
 export type ScreenShareEncodeLayersPayload = {
   layers: number[];
 };
@@ -300,8 +295,7 @@ export type ClientMessage =
   | { event: 'screen-share-stop'; data: Record<string, never> }
   | { event: 'screen-share-resume'; data: ScreenShareResumePayload }
   | { event: 'screen-share-subscribe'; data: ScreenShareSubscribePayload }
-  | { event: 'screen-share-unsubscribe'; data: ScreenShareUnsubscribePayload }
-  | { event: 'screen-share-layer-select'; data: ScreenShareLayerSelectPayload };
+  | { event: 'screen-share-unsubscribe'; data: ScreenShareUnsubscribePayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 

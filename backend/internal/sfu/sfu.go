@@ -774,12 +774,6 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.handleScreenShareUnsubscribe(p, d)
-	case "screen-share-layer-select":
-		var d protocol.ScreenShareLayerSelectData
-		if err := json.Unmarshal(msg.Data, &d); err != nil {
-			return
-		}
-		r.handleScreenShareLayerSelect(p, d)
 	}
 }
 
