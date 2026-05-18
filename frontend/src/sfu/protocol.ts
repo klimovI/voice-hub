@@ -16,6 +16,43 @@ export type Envelope = {
   data: unknown;
 };
 
+/**
+ * PCKind discriminates the RTCPeerConnection role every offer / answer /
+ * candidate message targets. Required on every signaling message — a missing
+ * value is a wire-format bug, not a default. Mirror of protocol.PCKind in Go.
+ *
+ *  - audio       → the single audio PC each peer maintains
+ *  - screen-pub  → the publisher's screen-share PC (one per active share)
+ *  - screen-sub  → a subscriber PC scoped to one publisher (publisherId required)
+ */
+export type PCKind = 'audio' | 'screen-pub' | 'screen-sub';
+
+/** Discriminated union form used by router switch statements. */
+export type PCDisc =
+  | { pc: 'audio' }
+  | { pc: 'screen-pub' }
+  | { pc: 'screen-sub'; publisherId: string };
+
+/**
+ * Wire shape of "offer" / "answer" data: SessionDescription fields hoisted
+ * to the top level, plus the PC discriminator. PublisherID is present iff
+ * pc='screen-sub'.
+ */
+export type OfferEnvelope = RTCSessionDescriptionInit & {
+  pc: PCKind;
+  publisherId?: string;
+};
+
+export type AnswerEnvelope = RTCSessionDescriptionInit & {
+  pc: PCKind;
+  publisherId?: string;
+};
+
+export type CandidateEnvelope = RTCIceCandidateInit & {
+  pc: PCKind;
+  publisherId?: string;
+};
+
 /** Canonical peer descriptor, used in welcome / peer-joined / peer-info. */
 export type PeerInfo = {
   id: string;
@@ -41,6 +78,11 @@ export type PeerInfo = {
    * entirely; voice peers can use it before the video track has arrived.
    */
   screenSharing?: boolean;
+  /**
+   * Server-driven flag: true iff the active screen share also carries a
+   * system-audio Opus track. Meaningful only when screenSharing=true.
+   */
+  screenSharingHasAudio?: boolean;
 };
 
 // Server → Client payloads
@@ -153,6 +195,62 @@ export type ChatPayload = {
   senderName?: string;
 };
 
+// Screen share — mirror of protocol/messages.go Screen* types.
+// See backend file for the lifecycle / state-machine notes; this file only
+// names the wire shapes.
+
+export type ScreenShareReason =
+  | 'not-found'
+  | 'invalid-token'
+  | 'already-publishing'
+  | 'internal';
+
+export type ScreenShareStartPayload = {
+  sdp: string;
+  hasSystemAudio: boolean;
+};
+
+/** Server-issued ack carrying the resume token. Delivered BEFORE the matching answer. */
+export type ScreenShareStartedPayload = {
+  sessionToken: string;
+};
+
+export type ScreenShareResumePayload = {
+  sessionToken: string;
+};
+
+export type ScreenShareAvailablePayload = {
+  publisherId: string;
+  hasSystemAudio: boolean;
+};
+
+export type ScreenShareEndedPayload = {
+  publisherId: string;
+};
+
+export type ScreenShareErrorPayload = {
+  publisherId?: string;
+  reason: ScreenShareReason;
+};
+
+export type ScreenShareSubscribePayload = {
+  publisherId: string;
+  preferredTemporalLayer: number;
+};
+
+export type ScreenShareUnsubscribePayload = {
+  publisherId: string;
+};
+
+export type ScreenShareLayerSelectPayload = {
+  publisherId: string;
+  temporalLayer: number;
+};
+
+export type ScreenShareEncodeLayersPayload = {
+  layers: number[];
+};
+
 // Discriminated union — all server→client variants
 
 export type PingPayload = {
@@ -168,21 +266,36 @@ export type ServerMessage =
   | { event: 'peer-state'; data: PeerStatePayload }
   | { event: 'chat'; data: ChatPayload }
   | { event: 'ping'; data: PingPayload }
-  | { event: 'offer'; data: RTCSessionDescriptionInit }
-  | { event: 'candidate'; data: RTCIceCandidateInit };
+  | { event: 'offer'; data: OfferEnvelope }
+  // The SFU answers the publisher's screen-pub offer — that arrives here as
+  // 'answer'. (Audio uses the inverse direction; SFU offers, peer answers.)
+  | { event: 'answer'; data: AnswerEnvelope }
+  | { event: 'candidate'; data: CandidateEnvelope }
+  | { event: 'screen-share-started'; data: ScreenShareStartedPayload }
+  | { event: 'screen-share-available'; data: ScreenShareAvailablePayload }
+  | { event: 'screen-share-ended'; data: ScreenShareEndedPayload }
+  | { event: 'screen-share-error'; data: ScreenShareErrorPayload }
+  | { event: 'screen-share-encode-pause'; data: ScreenShareEncodeLayersPayload }
+  | { event: 'screen-share-encode-resume'; data: ScreenShareEncodeLayersPayload };
 
 // ClientMessage union (used in send helpers)
 
 export type ClientMessage =
   | { event: 'hello'; data: HelloPayload }
-  | { event: 'answer'; data: RTCSessionDescriptionInit }
-  | { event: 'candidate'; data: RTCIceCandidateInit }
+  | { event: 'answer'; data: AnswerEnvelope }
+  | { event: 'candidate'; data: CandidateEnvelope }
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
   | { event: 'set-state'; data: SetStatePayload }
   | { event: 'chat-send'; data: ChatSendPayload }
   | { event: 'ping'; data: { to: string } }
   /** Asks the server for a fresh offer after a publisher-side track change. */
-  | { event: 'renegotiate'; data?: undefined };
+  | { event: 'renegotiate'; data?: undefined }
+  | { event: 'screen-share-start'; data: ScreenShareStartPayload }
+  | { event: 'screen-share-stop'; data: Record<string, never> }
+  | { event: 'screen-share-resume'; data: ScreenShareResumePayload }
+  | { event: 'screen-share-subscribe'; data: ScreenShareSubscribePayload }
+  | { event: 'screen-share-unsubscribe'; data: ScreenShareUnsubscribePayload }
+  | { event: 'screen-share-layer-select'; data: ScreenShareLayerSelectPayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -197,6 +310,10 @@ export type ClientMessage =
  *
  * A console.warn is emitted on every failure path to aid debugging.
  */
+function isPCKind(v: unknown): v is PCKind {
+  return v === 'audio' || v === 'screen-pub' || v === 'screen-sub';
+}
+
 export function parseServerMessage(raw: string): ServerMessage | null {
   let parsed: unknown;
   try {
@@ -273,28 +390,98 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     }
 
     case 'offer': {
+      const d = data as Record<string, unknown>;
       if (
         typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).type !== 'string' ||
-        typeof (data as Record<string, unknown>).sdp !== 'string'
+        typeof d.type !== 'string' ||
+        typeof d.sdp !== 'string' ||
+        !isPCKind(d.pc)
       ) {
         console.warn("[protocol] malformed 'offer' payload:", data);
         return null;
       }
-      return { event, data: data as RTCSessionDescriptionInit };
+      return { event, data: data as OfferEnvelope };
     }
 
-    case 'candidate': {
+    case 'answer': {
+      const d = data as Record<string, unknown>;
       if (
         typeof data !== 'object' ||
         data === null ||
-        typeof (data as Record<string, unknown>).candidate !== 'string'
+        typeof d.type !== 'string' ||
+        typeof d.sdp !== 'string' ||
+        !isPCKind(d.pc)
+      ) {
+        console.warn("[protocol] malformed 'answer' payload:", data);
+        return null;
+      }
+      return { event, data: data as AnswerEnvelope };
+    }
+
+    case 'candidate': {
+      const d = data as Record<string, unknown>;
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof d.candidate !== 'string' ||
+        !isPCKind(d.pc)
       ) {
         console.warn("[protocol] malformed 'candidate' payload:", data);
         return null;
       }
-      return { event, data: data as RTCIceCandidateInit };
+      return { event, data: data as CandidateEnvelope };
+    }
+
+    case 'screen-share-started': {
+      const d = data as Record<string, unknown>;
+      if (typeof data !== 'object' || data === null || typeof d.sessionToken !== 'string') {
+        console.warn("[protocol] malformed 'screen-share-started' payload:", data);
+        return null;
+      }
+      return { event, data: data as ScreenShareStartedPayload };
+    }
+
+    case 'screen-share-available': {
+      const d = data as Record<string, unknown>;
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof d.publisherId !== 'string' ||
+        typeof d.hasSystemAudio !== 'boolean'
+      ) {
+        console.warn("[protocol] malformed 'screen-share-available' payload:", data);
+        return null;
+      }
+      return { event, data: data as ScreenShareAvailablePayload };
+    }
+
+    case 'screen-share-ended': {
+      const d = data as Record<string, unknown>;
+      if (typeof data !== 'object' || data === null || typeof d.publisherId !== 'string') {
+        console.warn("[protocol] malformed 'screen-share-ended' payload:", data);
+        return null;
+      }
+      return { event, data: data as ScreenShareEndedPayload };
+    }
+
+    case 'screen-share-error': {
+      const d = data as Record<string, unknown>;
+      if (typeof data !== 'object' || data === null || typeof d.reason !== 'string') {
+        console.warn("[protocol] malformed 'screen-share-error' payload:", data);
+        return null;
+      }
+      return { event, data: data as ScreenShareErrorPayload };
+    }
+
+    case 'screen-share-encode-pause':
+    case 'screen-share-encode-resume': {
+      const d = data as Record<string, unknown>;
+      if (typeof data !== 'object' || data === null || !Array.isArray(d.layers)) {
+        console.warn(`[protocol] malformed '${event}' payload:`, data);
+        return null;
+      }
+      return { event, data: data as ScreenShareEncodeLayersPayload };
     }
 
     case 'chat': {

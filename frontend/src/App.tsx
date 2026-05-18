@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './styles/main.css';
 import { useStore } from './store/useStore';
 import { useAudioEngine } from './hooks/useAudioEngine';
@@ -21,6 +21,10 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { Footer } from './components/Footer';
 import { PingToast } from './components/PingToast';
 import { PingCard } from './components/PingCard';
+import { ScreenShareButton } from './components/ScreenShareButton';
+import { ScreenShareGallery } from './components/ScreenShareGallery';
+import { ScreenShareFocused } from './components/ScreenShareFocused';
+import { useScreenShareStore } from './store/useScreenShareStore';
 import { useAppVersion } from './hooks/useAppVersion';
 import { useLurkerWS } from './hooks/useLurkerWS';
 
@@ -250,9 +254,40 @@ export function App() {
     [voiceActive, session, lurker],
   );
 
+  const handleTileClick = useCallback(
+    (publisherId: string) => {
+      const share = useScreenShareStore.getState();
+      const prev = share.focusedId;
+      if (prev === publisherId) return;
+      if (prev) session.unsubscribeScreenShare(prev);
+      share.setFocused(publisherId);
+      session.subscribeScreenShare(publisherId);
+    },
+    [session],
+  );
+
+  const handleFocusedClose = useCallback(() => {
+    const share = useScreenShareStore.getState();
+    const focused = share.focusedId;
+    if (focused) session.unsubscribeScreenShare(focused);
+    share.setFocused(null);
+  }, [session]);
+
+  // Drop focus on -ended (publisher stopped while focused).
+  const focusedId = useScreenShareStore((s) => s.focusedId);
+  const focusedStillShared = useScreenShareStore((s) =>
+    s.focusedId ? s.shares.has(s.focusedId) : false,
+  );
+  useEffect(() => {
+    if (focusedId && !focusedStillShared) {
+      useScreenShareStore.getState().setFocused(null);
+    }
+  }, [focusedId, focusedStillShared]);
+
   return (
     <>
       <PingToast />
+      <ScreenShareFocused onClose={handleFocusedClose} />
       <main
         className="grid gap-4 mx-auto
           w-[min(1560px,100%)] px-5 pt-5 pb-12
@@ -282,6 +317,13 @@ export function App() {
             />
           </div>
           <div className="grid gap-4 content-start">
+            {voiceActive && (
+              <ScreenShareButton
+                onStart={session.startScreenShare}
+                onStop={session.stopScreenShare}
+              />
+            )}
+            <ScreenShareGallery onTileClick={handleTileClick} />
             <ChatPanel roomId={roomSlug} onSend={handleChatSend} />
           </div>
           <div className="grid gap-4 content-start">

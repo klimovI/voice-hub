@@ -10,6 +10,7 @@
 
 import { useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
+import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useAudioEngine } from './useAudioEngine';
 import { preloadEngine, isEngineReady } from '../audio/engine';
 import { useSFU } from './useSFU';
@@ -86,6 +87,14 @@ export type UseSessionManagerReturn = {
   sendChat: (text: string, clientMsgId: string) => void;
   /** Send a ping to a specific peer. No-op when not joined. */
   sendPing: (targetId: string) => void;
+  /** Open the system picker and start publishing a screen share. */
+  startScreenShare: () => Promise<void>;
+  /** Stop the active publisher session. No-op when not publishing. */
+  stopScreenShare: () => void;
+  /** Subscribe to a peer's share (called from gallery tile click). */
+  subscribeScreenShare: (publisherId: string) => void;
+  /** Unsubscribe from a peer's share (called from focused close). */
+  unsubscribeScreenShare: (publisherId: string) => void;
   /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
   /**
@@ -361,6 +370,11 @@ export function useSessionManager({
             clientId: clientIdRef.current,
             chatOnly: false,
           });
+          // Welcome is also authoritative for in-room screen shares: drop
+          // anything we cached from a prior session, then seed from the
+          // server snapshot. Cold-join lands here.
+          const share = useScreenShareStore.getState();
+          share.clearShares();
           for (const p of peers ?? []) {
             const stored = p.clientId ? loadPeerVolume(p.clientId) : null;
             getStore().upsertParticipant({
@@ -373,6 +387,12 @@ export function useSessionManager({
               screenSharing: p.screenSharing ?? false,
               ...(stored !== null ? { localVolume: stored } : {}),
             });
+            if (p.screenSharing) {
+              share.upsertShare({
+                publisherId: p.id,
+                hasSystemAudio: p.screenSharingHasAudio ?? false,
+              });
+            }
           }
           // Re-send our own pending chat messages whose echo we missed during
           // the previous WS rotation (e.g. lurker → voice transition).
@@ -386,6 +406,7 @@ export function useSessionManager({
           deafened,
           chatOnly,
           screenSharing,
+          screenSharingHasAudio,
         }) => {
           const stored = clientId ? loadPeerVolume(clientId) : null;
           getStore().upsertParticipant({
@@ -398,12 +419,32 @@ export function useSessionManager({
             screenSharing: screenSharing ?? false,
             ...(stored !== null ? { localVolume: stored } : {}),
           });
+          // Symmetric with onWelcome's seed path: if the join broadcast
+          // arrives with screenSharing already true (unreachable today, but
+          // possible once Stage 2 resume rebinds publishing across reconnect),
+          // the gallery would otherwise be one peer-info round trip behind.
+          if (screenSharing) {
+            useScreenShareStore.getState().upsertShare({
+              publisherId: id,
+              hasSystemAudio: screenSharingHasAudio ?? false,
+            });
+          }
         },
         onPeerLeft: ({ id }) => {
           audio.detachRemoteStream(id);
           getStore().removeParticipant(id);
+          // -ended fires from the backend independently; this is just a
+          // safety net for the case where the publisher's session was torn
+          // down without an explicit -ended (shouldn't happen but cheap).
+          useScreenShareStore.getState().removeShare(id);
         },
-        onPeerInfo: ({ id, displayName: peerDisplay, clientId, screenSharing }) => {
+        onPeerInfo: ({
+          id,
+          displayName: peerDisplay,
+          clientId,
+          screenSharing,
+          screenSharingHasAudio,
+        }) => {
           const patch: {
             display?: string;
             clientId?: string;
@@ -413,6 +454,20 @@ export function useSessionManager({
           // Backfill clientId if a track-induced entry beat peer-joined here.
           if (clientId) patch.clientId = clientId;
           getStore().updateParticipant(id, patch);
+          // Reconcile shares-store on flip in either direction. -available
+          // is authoritative on transition to true, but peer-info is the
+          // only signal for transitions to false caused by anything other
+          // than -ended (e.g. the publisher session ending while the
+          // subscriber is offline — they get peer-info on reconnect).
+          const share = useScreenShareStore.getState();
+          if (screenSharing) {
+            share.upsertShare({
+              publisherId: id,
+              hasSystemAudio: screenSharingHasAudio ?? false,
+            });
+          } else {
+            share.removeShare(id);
+          }
         },
         onPeerState: ({ id, selfMuted, deafened }) => {
           getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
@@ -425,6 +480,30 @@ export function useSessionManager({
             getStore().upsertParticipant({ id: peerId, hasStream: true });
             audio.attachRemoteStream(peerId, stream);
           }
+        },
+        onScreenShareAvailable: ({ publisherId, hasSystemAudio }) => {
+          useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio });
+        },
+        onScreenShareEnded: ({ publisherId }) => {
+          useScreenShareStore.getState().removeShare(publisherId);
+        },
+        onScreenShareError: ({ publisherId, reason }) => {
+          // Reverts UI state — if we were focused on this publisher, drop it.
+          // If the error is on our own session (no publisherId), recover the
+          // publish button by snapping myStatus back to idle.
+          const store = useScreenShareStore.getState();
+          if (publisherId) store.removeShare(publisherId);
+          if (!publisherId || reason === 'already-publishing' || reason === 'internal') {
+            store.setMyStatus('idle');
+          }
+        },
+        onScreenShareTrack: ({ publisherId, stream, kind }) => {
+          const store = useScreenShareStore.getState();
+          if (kind === 'video') store.attachFocusedVideo(publisherId, stream);
+          else store.attachFocusedAudio(publisherId, stream);
+        },
+        onScreenShareSelfStopped: () => {
+          useScreenShareStore.getState().setMyStatus('idle');
         },
         onError: () => {
           // onState handles user-visible errors
@@ -465,6 +544,8 @@ export function useSessionManager({
     audio.fullCleanup();
     micGraphRef.current = null;
     peerIdRef.current = null;
+    useScreenShareStore.getState().clearShares();
+    useScreenShareStore.getState().setMyStatus('idle');
     // Optimistic transition: morph self into a lurker placeholder and drop
     // voice peers. Avoids a 1–2 s empty-roster flash while the lurker WS
     // handshakes; lurker.onWelcome will clear+repopulate authoritatively
@@ -677,6 +758,50 @@ export function useSessionManager({
     [handleLeave, handleJoin, rotateRoomKeepingMic],
   );
 
+  const startScreenShare = useCallback(async (): Promise<void> => {
+    const client = sfu.getClient();
+    if (!client) throw new Error('Не подключён');
+    const share = useScreenShareStore.getState();
+    if (share.myStatus !== 'idle') return;
+    share.setMyStatus('starting');
+    try {
+      await client.startScreenShare();
+      // We can't observe -started fully here (it lives on the WS path); the
+      // status flips to 'publishing' when the SDP answer settles inside
+      // startScreenShare. Set it on success.
+      useScreenShareStore.getState().setMyStatus('publishing');
+    } catch (err) {
+      useScreenShareStore.getState().setMyStatus('idle');
+      // User cancelling the picker raises a DOMException with name "NotAllowedError"
+      // or "AbortError" — neither should produce a noisy app error.
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'AbortError') return;
+      throw err;
+    }
+  }, [sfu]);
+
+  const stopScreenShare = useCallback((): void => {
+    const client = sfu.getClient();
+    if (!client) return;
+    useScreenShareStore.getState().setMyStatus('stopping');
+    client.stopScreenShare();
+    // onScreenShareSelfStopped will flip status back to idle.
+  }, [sfu]);
+
+  const subscribeScreenShare = useCallback(
+    (publisherId: string): void => {
+      sfu.getClient()?.subscribeScreenShare(publisherId);
+    },
+    [sfu],
+  );
+
+  const unsubscribeScreenShare = useCallback(
+    (publisherId: string): void => {
+      sfu.getClient()?.unsubscribeScreenShare(publisherId);
+    },
+    [sfu],
+  );
+
   return {
     join: handleJoin,
     leave: handleLeave,
@@ -689,6 +814,10 @@ export function useSessionManager({
     sendSetState,
     sendChat,
     sendPing,
+    startScreenShare,
+    stopScreenShare,
+    subscribeScreenShare,
+    unsubscribeScreenShare,
     getRoomId,
     handleChatReceive,
     handlePingReceive,

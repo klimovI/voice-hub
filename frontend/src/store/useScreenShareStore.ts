@@ -1,0 +1,96 @@
+// Reactive state for screen-share UI.
+//
+// Lives in its own Zustand store (not useStore.ts) so the existing participants
+// / chat / audio state isn't touched by every screen-share UI re-render and
+// vice versa. Audio nodes follow the same pattern (kept imperative outside the
+// store); MediaStreams here are exceptions — the focused video tile reads
+// `focusedStream` directly to feed `<video>.srcObject`.
+
+import { create } from 'zustand';
+
+/** One active screen share announced by the server. */
+export type ScreenShare = {
+  publisherId: string;
+  hasSystemAudio: boolean;
+};
+
+/** Local publisher state — independent from the shares map (which lists what's
+ * happening in the room, not what we're publishing). */
+export type MyShareStatus = 'idle' | 'starting' | 'publishing' | 'stopping';
+
+export type ScreenShareState = {
+  shares: Map<string, ScreenShare>;
+  upsertShare: (share: ScreenShare) => void;
+  removeShare: (publisherId: string) => void;
+  clearShares: () => void;
+
+  focusedId: string | null;
+  focusedStream: MediaStream | null;
+  focusedAudioStream: MediaStream | null;
+  setFocused: (publisherId: string | null) => void;
+  attachFocusedVideo: (publisherId: string, stream: MediaStream) => void;
+  attachFocusedAudio: (publisherId: string, stream: MediaStream) => void;
+
+  myStatus: MyShareStatus;
+  setMyStatus: (s: MyShareStatus) => void;
+};
+
+export const useScreenShareStore = create<ScreenShareState>((set) => ({
+  shares: new Map(),
+  upsertShare: (share) =>
+    set((s) => {
+      const m = new Map(s.shares);
+      m.set(share.publisherId, share);
+      return { shares: m };
+    }),
+  removeShare: (publisherId) =>
+    set((s) => {
+      if (!s.shares.has(publisherId)) return {};
+      const m = new Map(s.shares);
+      m.delete(publisherId);
+      const patch: Partial<ScreenShareState> = { shares: m };
+      // If we lost the focused share, drop the focus + the attached streams.
+      if (s.focusedId === publisherId) {
+        patch.focusedId = null;
+        patch.focusedStream = null;
+        patch.focusedAudioStream = null;
+      }
+      return patch;
+    }),
+  clearShares: () =>
+    set({
+      shares: new Map(),
+      focusedId: null,
+      focusedStream: null,
+      focusedAudioStream: null,
+    }),
+
+  focusedId: null,
+  focusedStream: null,
+  focusedAudioStream: null,
+  setFocused: (publisherId) =>
+    set((s) => {
+      // Switching focus invalidates any previously-attached stream — the
+      // new subscriber's tracks haven't arrived yet. UI shows a loading
+      // placeholder until attachFocusedVideo fires.
+      if (publisherId === s.focusedId) return {};
+      return {
+        focusedId: publisherId,
+        focusedStream: null,
+        focusedAudioStream: null,
+      };
+    }),
+  attachFocusedVideo: (publisherId, stream) =>
+    set((s) => {
+      if (s.focusedId !== publisherId) return {};
+      return { focusedStream: stream };
+    }),
+  attachFocusedAudio: (publisherId, stream) =>
+    set((s) => {
+      if (s.focusedId !== publisherId) return {};
+      return { focusedAudioStream: stream };
+    }),
+
+  myStatus: 'idle',
+  setMyStatus: (s) => set({ myStatus: s }),
+}));

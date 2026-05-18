@@ -8,7 +8,11 @@ import {
   type ChatPayload,
   type ChatSendPayload,
   type PingPayload,
+  type ScreenShareAvailablePayload,
+  type ScreenShareEndedPayload,
+  type ScreenShareErrorPayload,
 } from './protocol';
+import { orderCodecsAV1First } from '../screenshare/codec';
 
 export type SFUHandlers = {
   onState: (state: string) => void;
@@ -20,6 +24,24 @@ export type SFUHandlers = {
   onChat: (data: ChatPayload) => void;
   onPing: (data: PingPayload) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
+  /** A new screen share is publishing — UI should render a placeholder tile. */
+  onScreenShareAvailable: (data: ScreenShareAvailablePayload) => void;
+  /** A screen share has stopped — UI should drop the tile and any focused subscription. */
+  onScreenShareEnded: (data: ScreenShareEndedPayload) => void;
+  /** Server reported an error on a screen-share path. */
+  onScreenShareError: (data: ScreenShareErrorPayload) => void;
+  /**
+   * Subscriber-side media arrival. Fires once the subscriber PC's ontrack
+   * resolves; `kind` lets the UI route audio (system audio) vs video.
+   */
+  onScreenShareTrack: (data: {
+    publisherId: string;
+    track: MediaStreamTrack;
+    stream: MediaStream;
+    kind: 'video' | 'audio';
+  }) => void;
+  /** Publisher-side: the publisher session has stopped (track ended, user cancel, server stop). */
+  onScreenShareSelfStopped: () => void;
   onError: (err: unknown) => void;
 };
 
@@ -40,6 +62,23 @@ export type SFUClient = {
   sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
+  /**
+   * Open the system picker and start publishing. Resolves when the publisher
+   * PC's answer has been applied. Rejects if the user cancels the picker or
+   * if the server rejects the start.
+   */
+  startScreenShare(): Promise<void>;
+  /** Tear down the publisher PC and notify the server. */
+  stopScreenShare(): void;
+  /**
+   * Subscribe to a specific publisher's share. UI calls this when the user
+   * clicks a gallery tile.
+   */
+  subscribeScreenShare(publisherId: string): void;
+  /** Detach from a publisher's share and close the subscriber PC. */
+  unsubscribeScreenShare(publisherId: string): void;
+  /** True when this client is currently publishing a share. */
+  isPublishingScreenShare(): boolean;
 };
 
 function noop(): void {
@@ -57,6 +96,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onChat: handlers.onChat ?? noop,
     onPing: handlers.onPing ?? noop,
     onTrack: handlers.onTrack ?? noop,
+    onScreenShareAvailable: handlers.onScreenShareAvailable ?? noop,
+    onScreenShareEnded: handlers.onScreenShareEnded ?? noop,
+    onScreenShareError: handlers.onScreenShareError ?? noop,
+    onScreenShareTrack: handlers.onScreenShareTrack ?? noop,
+    onScreenShareSelfStopped: handlers.onScreenShareSelfStopped ?? noop,
     onError: handlers.onError ?? noop,
   };
 
@@ -64,6 +108,16 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let pc: RTCPeerConnection | null = null;
   let myId: string | null = null;
   let stopped = false;
+  let iceServers: RTCIceServer[] = [];
+
+  // Screen share state. screenPubPC is the publisher-side PC (one at a time
+  // per client by design — multi-publish per client is out of scope). The
+  // screenSubs map is keyed by publisher peer ID; each entry is a complete
+  // subscriber PC with its own stream/track wiring.
+  let screenPubPC: RTCPeerConnection | null = null;
+  let screenPubStream: MediaStream | null = null;
+  let screenPubStopped = false;
+  const screenSubs = new Map<string, RTCPeerConnection>();
 
   function send(event: string, data: unknown): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -73,8 +127,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   function connect(opts: ConnectOptions): Promise<void> {
     if (ws || pc) throw new Error('sfu-client: already connected');
     stopped = false;
+    iceServers = opts.iceServers ?? [];
 
-    pc = new RTCPeerConnection({ iceServers: opts.iceServers ?? [] });
+    pc = new RTCPeerConnection({ iceServers });
 
     pc.ontrack = (event) => {
       const stream = event.streams?.[0] ?? null;
@@ -86,7 +141,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     pc.onicecandidate = (event) => {
       if (!event.candidate) return;
-      send('candidate', event.candidate.toJSON ? event.candidate.toJSON() : event.candidate);
+      const cand = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
+      send('candidate', { pc: 'audio', ...cand });
     };
 
     pc.onconnectionstatechange = () => {
@@ -174,22 +230,338 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       case 'ping':
         on.onPing(msg.data);
         break;
-      case 'offer': {
+      case 'offer':
+        await handleOffer(msg.data);
+        break;
+      case 'answer':
+        await handleAnswer(msg.data);
+        break;
+      case 'candidate':
+        await handleCandidate(msg.data);
+        break;
+      case 'screen-share-started':
+        // sessionToken is delivered here, but Stage 1 resume is server-side
+        // stub (always rejects). Stash → Stage 2. For now: no-op.
+        void msg.data.sessionToken;
+        break;
+      case 'screen-share-available':
+        on.onScreenShareAvailable(msg.data);
+        break;
+      case 'screen-share-ended':
+        // Tear down our local subscriber PC for that publisher, if any.
+        teardownScreenSub(msg.data.publisherId);
+        on.onScreenShareEnded(msg.data);
+        break;
+      case 'screen-share-error':
+        // Best-effort cleanup of the relevant local state. The handler may
+        // also revert UI state.
+        if (msg.data.publisherId) teardownScreenSub(msg.data.publisherId);
+        on.onScreenShareError(msg.data);
+        break;
+      case 'screen-share-encode-pause':
+      case 'screen-share-encode-resume':
+        // Dynacast not implemented in Stage 1 publisher; ignore.
+        break;
+    }
+  }
+
+  async function handleOffer(data: ServerMessage & { event: 'offer' } extends never
+    ? never
+    : Extract<ServerMessage, { event: 'offer' }>['data']): Promise<void> {
+    switch (data.pc) {
+      case 'audio': {
         if (!pc) return;
-        await pc.setRemoteDescription(msg.data);
+        await pc.setRemoteDescription({ type: data.type, sdp: data.sdp });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        send('answer', answer);
-        break;
+        send('answer', { pc: 'audio', type: answer.type, sdp: answer.sdp });
+        return;
       }
-      case 'candidate':
-        if (!pc) return;
-        try {
-          await pc.addIceCandidate(msg.data);
-        } catch {
-          // stale or invalid candidate; ignore
+      case 'screen-sub': {
+        const publisherId = data.publisherId;
+        if (!publisherId) {
+          console.warn('[sfu] screen-sub offer without publisherId');
+          return;
         }
-        break;
+        const subPC = screenSubs.get(publisherId);
+        if (!subPC) {
+          console.warn(`[sfu] screen-sub offer for unknown publisher=${publisherId}`);
+          return;
+        }
+        await subPC.setRemoteDescription({ type: data.type, sdp: data.sdp });
+        const answer = await subPC.createAnswer();
+        await subPC.setLocalDescription(answer);
+        send('answer', {
+          pc: 'screen-sub',
+          publisherId,
+          type: answer.type,
+          sdp: answer.sdp,
+        });
+        return;
+      }
+      case 'screen-pub':
+        // SFU never offers to a screen-pub PC — it always answers.
+        console.warn('[sfu] unexpected offer with pc=screen-pub');
+        return;
+    }
+  }
+
+  async function handleAnswer(
+    data: Extract<ServerMessage, { event: 'answer' }>['data'],
+  ): Promise<void> {
+    // The SFU answers the publisher's screen-pub offer. Other pc kinds
+    // arriving as 'answer' are a protocol mistake; log and drop.
+    if (data.pc !== 'screen-pub') {
+      console.warn(`[sfu] unexpected answer with pc=${data.pc}`);
+      return;
+    }
+    if (!screenPubPC) {
+      console.warn('[sfu] screen-pub answer with no active publisher PC');
+      return;
+    }
+    await screenPubPC.setRemoteDescription({ type: data.type, sdp: data.sdp });
+  }
+
+  async function handleCandidate(
+    data: Extract<ServerMessage, { event: 'candidate' }>['data'],
+  ): Promise<void> {
+    const { pc: kind, publisherId, ...cand } = data;
+    try {
+      switch (kind) {
+        case 'audio':
+          if (!pc) return;
+          await pc.addIceCandidate(cand);
+          return;
+        case 'screen-pub':
+          if (!screenPubPC) return;
+          await screenPubPC.addIceCandidate(cand);
+          return;
+        case 'screen-sub': {
+          if (!publisherId) return;
+          const subPC = screenSubs.get(publisherId);
+          if (!subPC) return;
+          await subPC.addIceCandidate(cand);
+          return;
+        }
+      }
+    } catch {
+      // stale or invalid candidate; ignore.
+    }
+  }
+
+  // ---- Screen share: publisher ----
+
+  async function startScreenShare(): Promise<void> {
+    if (screenPubPC) throw new Error('sfu-client: already publishing screen share');
+
+    // The user's picker click is the gesture context. Any await between this
+    // line and getDisplayMedia would break the gesture chain on some browsers.
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: { ideal: 60, max: 60 },
+        width: { ideal: 2560 },
+        height: { ideal: 1440 },
+        displaySurface: 'monitor',
+      },
+      audio: true,
+      // systemAudio / selfBrowserSurface / surfaceSwitching are top-level
+      // getDisplayMedia options, NOT inside audio/video constraints. Chrome
+      // is strict about this and silently drops mistyped values.
+      systemAudio: 'include',
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include',
+    } as DisplayMediaStreamOptions);
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) {
+      stream.getTracks().forEach((t) => t.stop());
+      throw new Error('sfu-client: getDisplayMedia returned no video track');
+    }
+    // contentHint='detail' biases encoders toward sharpness (text legibility)
+    // over motion smoothness — the right tradeoff for desktop / window
+    // capture. 'motion' would be the choice for game streaming.
+    videoTrack.contentHint = 'detail';
+
+    const audioTrack = stream.getAudioTracks()[0];
+    const hasSystemAudio = !!audioTrack;
+
+    const newPC = new RTCPeerConnection({ iceServers });
+    screenPubPC = newPC;
+    screenPubStream = stream;
+    screenPubStopped = false;
+
+    const videoSender = newPC.addTrack(videoTrack, stream);
+    if (audioTrack) newPC.addTrack(audioTrack, stream);
+
+    // Codec preferences must be set BEFORE createOffer so the resulting SDP
+    // lists AV1 first. setCodecPreferences on the matching transceiver, not
+    // on the PC.
+    const caps = RTCRtpSender.getCapabilities('video');
+    if (caps) {
+      const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
+      if (tx) {
+        const ordered = orderCodecsAV1First(caps.codecs);
+        if (ordered.length > 0) tx.setCodecPreferences(ordered);
+      }
+    }
+
+    newPC.addEventListener('icecandidate', (ev) => {
+      if (!ev.candidate || screenPubStopped) return;
+      const cand = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
+      send('candidate', { pc: 'screen-pub', ...cand });
+    });
+
+    newPC.addEventListener('connectionstatechange', () => {
+      if (
+        newPC.connectionState === 'failed' ||
+        newPC.connectionState === 'closed'
+      ) {
+        if (!screenPubStopped) stopScreenShare();
+      }
+    });
+
+    videoTrack.addEventListener('ended', () => {
+      // Fires when the user hits "Stop sharing" in the browser's native bar.
+      if (!screenPubStopped) stopScreenShare();
+    });
+
+    const offer = await newPC.createOffer();
+    await newPC.setLocalDescription(offer);
+
+    send('screen-share-start', { sdp: offer.sdp ?? '', hasSystemAudio });
+
+    // The server replies with screen-share-started (token) followed by an
+    // answer envelope with pc='screen-pub'. setParameters needs encodings[]
+    // to be populated, which happens at setRemoteDescription(answer) time.
+    // Wait for signaling-state=stable then apply L1T3 + bitrate caps.
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const t = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('sfu-client: screen-share answer timeout'));
+          }
+        }, 10000);
+        const watcher = () => {
+          if (newPC.signalingState !== 'stable' || settled) return;
+          settled = true;
+          clearTimeout(t);
+          newPC.removeEventListener('signalingstatechange', watcher);
+          try {
+            const params = videoSender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) {
+              params.encodings = [{}];
+            }
+            params.encodings[0] = {
+              ...params.encodings[0],
+              scalabilityMode: 'L1T3',
+              maxBitrate: 5_000_000,
+              maxFramerate: 60,
+              priority: 'high',
+            } as RTCRtpEncodingParameters;
+            void videoSender.setParameters(params);
+          } catch (err) {
+            console.warn('[sfu] setParameters on screen video failed', err);
+          }
+          resolve();
+        };
+        newPC.addEventListener('signalingstatechange', watcher);
+      });
+    } catch (err) {
+      // Don't leak the PC if the answer never arrives — without nulling
+      // screenPubPC the next startScreenShare would throw "already publishing".
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* ignore */
+      }
+      try {
+        newPC.close();
+      } catch {
+        /* ignore */
+      }
+      if (screenPubPC === newPC) {
+        screenPubPC = null;
+        screenPubStream = null;
+        screenPubStopped = false;
+      }
+      throw err;
+    }
+  }
+
+  function stopScreenShare(): void {
+    if (!screenPubPC) return;
+    screenPubStopped = true;
+    send('screen-share-stop', {});
+    try {
+      screenPubStream?.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    try {
+      screenPubPC.close();
+    } catch {
+      /* ignore */
+    }
+    screenPubPC = null;
+    screenPubStream = null;
+    on.onScreenShareSelfStopped();
+  }
+
+  function isPublishingScreenShare(): boolean {
+    return screenPubPC !== null && !screenPubStopped;
+  }
+
+  // ---- Screen share: subscriber ----
+
+  function subscribeScreenShare(publisherId: string): void {
+    if (screenSubs.has(publisherId)) return;
+    const subPC = new RTCPeerConnection({ iceServers });
+    screenSubs.set(publisherId, subPC);
+
+    subPC.addEventListener('track', (ev) => {
+      // Some browsers populate ev.streams; some don't. The fallback wraps
+      // the track in a fresh MediaStream so the consumer always has a
+      // stable handle to attach to <video>.srcObject.
+      const stream = ev.streams[0] ?? new MediaStream([ev.track]);
+      on.onScreenShareTrack({
+        publisherId,
+        track: ev.track,
+        stream,
+        kind: ev.track.kind as 'video' | 'audio',
+      });
+    });
+
+    subPC.addEventListener('icecandidate', (ev) => {
+      if (!ev.candidate) return;
+      const cand = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
+      send('candidate', { pc: 'screen-sub', publisherId, ...cand });
+    });
+
+    subPC.addEventListener('connectionstatechange', () => {
+      if (subPC.connectionState === 'failed' || subPC.connectionState === 'closed') {
+        teardownScreenSub(publisherId);
+      }
+    });
+
+    send('screen-share-subscribe', { publisherId, preferredTemporalLayer: 2 });
+  }
+
+  function unsubscribeScreenShare(publisherId: string): void {
+    if (!screenSubs.has(publisherId)) return;
+    send('screen-share-unsubscribe', { publisherId });
+    teardownScreenSub(publisherId);
+  }
+
+  function teardownScreenSub(publisherId: string): void {
+    const subPC = screenSubs.get(publisherId);
+    if (!subPC) return;
+    screenSubs.delete(publisherId);
+    try {
+      subPC.close();
+    } catch {
+      /* ignore */
     }
   }
 
@@ -219,6 +591,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function disconnect(): void {
     stopped = true;
+    // Tear screen share down first so we don't race ws.close with -stop.
+    if (screenPubPC) stopScreenShare();
+    for (const id of Array.from(screenSubs.keys())) {
+      teardownScreenSub(id);
+    }
     if (ws) {
       // CONNECTING-state close triggers a console warning; defer until open.
       if (ws.readyState === WebSocket.CONNECTING) {
@@ -259,6 +636,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     sendPing,
     getPeerConnection,
     getId,
+    startScreenShare,
+    stopScreenShare,
+    subscribeScreenShare,
+    unsubscribeScreenShare,
+    isPublishingScreenShare,
   };
 }
 
@@ -384,9 +766,6 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
   function disconnect(): void {
     stopped = true;
     if (ws) {
-      // If we're still in CONNECTING, calling close() now triggers a browser
-      // "WebSocket closed before established" warning. Defer the close until
-      // onopen so it lands on an open socket and exits cleanly.
       if (ws.readyState === WebSocket.CONNECTING) {
         const w = ws;
         w.onopen = () => {

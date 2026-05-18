@@ -283,31 +283,97 @@ describe('parseServerMessage', () => {
     warn.mockRestore();
   });
 
-  it('accepts a well-formed offer', () => {
+  it('accepts a well-formed offer (audio pc)', () => {
     const raw = JSON.stringify({
       event: 'offer',
-      data: { type: 'offer', sdp: 'v=0\r\n...' },
+      data: { pc: 'audio', type: 'offer', sdp: 'v=0\r\n...' },
     });
     const msg = parseServerMessage(raw);
     expect(msg).not.toBeNull();
     expect(msg!.event).toBe('offer');
   });
 
-  it('accepts a well-formed candidate', () => {
+  it('accepts a well-formed candidate (screen-pub pc)', () => {
     const raw = JSON.stringify({
       event: 'candidate',
-      data: { candidate: 'candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host' },
+      data: {
+        pc: 'screen-pub',
+        candidate: 'candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host',
+      },
     });
     const msg = parseServerMessage(raw);
     expect(msg).not.toBeNull();
     expect(msg!.event).toBe('candidate');
   });
 
-  it("returns null and warns when offer is missing 'sdp'", () => {
+  it("returns null and warns when offer is missing 'pc'", () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const raw = JSON.stringify({ event: 'offer', data: { type: 'offer' } });
+    const raw = JSON.stringify({
+      event: 'offer',
+      data: { type: 'offer', sdp: 'v=0\r\n...' },
+    });
     expect(parseServerMessage(raw)).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("returns null and warns when offer is missing 'sdp'", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const raw = JSON.stringify({ event: 'offer', data: { pc: 'audio', type: 'offer' } });
+    expect(parseServerMessage(raw)).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('parses candidate-screen-pub.json fixture', () => {
+    const data = readFixture('candidate-screen-pub.json');
+    const msg = parseServerMessage(envelope('candidate', data));
+    expect(msg).not.toBeNull();
+    if (msg && msg.event === 'candidate') {
+      expect(msg.data.pc).toBe('screen-pub');
+    }
+  });
+
+  it('parses offer-audio.json fixture', () => {
+    const data = readFixture('offer-audio.json');
+    const msg = parseServerMessage(envelope('offer', data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe('offer');
+    if (msg && msg.event === 'offer') {
+      expect(msg.data.pc).toBe('audio');
+      expect(msg.data.type).toBe('offer');
+    }
+  });
+
+  it('parses answer-screen-sub.json fixture into a CandidateEnvelope-like answer envelope', () => {
+    const data = readFixture('answer-screen-sub.json') as Record<string, unknown>;
+    expect(data.pc).toBe('screen-sub');
+    expect(data.publisherId).toBe('11223344aabbccdd');
+    expect(data.type).toBe('answer');
+  });
+
+  it('parses screen-share-available fixture', () => {
+    const data = readFixture('screen-share-available.json');
+    const msg = parseServerMessage(envelope('screen-share-available', data));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe('screen-share-available');
+  });
+
+  it('parses screen-share-error fixture', () => {
+    const data = readFixture('screen-share-error.json');
+    const msg = parseServerMessage(envelope('screen-share-error', data));
+    expect(msg).not.toBeNull();
+    if (msg && msg.event === 'screen-share-error') {
+      expect(msg.data.reason).toBe('already-publishing');
+    }
+  });
+
+  it('parses screen-share-encode-pause fixture', () => {
+    const data = readFixture('screen-share-encode-pause.json');
+    const msg = parseServerMessage(envelope('screen-share-encode-pause', data));
+    expect(msg).not.toBeNull();
+    if (msg && msg.event === 'screen-share-encode-pause') {
+      expect(msg.data.layers).toEqual([2]);
+    }
   });
 });

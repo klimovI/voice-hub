@@ -15,7 +15,51 @@
 // RTCIceCandidateInit respectively; TS does not need custom mirrors for them.
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/pion/webrtc/v4"
+)
+
+// PCKind discriminates the PeerConnection role each offer/answer/candidate
+// message targets. Required (no omitempty) — router on either side must be
+// able to dispatch on it; a missing value is a wire-format bug, not a default.
+type PCKind string
+
+const (
+	PCAudio     PCKind = "audio"
+	PCScreenPub PCKind = "screen-pub"
+	PCScreenSub PCKind = "screen-sub"
+)
+
+// OfferEnvelope is the data field of every "offer" message. PC discriminates
+// the target PeerConnection. PublisherID is set only when PC=screen-sub and
+// names the publisher whose stream this subscriber PC is being offered.
+//
+// Embedded SessionDescription means {type, sdp} hoist to the top-level JSON
+// object — preserving the wire format the browser already produces from
+// RTCSessionDescription.toJSON().
+type OfferEnvelope struct {
+	PC                        PCKind `json:"pc"`
+	PublisherID               string `json:"publisherId,omitempty"`
+	webrtc.SessionDescription        // {type, sdp}
+}
+
+// AnswerEnvelope mirrors OfferEnvelope for the "answer" event.
+type AnswerEnvelope struct {
+	PC                        PCKind `json:"pc"`
+	PublisherID               string `json:"publisherId,omitempty"`
+	webrtc.SessionDescription        // {type, sdp}
+}
+
+// CandidateEnvelope wraps a trickle ICE candidate. The pion ICECandidateInit
+// shape ({candidate, sdpMid, sdpMLineIndex, usernameFragment}) is preserved
+// at the top level via embedding.
+type CandidateEnvelope struct {
+	PC                       PCKind `json:"pc"`
+	PublisherID              string `json:"publisherId,omitempty"`
+	webrtc.ICECandidateInit         // {candidate, sdpMid, sdpMLineIndex, usernameFragment}
+}
 
 // Envelope is the top-level JSON wrapper for every signaling message.
 // It replaces the legacy sfu.Message type; the wire format is identical.
@@ -42,13 +86,14 @@ type Envelope struct {
 // track from this peer. Lurkers never receive media, so this flag is their
 // only signal that a share is active.
 type PeerInfo struct {
-	ID            string `json:"id"`
-	DisplayName   string `json:"displayName,omitempty"`
-	ClientID      string `json:"clientId,omitempty"`
-	SelfMuted     bool   `json:"selfMuted,omitempty"`
-	Deafened      bool   `json:"deafened,omitempty"`
-	ChatOnly      bool   `json:"chatOnly,omitempty"`
-	ScreenSharing bool   `json:"screenSharing,omitempty"`
+	ID                    string `json:"id"`
+	DisplayName           string `json:"displayName,omitempty"`
+	ClientID              string `json:"clientId,omitempty"`
+	SelfMuted             bool   `json:"selfMuted,omitempty"`
+	Deafened              bool   `json:"deafened,omitempty"`
+	ChatOnly              bool   `json:"chatOnly,omitempty"`
+	ScreenSharing         bool   `json:"screenSharing,omitempty"`
+	ScreenSharingHasAudio bool   `json:"screenSharingHasAudio,omitempty"`
 }
 
 // --- Server → Client payloads ---
@@ -268,4 +313,128 @@ type ChatPayload struct {
 	Ts          int64  `json:"ts"`
 	ClientMsgID string `json:"clientMsgId,omitempty"`
 	SenderName  string `json:"senderName,omitempty"`
+}
+
+// --- Screen share ---
+//
+// Lifecycle events (see tmp/screen-share-plan.md for the full state machine):
+//
+//   C→S "screen-share-start"      (sdp+hasSystemAudio; publisher creates a 2nd PC)
+//   S→C "screen-share-started"    (sessionToken; FIFO writer guarantees this
+//                                  is delivered BEFORE the matching answer)
+//   S→all "screen-share-available" (publisherId; sent after OnTrack — i.e.
+//                                  the first RTP packet has arrived and the
+//                                  TrackLocalStaticRTP is wired up)
+//   C→S "screen-share-stop"       (no payload; publisher's own peerID is
+//                                  implicit in the WS connection)
+//   S→all "screen-share-ended"    (publisherId; SFU broadcasts on stop,
+//                                  grace-timer expiry, or publisher disconnect)
+//   C→S "screen-share-resume"     (sessionToken; reattach to live session
+//                                  after a WS reconnect within the 5s grace)
+//
+//   C→S "screen-share-subscribe"  (publisherId + preferredTemporalLayer)
+//   C→S "screen-share-unsubscribe"(publisherId)
+//   C→S "screen-share-layer-select"(publisherId + temporalLayer; manual pin)
+//
+//   S→C "screen-share-encode-pause" / "screen-share-encode-resume"
+//     (publisher-side dynacast: SFU tells the publisher which layers to
+//     stop / restart encoding. Distinct from subscriber-side layer-select.)
+//
+//   S→C "screen-share-error"      (publisherId? + reason; any failure path)
+//
+// sessionToken is a 32-byte cryptorandom value, base64-encoded. Treated as
+// opaque by the client; only the server validates it on resume.
+
+// ScreenShareReason names the discrete failure modes ScreenShareErrorData
+// can carry. New constants must stay in sync with the TS literal union in
+// frontend/src/sfu/protocol.ts.
+type ScreenShareReason string
+
+const (
+	ReasonNotFound          ScreenShareReason = "not-found"
+	ReasonInvalidToken      ScreenShareReason = "invalid-token"
+	ReasonAlreadyPublishing ScreenShareReason = "already-publishing"
+	ReasonInternal          ScreenShareReason = "internal"
+)
+
+// ScreenShareStartData — C→S. SDP is the publisher's offer.sdp. HasSystemAudio
+// tells the server whether the second m-section in the offer carries the
+// system-audio Opus track; the server uses this to decide whether to pre-
+// create an audio TrackLocalStaticRTP for fan-out.
+type ScreenShareStartData struct {
+	SDP            string `json:"sdp"`
+	HasSystemAudio bool   `json:"hasSystemAudio"`
+}
+
+// ScreenShareStopData — C→S. Empty payload by design: a peer publishes at
+// most one screen share at a time, so the WS connection alone disambiguates.
+type ScreenShareStopData struct{}
+
+// ScreenShareResumeData — C→S. Sent after a WS reconnect to reattach to a
+// publisher session that is still alive in the server's grace window.
+type ScreenShareResumeData struct {
+	SessionToken string `json:"sessionToken"`
+}
+
+// ScreenShareStartedData — S→C. Ack for screen-share-start. The server writes
+// it onto the publisher's outbound queue immediately before the answer, and
+// the FIFO writeLoop preserves that order on the wire.
+type ScreenShareStartedData struct {
+	SessionToken string `json:"sessionToken"`
+}
+
+// ScreenShareAvailableData — S→all. Broadcast on first OnTrack (not on
+// receipt of -start), so subscribers only render a tile once media is
+// actually wired up and ready to forward.
+type ScreenShareAvailableData struct {
+	PublisherID    string `json:"publisherId"`
+	HasSystemAudio bool   `json:"hasSystemAudio"`
+}
+
+// ScreenShareEndedData — S→all. Sent on publisher stop, grace expiry, or
+// disconnect. Subscribers must close their subscriber PC on receipt.
+type ScreenShareEndedData struct {
+	PublisherID string `json:"publisherId"`
+}
+
+// ScreenShareErrorData — S→C. PublisherID is empty for errors not tied to a
+// specific publisher session (e.g. an invalid-token resume that no longer
+// has a session to reference).
+type ScreenShareErrorData struct {
+	PublisherID string            `json:"publisherId,omitempty"`
+	Reason      ScreenShareReason `json:"reason"`
+}
+
+// ScreenShareSubscribeData — C→S. preferredTemporalLayer is a hint, not a
+// guarantee: the server may downgrade it based on subscriber BWE.
+type ScreenShareSubscribeData struct {
+	PublisherID            string `json:"publisherId"`
+	PreferredTemporalLayer uint8  `json:"preferredTemporalLayer"`
+}
+
+// ScreenShareUnsubscribeData — C→S. Server closes the subscriber PC and frees
+// the per-subscriber forward state.
+type ScreenShareUnsubscribeData struct {
+	PublisherID string `json:"publisherId"`
+}
+
+// ScreenShareLayerSelectData — C→S. Explicit subscriber-side pin. Overrides
+// the BWE-driven auto-downgrade until next BWE update.
+type ScreenShareLayerSelectData struct {
+	PublisherID   string `json:"publisherId"`
+	TemporalLayer uint8  `json:"temporalLayer"`
+}
+
+// ScreenShareEncodePauseData — S→C (to publisher). Dynacast: tells the
+// publisher which encodings can stop. Empty / missing Layers means "all".
+//
+// Layers is []int (not []uint8) so encoding/json emits a JSON array of
+// numbers; []uint8 would be base64-encoded as a byte slice.
+type ScreenShareEncodePauseData struct {
+	Layers []int `json:"layers"`
+}
+
+// ScreenShareEncodeResumeData — S→C (to publisher). Counterpart to pause.
+type ScreenShareEncodeResumeData struct {
+	Layers []int `json:"layers"`
 }

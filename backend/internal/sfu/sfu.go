@@ -31,6 +31,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"voice-hub/backend/internal/sfu/dd"
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
@@ -112,6 +113,20 @@ type peer struct {
 	// syncPending is set when syncOnePeer was skipped because the PC was
 	// mid-negotiation; the answer handler drains it once signaling settles.
 	syncPending atomic.Bool
+
+	// Screen share state. Both fields guarded by Room.mu.
+	//
+	//  - screenSession is the active publisher session this peer owns
+	//    (nil when not sharing).
+	//  - screenSubs holds this peer's subscriber-side PCs, keyed by the
+	//    PUBLISHER's peer ID (one entry per publisher we're focused on).
+	//  - screenSharing / screenSharingHasAudio mirror the matching PeerInfo
+	//    fields so peer-info broadcasts stay in sync without re-reading
+	//    screenSession (avoids touching session under r.mu).
+	screenSession         *ScreenShareSession
+	screenSubs            map[string]*screenSubPC
+	screenSharing         bool
+	screenSharingHasAudio bool
 }
 
 // peerOutBufLen bounds per-peer outbound queue depth. Sized for the
@@ -272,6 +287,41 @@ func NewRoom(cfg Config) (*Room, error) {
 		},
 		PayloadType: 111,
 	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, err
+	}
+	// AV1 + VP9 are registered only for screen share. Browsers will pick
+	// AV1 first via setCodecPreferences on the publisher transceiver; VP9
+	// is the fallback when AV1 is not available (e.g. older builds, SW
+	// encoder unavailable). PT 45 / 98 mirror Chrome defaults so SDPs from
+	// publisher are byte-comparable to what dev tools show.
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeAV1,
+			ClockRate:   90000,
+			SDPFmtpLine: "level-idx=5;profile=0;tier=0",
+		},
+		PayloadType: 45,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, err
+	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeVP9,
+			ClockRate:   90000,
+			SDPFmtpLine: "profile-id=0",
+		},
+		PayloadType: 98,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, err
+	}
+	// DD header extension: the SFU parses temporal/spatial layer info from
+	// here for layer-aware forwarding. Stage 1 uses a no-op parser, but the
+	// extension must still be SDP-negotiated end-to-end so publishers and
+	// subscribers exchange the right ID for Stage 2 to drop in.
+	if err := mediaEngine.RegisterHeaderExtension(
+		webrtc.RTPHeaderExtensionCapability{URI: dd.RTPExtensionURI},
+		webrtc.RTPCodecTypeVideo,
+	); err != nil {
 		return nil, err
 	}
 
@@ -454,7 +504,10 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 		if c == nil {
 			return
 		}
-		b, err := json.Marshal(c.ToJSON())
+		b, err := json.Marshal(protocol.CandidateEnvelope{
+			PC:                 protocol.PCAudio,
+			ICECandidateInit:   c.ToJSON(),
+		})
 		if err != nil {
 			log.Printf("sfu: marshal ICE candidate (%s): %v", p.id, err)
 			return
@@ -581,27 +634,74 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 
 	switch msg.Event {
 	case "answer":
-		var sd webrtc.SessionDescription
-		if err := json.Unmarshal(msg.Data, &sd); err != nil {
+		var env protocol.AnswerEnvelope
+		if err := json.Unmarshal(msg.Data, &env); err != nil {
 			return
 		}
-		if err := p.pc.SetRemoteDescription(sd); err != nil {
-			log.Printf("sfu: set remote (%s): %v", p.id, err)
-			return
-		}
-		// Drain a sync skipped earlier while this peer was mid-negotiation.
-		// Conditional: unconditionally re-syncing here creates an offer
-		// ping-pong (every answer triggers a fresh offer for all peers).
-		if p.syncPending.Swap(false) {
-			r.signalPeerConnections()
+		switch env.PC {
+		case protocol.PCAudio:
+			if err := p.pc.SetRemoteDescription(env.SessionDescription); err != nil {
+				log.Printf("sfu: set remote audio (%s): %v", p.id, err)
+				return
+			}
+			// Drain a sync skipped while this peer was mid-negotiation.
+			// Conditional: unconditional re-sync creates an offer ping-pong
+			// (every answer triggers fresh offers for all peers).
+			if p.syncPending.Swap(false) {
+				r.signalPeerConnections()
+			}
+		case protocol.PCScreenSub:
+			r.mu.Lock()
+			subPC := p.screenSubs[env.PublisherID]
+			r.mu.Unlock()
+			if subPC == nil {
+				log.Printf("sfu: screen-sub answer (%s→%s) no PC", p.id, env.PublisherID)
+				return
+			}
+			if err := subPC.pc.SetRemoteDescription(env.SessionDescription); err != nil {
+				log.Printf("sfu: screen-sub set remote (%s→%s): %v", p.id, env.PublisherID, err)
+			}
+		case protocol.PCScreenPub:
+			// SFU is the answerer on screen-pub, never the offerer. A client
+			// "answer" with pc=screen-pub is a protocol misuse; log and drop.
+			log.Printf("sfu: unexpected answer pc=screen-pub from %s", p.id)
+		default:
+			log.Printf("sfu: answer with unknown pc=%q from %s", env.PC, p.id)
 		}
 	case "candidate":
-		var c webrtc.ICECandidateInit
-		if err := json.Unmarshal(msg.Data, &c); err != nil {
+		var env protocol.CandidateEnvelope
+		if err := json.Unmarshal(msg.Data, &env); err != nil {
 			return
 		}
-		if err := p.pc.AddICECandidate(c); err != nil {
-			log.Printf("sfu: add candidate (%s): %v", p.id, err)
+		switch env.PC {
+		case protocol.PCAudio:
+			if err := p.pc.AddICECandidate(env.ICECandidateInit); err != nil {
+				log.Printf("sfu: add audio candidate (%s): %v", p.id, err)
+			}
+		case protocol.PCScreenPub:
+			r.mu.Lock()
+			session := p.screenSession
+			r.mu.Unlock()
+			if session == nil {
+				log.Printf("sfu: screen-pub candidate (%s) no session", p.id)
+				return
+			}
+			if err := session.publisherPC.AddICECandidate(env.ICECandidateInit); err != nil {
+				log.Printf("sfu: screen-pub add candidate (%s): %v", p.id, err)
+			}
+		case protocol.PCScreenSub:
+			r.mu.Lock()
+			subPC := p.screenSubs[env.PublisherID]
+			r.mu.Unlock()
+			if subPC == nil {
+				log.Printf("sfu: screen-sub candidate (%s→%s) no PC", p.id, env.PublisherID)
+				return
+			}
+			if err := subPC.pc.AddICECandidate(env.ICECandidateInit); err != nil {
+				log.Printf("sfu: screen-sub add candidate (%s→%s): %v", p.id, env.PublisherID, err)
+			}
+		default:
+			log.Printf("sfu: candidate with unknown pc=%q from %s", env.PC, p.id)
 		}
 	case "set-displayname":
 		var dn protocol.SetDisplayNamePayload
@@ -630,6 +730,38 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		p.lastRenegotiateAt = time.Now()
 		r.mu.Unlock()
 		r.signalPeerConnections()
+	case "screen-share-start":
+		var d protocol.ScreenShareStartData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareStart(p, d)
+	case "screen-share-stop":
+		r.handleScreenShareStop(p)
+	case "screen-share-resume":
+		var d protocol.ScreenShareResumeData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareResume(p, d)
+	case "screen-share-subscribe":
+		var d protocol.ScreenShareSubscribeData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareSubscribe(p, d)
+	case "screen-share-unsubscribe":
+		var d protocol.ScreenShareUnsubscribeData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareUnsubscribe(p, d)
+	case "screen-share-layer-select":
+		var d protocol.ScreenShareLayerSelectData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareLayerSelect(p, d)
 	}
 }
 
@@ -637,12 +769,14 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 // since this function does not access room state directly.
 func peerInfo(p *peer) protocol.PeerInfo {
 	return protocol.PeerInfo{
-		ID:          p.id,
-		DisplayName: p.displayName,
-		ClientID:    p.clientID,
-		SelfMuted:   p.selfMuted,
-		Deafened:    p.deafened,
-		ChatOnly:    p.chatOnly,
+		ID:                    p.id,
+		DisplayName:           p.displayName,
+		ClientID:              p.clientID,
+		SelfMuted:             p.selfMuted,
+		Deafened:              p.deafened,
+		ChatOnly:              p.chatOnly,
+		ScreenSharing:         p.screenSharing,
+		ScreenSharingHasAudio: p.screenSharingHasAudio,
 	}
 }
 
@@ -733,7 +867,30 @@ func (r *Room) removePeer(id string) {
 		others = append(others, op)
 	}
 	count := len(r.peers)
+	// Snapshot screen-share state so we can arm grace timer / close
+	// outbound subscriber PCs OUTSIDE the room lock (each pc.Close acquires
+	// pion-internal locks we don't want crossing with r.mu).
+	session := p.screenSession
+	subs := make([]*screenSubPC, 0, len(p.screenSubs))
+	for _, s := range p.screenSubs {
+		subs = append(subs, s)
+	}
+	p.screenSubs = nil
 	r.mu.Unlock()
+
+	// If this peer was subscribed to someone else's screen share, close
+	// each subscriber PC. The session.subscribers entry is cleaned up
+	// inside removeScreenSubscriber, which we don't need here since the
+	// peer is gone — but we still close the PC for clean teardown.
+	for _, s := range subs {
+		_ = s.pc.Close()
+	}
+	if session != nil {
+		// Publisher is gone. Arm the grace window; reattach must happen
+		// from a peer with the same clientId-evicted reconnect, which will
+		// land in screen-share-resume.
+		r.startScreenShareGrace(session)
+	}
 
 	if p.cancel != nil {
 		p.cancel()
@@ -1134,7 +1291,10 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		log.Printf("sfu: syncOnePeer (%s) SetLocalDescription: %v", p.id, err)
 		return true
 	}
-	sd, err := json.Marshal(offer)
+	sd, err := json.Marshal(protocol.OfferEnvelope{
+		PC:                  protocol.PCAudio,
+		SessionDescription:  offer,
+	})
 	if err != nil {
 		log.Printf("sfu: syncOnePeer (%s) marshal offer: %v", p.id, err)
 		return true

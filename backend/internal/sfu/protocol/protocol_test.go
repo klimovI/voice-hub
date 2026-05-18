@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pion/webrtc/v4"
+
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
@@ -116,6 +118,98 @@ var fixtureCases = []fixtureCase{
 				{ID: "aabbccddeeff0011", DisplayName: "Lurker", ClientID: "cli_lurker_uuid", ChatOnly: true},
 			},
 		},
+	},
+	// PC discriminator envelopes — exercise top-level field embedding.
+	{
+		name: "offer-audio",
+		payload: protocol.OfferEnvelope{
+			PC:                 protocol.PCAudio,
+			SessionDescription: webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "v=0\r\n"},
+		},
+	},
+	{
+		name: "answer-screen-sub",
+		payload: protocol.AnswerEnvelope{
+			PC:                 protocol.PCScreenSub,
+			PublisherID:        "11223344aabbccdd",
+			SessionDescription: webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: "v=0\r\n"},
+		},
+	},
+	// answer-screen-pub is the S→C answer to the publisher's screen-pub offer.
+	// PublisherID is absent — only screen-sub answers carry it.
+	{
+		name: "answer-screen-pub",
+		payload: protocol.AnswerEnvelope{
+			PC:                 protocol.PCScreenPub,
+			SessionDescription: webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: "v=0\r\n"},
+		},
+	},
+	{
+		name: "candidate-screen-pub",
+		payload: protocol.CandidateEnvelope{
+			PC:               protocol.PCScreenPub,
+			ICECandidateInit: webrtc.ICECandidateInit{Candidate: "candidate:1 1 UDP 1 1.1.1.1 1 typ host"},
+		},
+	},
+	// Screen share lifecycle messages.
+	{
+		name: "screen-share-start",
+		payload: protocol.ScreenShareStartData{
+			SDP:            "v=0\r\n",
+			HasSystemAudio: true,
+		},
+	},
+	{
+		name:    "screen-share-started",
+		payload: protocol.ScreenShareStartedData{SessionToken: "dGVzdC10b2tlbi0zMmJ5dGUtYmFzZTY0XzAwMDAwMA"},
+	},
+	{
+		name: "screen-share-available",
+		payload: protocol.ScreenShareAvailableData{
+			PublisherID:    "11223344aabbccdd",
+			HasSystemAudio: true,
+		},
+	},
+	{
+		name:    "screen-share-ended",
+		payload: protocol.ScreenShareEndedData{PublisherID: "11223344aabbccdd"},
+	},
+	{
+		name: "screen-share-error",
+		payload: protocol.ScreenShareErrorData{
+			PublisherID: "11223344aabbccdd",
+			Reason:      protocol.ReasonAlreadyPublishing,
+		},
+	},
+	{
+		name:    "screen-share-resume",
+		payload: protocol.ScreenShareResumeData{SessionToken: "dGVzdC10b2tlbi0zMmJ5dGUtYmFzZTY0XzAwMDAwMA"},
+	},
+	{
+		name: "screen-share-subscribe",
+		payload: protocol.ScreenShareSubscribeData{
+			PublisherID:            "11223344aabbccdd",
+			PreferredTemporalLayer: 2,
+		},
+	},
+	{
+		name:    "screen-share-unsubscribe",
+		payload: protocol.ScreenShareUnsubscribeData{PublisherID: "11223344aabbccdd"},
+	},
+	{
+		name: "screen-share-layer-select",
+		payload: protocol.ScreenShareLayerSelectData{
+			PublisherID:   "11223344aabbccdd",
+			TemporalLayer: 1,
+		},
+	},
+	{
+		name:    "screen-share-encode-pause",
+		payload: protocol.ScreenShareEncodePauseData{Layers: []int{2}},
+	},
+	{
+		name:    "screen-share-encode-resume",
+		payload: protocol.ScreenShareEncodeResumeData{Layers: []int{0, 1, 2}},
 	},
 }
 
