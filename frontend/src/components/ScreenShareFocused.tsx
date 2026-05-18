@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
+import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
 
 interface Props {
   /** Called when user dismisses the overlay — owner unsubscribes from SFU. */
   onClose: () => void;
 }
+
+// Grace window before auto-closing after publisher ends the stream. Gives
+// the user a beat to read the "Стрим завершён" overlay instead of the
+// fullscreen view vanishing without warning.
+const ENDED_GRACE_MS = 1500;
 
 // System audio routes through a sibling <audio> element, not the voice mixer,
 // so the publisher's screen-capture audio isn't ducked by mic/output sliders.
@@ -17,14 +23,28 @@ export function ScreenShareFocused({ onClose }: Props) {
   const hasSystemAudio = useScreenShareStore((s) =>
     focusedId ? (s.shares.get(focusedId)?.hasSystemAudio ?? false) : false,
   );
-  const display = useStore((s) =>
-    focusedId ? (s.participants.get(focusedId)?.display ?? `user-${focusedId}`) : '',
+  const shareStillLive = useScreenShareStore((s) =>
+    s.focusedId ? s.shares.has(s.focusedId) : false,
   );
+  const publisher = useStore((s) => (focusedId ? s.participants.get(focusedId) : undefined));
+  const display = publisher?.display ?? (focusedId ? `user-${focusedId}` : '');
+  const publisherClientId = publisher?.clientId ?? '';
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+
+  const initialVolume = useMemo(() => {
+    if (!publisherClientId) return 1;
+    const saved = loadScreenAudioVolume(publisherClientId);
+    return saved !== null ? Math.max(0, Math.min(1, saved)) : 1;
+  }, [publisherClientId]);
+  const [volume, setVolume] = useState(initialVolume);
+
+  useEffect(() => {
+    setVolume(initialVolume);
+  }, [initialVolume]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -52,13 +72,33 @@ export function ScreenShareFocused({ onClose }: Props) {
     const el = audioRef.current;
     if (!el) return;
     el.srcObject = audioStream;
+    el.volume = volume;
+    el.muted = audioMuted;
     el.play().catch(() => {});
+    // volume / muted re-apply when the user scrubs is handled below — this
+    // effect only runs on stream attach.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioStream]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
 
   function toggleAudioMute() {
     const next = !audioMuted;
     setAudioMuted(next);
     if (audioRef.current) audioRef.current.muted = next;
+  }
+
+  function onVolumeInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = Number(e.target.value) / 100;
+    setVolume(next);
+    if (publisherClientId) saveScreenAudioVolume(publisherClientId, next);
+    // Scrubbing the slider implicitly unmutes — matches Discord / desktop UX.
+    if (audioMuted && next > 0) {
+      setAudioMuted(false);
+      if (audioRef.current) audioRef.current.muted = false;
+    }
   }
 
   // Escape closes the overlay — matches the native browser fullscreen UX.
@@ -70,9 +110,19 @@ export function ScreenShareFocused({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Publisher ended (server -ended or user stopped) — show a brief overlay
+  // and auto-dismiss. Switching to another tile within the grace window
+  // cancels the timer via dependency change.
+  useEffect(() => {
+    if (!focusedId || shareStillLive) return;
+    const t = setTimeout(onClose, ENDED_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [focusedId, shareStillLive, onClose]);
+
   if (!focusedId) return null;
 
   const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+  const ended = !shareStillLive;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
@@ -85,20 +135,32 @@ export function ScreenShareFocused({ onClose }: Props) {
             </span>
           )}
         </span>
-        <div className="flex items-center gap-1">
-          {hasSystemAudio && (
-            <button
-              type="button"
-              onClick={toggleAudioMute}
-              aria-label={audioMuted ? 'Включить звук' : 'Выключить звук'}
-              className="rounded p-1 hover:bg-white/10"
-            >
-              {audioMuted ? (
-                <VolumeX size={18} strokeWidth={2.25} />
-              ) : (
-                <Volume2 size={18} strokeWidth={2.25} />
-              )}
-            </button>
+        <div className="flex items-center gap-2">
+          {hasSystemAudio && !ended && (
+            <>
+              <button
+                type="button"
+                onClick={toggleAudioMute}
+                aria-label={audioMuted ? 'Включить звук' : 'Выключить звук'}
+                className="rounded p-1 hover:bg-white/10"
+              >
+                {audioMuted ? (
+                  <VolumeX size={18} strokeWidth={2.25} />
+                ) : (
+                  <Volume2 size={18} strokeWidth={2.25} />
+                )}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round((audioMuted ? 0 : volume) * 100)}
+                onChange={onVolumeInput}
+                aria-label="Громкость звука с экрана"
+                className="w-24 accent-zinc-300"
+              />
+            </>
           )}
           <button
             type="button"
@@ -110,7 +172,7 @@ export function ScreenShareFocused({ onClose }: Props) {
           </button>
         </div>
       </header>
-      <div className="flex-1 min-h-0 grid place-items-center px-4 pb-4">
+      <div className="flex-1 min-h-0 grid place-items-center px-4 pb-4 relative">
         {videoStream ? (
           <video
             ref={videoRef}
@@ -120,6 +182,11 @@ export function ScreenShareFocused({ onClose }: Props) {
           />
         ) : (
           <div className="text-zinc-400 text-sm">Подключаюсь к потоку…</div>
+        )}
+        {ended && (
+          <div className="absolute inset-0 grid place-items-center bg-black/60 text-zinc-200 text-sm">
+            Стрим завершён
+          </div>
         )}
       </div>
       <audio ref={audioRef} />

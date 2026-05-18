@@ -160,7 +160,7 @@ func newSessionToken() (string, error) {
 
 // handleScreenShareStart is the entry point for the publisher's first
 // screen-share-start message. It creates a new PC dedicated to the screen
-// share, parses the publisher's offer, creates AV1/VP9-capable forwarder
+// share, parses the publisher's offer, creates AV1-capable forwarder
 // tracks, answers, and on first OnTrack broadcasts screen-share-available
 // to the room.
 func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartData) {

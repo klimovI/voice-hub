@@ -55,6 +55,15 @@ export type ConnectOptions = {
 
 export type SFUClient = {
   connect(opts: ConnectOptions): Promise<void>;
+  /**
+   * Reattach the live client to a fresh WebSocket + audio PC while preserving
+   * the publisher screen-share state (PC, token, video sender). Pair with
+   * resumeScreenShare(token) on the welcome to keep an active share alive
+   * across a WS hiccup.
+   *
+   * Throws if the client has been disconnect()ed.
+   */
+  reconnect(opts: ConnectOptions): Promise<void>;
   disconnect(): void;
   setDisplayName(name: string): void;
   sendSetState(selfMuted: boolean, deafened: boolean): void;
@@ -171,11 +180,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     ws.send(JSON.stringify({ event, data }));
   }
 
-  function connect(opts: ConnectOptions): Promise<void> {
-    if (ws || pc) throw new Error('sfu-client: already connected');
-    stopped = false;
-    iceServers = opts.iceServers ?? [];
-
+  function setupAudioAndWS(opts: ConnectOptions): Promise<void> {
     pc = new RTCPeerConnection({ iceServers });
 
     pc.ontrack = (event) => {
@@ -207,7 +212,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         if (!resolved) {
           resolved = true;
           reject(new Error('sfu-client: welcome timeout'));
-          disconnect();
         }
       }, 10000);
 
@@ -250,6 +254,71 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
           resolve();
         }
       };
+    });
+  }
+
+  function detachAudioAndWS(): void {
+    // Detach handlers BEFORE close so the closing event doesn't fire onState
+    // and trigger an external reconnect loop that's already in flight.
+    if (ws) {
+      ws.onopen = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      ws.onmessage = null;
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      ws = null;
+    }
+    if (pc) {
+      pc.ontrack = null;
+      pc.onicecandidate = null;
+      pc.onconnectionstatechange = null;
+      try {
+        pc.close();
+      } catch {
+        /* ignore */
+      }
+      pc = null;
+    }
+  }
+
+  function connect(opts: ConnectOptions): Promise<void> {
+    if (ws || pc) throw new Error('sfu-client: already connected');
+    stopped = false;
+    iceServers = opts.iceServers ?? [];
+    return setupAudioAndWS(opts).catch((err) => {
+      disconnect();
+      throw err;
+    });
+  }
+
+  function reconnect(opts: ConnectOptions): Promise<void> {
+    if (stopped) throw new Error('sfu-client: cannot reconnect after disconnect');
+
+    detachAudioAndWS();
+
+    // Subscriber screen PCs die with the server-side peer rebind — the server
+    // will re-broadcast screen-share-available for live publishers, UI rebuilds
+    // tiles, user re-clicks if they want to keep watching.
+    for (const id of Array.from(screenSubs.keys())) {
+      teardownScreenSub(id);
+    }
+    // A stale resume continuation belongs to the previous WS — fail it so the
+    // caller doesn't get a spurious resolve against the new connection.
+    if (resumeContinuation) {
+      const cont = resumeContinuation;
+      resumeContinuation = null;
+      cont.reject(new Error('sfu-client: reconnect interrupted resume'));
+    }
+    myId = null;
+
+    iceServers = opts.iceServers ?? iceServers;
+    return setupAudioAndWS(opts).catch((err) => {
+      detachAudioAndWS();
+      throw err;
     });
   }
 
@@ -330,9 +399,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     }
   }
 
-  async function handleOffer(data: ServerMessage & { event: 'offer' } extends never
-    ? never
-    : Extract<ServerMessage, { event: 'offer' }>['data']): Promise<void> {
+  async function handleOffer(
+    data: ServerMessage & { event: 'offer' } extends never
+      ? never
+      : Extract<ServerMessage, { event: 'offer' }>['data'],
+  ): Promise<void> {
     switch (data.pc) {
       case 'audio': {
         if (!pc) return;
@@ -478,10 +549,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     });
 
     newPC.addEventListener('connectionstatechange', () => {
-      if (
-        newPC.connectionState === 'failed' ||
-        newPC.connectionState === 'closed'
-      ) {
+      if (newPC.connectionState === 'failed' || newPC.connectionState === 'closed') {
         if (!screenPubStopped) stopScreenShare();
       }
     });
@@ -771,6 +839,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   return {
     connect,
+    reconnect,
     disconnect,
     setDisplayName,
     sendSetState,

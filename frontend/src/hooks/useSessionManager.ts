@@ -22,7 +22,7 @@ import {
   loadOrCreateClientId,
   loadPeerVolume,
 } from '../utils/storage';
-import type { ChatPayload, PingPayload } from '../sfu/protocol';
+import type { ChatPayload, PingPayload, ScreenShareReason } from '../sfu/protocol';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
 import { flashFavicon } from '../utils/favicon';
@@ -110,6 +110,21 @@ export type UseSessionManagerReturn = {
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
+
+function screenShareErrorRu(reason: ScreenShareReason): string | null {
+  switch (reason) {
+    case 'not-found':
+      return 'Сессия демонстрации не найдена.';
+    case 'invalid-token':
+      return 'Не удалось восстановить демонстрацию. Поделитесь экраном заново.';
+    case 'already-publishing':
+      return 'Вы уже делитесь экраном.';
+    case 'internal':
+      return 'Ошибка сервера демонстрации.';
+    default:
+      return null;
+  }
+}
 
 export function useSessionManager({
   audio,
@@ -272,9 +287,12 @@ export function useSessionManager({
     [sfu],
   );
 
-  const sendPing = useCallback((targetId: string): void => {
-    sfu.getClient()?.sendPing(targetId);
-  }, [sfu]);
+  const sendPing = useCallback(
+    (targetId: string): void => {
+      sfu.getClient()?.sendPing(targetId);
+    },
+    [sfu],
+  );
 
   const handleChatReceive = useCallback(
     (data: ChatPayload): void => {
@@ -323,6 +341,47 @@ export function useSessionManager({
           reconnectSchedulerRef.current.reset();
           throw new Error('mic graph gone');
         }
+        const cfg = configRef.current;
+        if (!cfg) throw new Error('Config not loaded');
+
+        // Soft path: if a screen share is in flight, keep the publisher PC
+        // alive and ask the server to rebind the session via screen-share-
+        // resume. Only valid within the 5s grace window the SFU keeps.
+        // Anything else (resume reject, welcome timeout) falls through to the
+        // cold path below — screen share is then lost cleanly.
+        const liveClient = sfu.getClient();
+        const screenToken = liveClient?.getScreenShareToken() ?? null;
+        const hadActiveShare = liveClient?.isPublishingScreenShare() ?? false;
+        if (liveClient && screenToken && hadActiveShare) {
+          audio.cleanupAllRemote();
+          getStore().clearParticipants();
+          peerIdRef.current = null;
+          try {
+            await liveClient.reconnect({
+              wsUrl: buildWsUrl(roomSlugRef.current),
+              iceServers: cfg.iceServers,
+              localStream: graph.processedLocalStream,
+              displayName: lastDisplayNameRef.current,
+              clientId: clientIdRef.current,
+            });
+            await liveClient.resumeScreenShare(screenToken);
+            // Re-broadcast persisted mute/deafen state — fresh peer ID on the
+            // server side means peers don't carry over our prior peer-state.
+            const s = useStore.getState();
+            if (s.selfMuted || s.deafened) {
+              liveClient.sendSetState(s.selfMuted, s.deafened);
+            }
+            return;
+          } catch (err) {
+            console.warn(
+              '[session] screen-share resume failed; falling back to cold reconnect',
+              err,
+            );
+            useScreenShareStore.getState().setMyStatus('idle');
+            // fall through
+          }
+        }
+
         sfu.disconnect();
         audio.cleanupAllRemote();
         getStore().clearParticipants();
@@ -485,17 +544,30 @@ export function useSessionManager({
           useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio });
         },
         onScreenShareEnded: ({ publisherId }) => {
-          useScreenShareStore.getState().removeShare(publisherId);
+          const store = useScreenShareStore.getState();
+          store.removeShare(publisherId);
+          // Server killed our own publish session (grace expired, internal
+          // error). The button still says "Остановить демонстрацию" otherwise
+          // and a click is silently dropped — snap it back to idle and tell
+          // the user. peerIdRef is the live one; before welcome it's null.
+          if (publisherId === peerIdRef.current && store.myStatus === 'publishing') {
+            store.setMyStatus('idle');
+            getStore().setStatus('Демонстрация прервана разрывом соединения.', true, true);
+          }
         },
         onScreenShareError: ({ publisherId, reason }) => {
-          // Reverts UI state — if we were focused on this publisher, drop it.
-          // If the error is on our own session (no publisherId), recover the
-          // publish button by snapping myStatus back to idle.
+          // Revert local subscriber state if the error targets a specific publisher.
           const store = useScreenShareStore.getState();
           if (publisherId) store.removeShare(publisherId);
+          // Self-targeted reasons recover the publish button.
           if (!publisherId || reason === 'already-publishing' || reason === 'internal') {
             store.setMyStatus('idle');
           }
+          // Russian-language surface for every reason. invalid-token only fires
+          // on a server-side resume failure (token expired or in use) and
+          // means the publisher must re-click "Поделиться экраном".
+          const msg = screenShareErrorRu(reason);
+          if (msg) getStore().setStatus(msg, true, true);
         },
         onScreenShareTrack: ({ publisherId, stream, kind }) => {
           const store = useScreenShareStore.getState();
@@ -728,9 +800,7 @@ export function useSessionManager({
         useStore.getState().setStatus('Подключено', false, true);
       } catch (error) {
         handleLeave();
-        useStore
-          .getState()
-          .setStatus(error instanceof Error ? error.message : String(error), true);
+        useStore.getState().setStatus(error instanceof Error ? error.message : String(error), true);
       }
     },
     [audio, connectSfu, handleLeave, sfu],

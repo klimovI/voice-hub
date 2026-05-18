@@ -296,11 +296,10 @@ func NewRoom(cfg Config) (*Room, error) {
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, err
 	}
-	// AV1 + VP9 are registered only for screen share. Browsers will pick
-	// AV1 first via setCodecPreferences on the publisher transceiver; VP9
-	// is the fallback when AV1 is not available (e.g. older builds, SW
-	// encoder unavailable). PT 45 / 98 mirror Chrome defaults so SDPs from
-	// publisher are byte-comparable to what dev tools show.
+	// AV1 is the only video codec — registered for screen share. Target
+	// browsers (Chrome / Edge / WebView2) all support AV1 encode for WebRTC.
+	// PT 45 mirrors Chrome defaults so publisher SDPs are byte-comparable
+	// to what dev tools show.
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeAV1,
@@ -308,16 +307,6 @@ func NewRoom(cfg Config) (*Room, error) {
 			SDPFmtpLine: "level-idx=5;profile=0;tier=0",
 		},
 		PayloadType: 45,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, err
-	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, err
 	}

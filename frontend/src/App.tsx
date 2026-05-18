@@ -273,16 +273,9 @@ export function App() {
     share.setFocused(null);
   }, [session]);
 
-// Drop focus on -ended (publisher stopped while focused).
+  // -ended is handled inside ScreenShareFocused with a grace period overlay;
+  // App only needs focusedId to drive the arrow-key navigation effect.
   const focusedId = useScreenShareStore((s) => s.focusedId);
-  const focusedStillShared = useScreenShareStore((s) =>
-    s.focusedId ? s.shares.has(s.focusedId) : false,
-  );
-  useEffect(() => {
-    if (focusedId && !focusedStillShared) {
-      useScreenShareStore.getState().setFocused(null);
-    }
-  }, [focusedId, focusedStillShared]);
 
   useEffect(() => {
     if (!focusedId) return;

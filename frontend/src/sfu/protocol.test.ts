@@ -373,7 +373,7 @@ describe('parseServerMessage', () => {
     const msg = parseServerMessage(envelope('screen-share-encode-pause', data));
     expect(msg).not.toBeNull();
     if (msg && msg.event === 'screen-share-encode-pause') {
-      expect(msg.data.layers).toEqual([2]);
+      expect(msg.data.layers).toEqual([0, 1, 2]);
     }
   });
 });

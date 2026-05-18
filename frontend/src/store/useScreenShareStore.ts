@@ -48,14 +48,12 @@ export const useScreenShareStore = create<ScreenShareState>((set) => ({
       if (!s.shares.has(publisherId)) return {};
       const m = new Map(s.shares);
       m.delete(publisherId);
-      const patch: Partial<ScreenShareState> = { shares: m };
-      // If we lost the focused share, drop the focus + the attached streams.
-      if (s.focusedId === publisherId) {
-        patch.focusedId = null;
-        patch.focusedStream = null;
-        patch.focusedAudioStream = null;
-      }
-      return patch;
+      // focusedId / streams intentionally NOT cleared here — the focused
+      // overlay shows a "Стрим завершён" placeholder briefly before the
+      // grace-close timer in ScreenShareFocused dismisses the view. The
+      // <video> keeps its last frame because the MediaStream reference
+      // is still attached.
+      return { shares: m };
     }),
   clearShares: () =>
     set({

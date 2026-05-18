@@ -117,6 +117,11 @@ export function saveChatHistory(roomId: string, messages: PersistedChatMessage[]
 // setting survives both their reconnects and ours.
 const PEER_VOLUME_PREFIX = 'voice-hub.peer-volume.';
 
+// Per-peer screen-share system-audio volume, keyed by the publisher's stable
+// clientId. Independent from the voice-mic volume (PEER_VOLUME_PREFIX) so
+// muting someone's mic doesn't silence the screen audio they're sharing.
+const SCREEN_AUDIO_VOLUME_PREFIX = 'voice-hub.screen-audio-volume.';
+
 // Per-peer custom label keyed by stable clientId. Local-only annotation —
 // rendered as `[label]` after the peer's display name. Not synced anywhere.
 const PEER_LABEL_PREFIX = 'voice-hub.peer-label.';
@@ -192,6 +197,19 @@ export function loadPeerVolume(clientId: string): number | null {
 export function savePeerVolume(clientId: string, volume: number): void {
   if (!clientId) return;
   localStorage.setItem(PEER_VOLUME_PREFIX + clientId, String(volume));
+}
+
+export function loadScreenAudioVolume(clientId: string): number | null {
+  if (!clientId) return null;
+  const raw = localStorage.getItem(SCREEN_AUDIO_VOLUME_PREFIX + clientId);
+  if (raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function saveScreenAudioVolume(clientId: string, volume: number): void {
+  if (!clientId) return;
+  localStorage.setItem(SCREEN_AUDIO_VOLUME_PREFIX + clientId, String(volume));
 }
 
 export function loadPeerLabel(clientId: string): string {
