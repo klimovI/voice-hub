@@ -31,6 +31,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -39,6 +40,19 @@ export function ScreenShareFocused({ onClose }: Props) {
     // muted required for autoplay unlock; system audio is routed through the sibling <audio>.
     el.muted = true;
     el.play().catch(() => {});
+
+    setVideoSize(null);
+    const update = () => {
+      if (!el.videoWidth || !el.videoHeight) return;
+      setVideoSize({ w: el.videoWidth, h: el.videoHeight });
+    };
+    update();
+    el.addEventListener('loadedmetadata', update);
+    el.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('loadedmetadata', update);
+      el.removeEventListener('resize', update);
+    };
   }, [videoStream]);
 
   useEffect(() => {
@@ -65,10 +79,19 @@ export function ScreenShareFocused({ onClose }: Props) {
 
   if (!focusedId) return null;
 
+  const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       <header className="flex items-center justify-between px-4 py-2 text-zinc-200">
-        <span className="text-sm font-medium truncate">Экран · {display}</span>
+        <span className="text-sm font-medium truncate flex items-center gap-2">
+          Экран · {display}
+          {qualityLabel && (
+            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
+              {qualityLabel}
+            </span>
+          )}
+        </span>
         <div className="flex items-center gap-1">
           {hasSystemAudio && (
             <button
@@ -109,4 +132,12 @@ export function ScreenShareFocused({ onClose }: Props) {
       <audio ref={audioRef} />
     </div>
   );
+}
+
+function formatQualityLabel(h: number): string {
+  if (h >= 1400) return '1440p';
+  if (h >= 1000) return '1080p';
+  if (h >= 680) return '720p';
+  if (h >= 400) return '480p';
+  return `${h}p`;
 }
