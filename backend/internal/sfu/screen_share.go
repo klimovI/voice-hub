@@ -670,6 +670,8 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 	_ = sub.write(protocol.Envelope{Event: "offer", Data: b})
+	log.Printf("sfu: screen subscribe sub=%s pub=%s temp=%d firstSub=%v",
+		sub.id, session.PublisherID, target, firstSubscriber)
 
 	// Dynacast: wake the publisher's encoder on 0→1 and ask for a fresh
 	// keyframe so the new subscriber doesn't wait up to a full GOP for the
@@ -765,31 +767,22 @@ func (r *Room) sendScreenEncodeEnvelope(publisherID, event string, payload any) 
 		return
 	}
 	_ = pubPeer.write(protocol.Envelope{Event: event, Data: raw})
+	log.Printf("sfu: dynacast %s pub=%s", event, publisherID)
 }
 
 // requestKeyframe sends a PLI to the publisher so the next RTP packet carries
-// an intra frame. Called on dynacast resume so the first subscriber after
-// pause doesn't wait up to a full GOP for decodable video. No-op when the
-// publisher's video receiver has no SSRC yet (pre-OnTrack).
+// an intra frame. Called on dynacast resume and explicit layer-select so the
+// new viewer state doesn't wait up to a full GOP for decodable video. No-op
+// when the publisher's video receiver has no SSRC yet (pre-OnTrack).
 func (s *ScreenShareSession) requestKeyframe() {
-	var pubSSRC uint32
-	for _, tr := range s.publisherPC.GetTransceivers() {
-		recv := tr.Receiver()
-		if recv == nil {
-			continue
-		}
-		track := recv.Track()
-		if track != nil && track.Kind() == webrtc.RTPCodecTypeVideo {
-			pubSSRC = uint32(track.SSRC())
-			break
-		}
-	}
+	pubSSRC := screenPublisherVideoSSRC(s)
 	if pubSSRC == 0 {
 		return
 	}
 	_ = s.publisherPC.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: pubSSRC},
 	})
+	log.Printf("sfu: screen PLI pub=%s ssrc=%d", s.PublisherID, pubSSRC)
 }
 
 // handleScreenShareUnsubscribe is the client-initiated path. It defers
@@ -1185,17 +1178,8 @@ func (r *Room) handleScreenShareLayerSelect(p *peer, data protocol.ScreenShareLa
 		return
 	}
 	subEntry.SetTargetTemp(target)
-
-	// Pull the publisher's video SSRC so PLI MediaSSRC names the right stream.
-	// Same lookup the keyframe-on-subscribe RTCP forwarder does; encapsulate
-	// it here to keep the call site short.
-	pubSSRC := screenPublisherVideoSSRC(session)
-	if pubSSRC == 0 {
-		return
-	}
-	_ = session.publisherPC.WriteRTCP([]rtcp.Packet{
-		&rtcp.PictureLossIndication{MediaSSRC: pubSSRC},
-	})
+	log.Printf("sfu: screen layer-select sub=%s pub=%s temp=%d", p.id, data.PublisherID, target)
+	session.requestKeyframe()
 }
 
 // screenPublisherVideoSSRC returns the SSRC of the publisher PC's inbound
