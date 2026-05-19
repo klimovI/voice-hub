@@ -246,11 +246,14 @@ type Room struct {
 	peers map[string]*peer
 	// tracks is keyed by trackKey(ownerID, kind) so one peer can
 	// publish both audio and screen-share video concurrently.
-	tracks     map[string]*webrtc.TrackLocalStaticRTP
-	publishers map[string]publisherRef
-	cfg        Config
-	api        *webrtc.API
-	closed     atomic.Bool
+	tracks map[string]*webrtc.TrackLocalStaticRTP
+	// publishersMu guards publishers independently of mu so forwardSubscriberRTCP
+	// (per-RTCP-packet hot path) reads without blocking room-wide operations.
+	publishersMu sync.RWMutex
+	publishers   map[string]publisherRef
+	cfg          Config
+	api          *webrtc.API
+	closed       atomic.Bool
 
 	// pcCreateMu serialises NewPeerConnection so the cc OnNewPeerConnection
 	// callback (sync, during construction) can deposit into pendingBWE safely.
@@ -403,21 +406,21 @@ func NewRoom(cfg Config) (*Room, error) {
 }
 
 func (r *Room) setPublisher(key string, ref publisherRef) {
-	r.mu.Lock()
+	r.publishersMu.Lock()
 	r.publishers[key] = ref
-	r.mu.Unlock()
+	r.publishersMu.Unlock()
 }
 
 func (r *Room) clearPublisher(key string) {
-	r.mu.Lock()
+	r.publishersMu.Lock()
 	delete(r.publishers, key)
-	r.mu.Unlock()
+	r.publishersMu.Unlock()
 }
 
 func (r *Room) lookupPublisher(key string) (publisherRef, bool) {
-	r.mu.Lock()
+	r.publishersMu.RLock()
 	ref, ok := r.publishers[key]
-	r.mu.Unlock()
+	r.publishersMu.RUnlock()
 	return ref, ok
 }
 
@@ -1115,11 +1118,13 @@ func (r *Room) dropTracksForPeer(ownerID string) {
 			delete(r.tracks, k)
 		}
 	}
+	r.publishersMu.Lock()
 	for k := range r.publishers {
 		if ownerOf(k) == ownerID {
 			delete(r.publishers, k)
 		}
 	}
+	r.publishersMu.Unlock()
 }
 
 // signalPeerConnections renegotiates each peer so it has senders for all
