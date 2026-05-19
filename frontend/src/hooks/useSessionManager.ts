@@ -593,8 +593,8 @@ export function useSessionManager({
           store.setMyStatus('idle');
           store.setMyStream(null);
         },
-        onError: () => {
-          // onState handles user-visible errors
+        onError: (err) => {
+          console.warn('[sfu]', err);
         },
       });
 
