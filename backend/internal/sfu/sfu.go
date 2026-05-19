@@ -559,7 +559,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// that subscribers did not, so forwarding them would cause subscribers
 			// to misparse the extension block.
 			pkt.Extension = false
-			pkt.Extensions = nil
+			pkt.Extensions = pkt.Extensions[:0]
 
 			if err := local.WriteRTP(pkt); err != nil {
 				return
