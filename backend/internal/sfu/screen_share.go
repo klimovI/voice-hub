@@ -120,6 +120,11 @@ type ScreenShareSession struct {
 	// the forward goroutine itself doesn't branch on mode.
 	mode atomic.Uint32
 
+	// publisherVideoSSRC is the SSRC of the publisher's inbound video track.
+	// Set once in the OnTrack callback from remote.SSRC(); zero until OnTrack
+	// fires. Cached to avoid GetTransceivers() scans on every PLI/FIR packet.
+	publisherVideoSSRC atomic.Uint32
+
 	mu          sync.RWMutex
 	subscribers map[string]*screenSubscriber // key = subscriber peer ID
 
@@ -404,6 +409,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 			// extension IDs independently — we strip the publisher's
 			// extension on forward and let pion re-insert the right ID on
 			// each subscriber side.
+			session.publisherVideoSSRC.Store(uint32(remote.SSRC()))
 			session.codecAdapter.OnTrackNegotiated(receiver)
 			r.firstScreenVideoReady(p, session)
 			session.forwardVideo(remote)
@@ -840,17 +846,7 @@ func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sub *sc
 		// MediaSSRC on the inbound RTCP to the subscriber-side sender's
 		// SSRC. We rewrite to the publisher's RTP SSRC so the browser-side
 		// encoder treats it as a keyframe request for its own stream.
-		var pubSSRC uint32
-		for _, tr := range session.publisherPC.GetTransceivers() {
-			recv := tr.Receiver()
-			if recv == nil {
-				continue
-			}
-			if recv.Track() != nil && recv.Track().Kind() == webrtc.RTPCodecTypeVideo {
-				pubSSRC = uint32(recv.Track().SSRC())
-				break
-			}
-		}
+		pubSSRC := session.publisherVideoSSRC.Load()
 		if pubSSRC == 0 {
 			continue
 		}
@@ -1432,17 +1428,7 @@ func (r *Room) handleClientOffer(p *peer, env protocol.OfferEnvelope) {
 // session created but first OnTrack hasn't fired). Used to address RTCP PLIs
 // back to the publisher.
 func screenPublisherVideoSSRC(session *ScreenShareSession) uint32 {
-	for _, tr := range session.publisherPC.GetTransceivers() {
-		recv := tr.Receiver()
-		if recv == nil {
-			continue
-		}
-		t := recv.Track()
-		if t != nil && t.Kind() == webrtc.RTPCodecTypeVideo {
-			return uint32(t.SSRC())
-		}
-	}
-	return 0
+	return session.publisherVideoSSRC.Load()
 }
 
 // sendScreenShareError marshals and writes a screen-share-error envelope.
