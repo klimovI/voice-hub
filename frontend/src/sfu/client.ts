@@ -21,10 +21,11 @@ import {
   primeScreenCodecProfile,
 } from '../screenshare/codec';
 import {
-  startScreenShareHealthMonitor,
-  type ScreenShareHealthMonitor,
-} from '../screenshare/health';
-import { SCREEN_FPS, SCREEN_HEIGHT, SCREEN_MAX_BITRATE, SCREEN_WIDTH } from '../screenshare/params';
+  getCurrentScreenCodecPref,
+  getCurrentScreenContentHint,
+  getCurrentScreenParams,
+} from '../store/useScreenShareSettingsStore';
+import type { ScreenParams } from '../screenshare/params';
 
 export const SCREEN_SHARE_NO_CODEC = 'SCREEN_SHARE_NO_CODEC';
 
@@ -96,6 +97,12 @@ export type SFUClient = {
   startScreenShare(): Promise<void>;
   /** Tear down the publisher PC and notify the server. */
   stopScreenShare(): void;
+  /**
+   * Live re-apply current resolution/fps/bitrate settings to an active screen
+   * share via applyConstraints + setParameters (no SDP renegotiate). Codec
+   * changes still require stop+restart; this call ignores codec drift.
+   */
+  updateScreenShareParams(): Promise<void>;
   /**
    * Subscribe to a specific publisher's share. UI calls this when the user
    * clicks a gallery tile.
@@ -178,7 +185,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let screenPubStopped = false;
   let screenPubToken: string | null = null;
   let screenPubVideoSender: RTCRtpSender | null = null;
-  let screenPubHealthMonitor: ScreenShareHealthMonitor | null = null;
   // Tracks the L1T3 / bitrate-caps setParameters call kicked off by the
   // signaling-state watcher in startScreenShare. encode-pause / encode-resume
   // must observe its completion, otherwise getParameters() races and
@@ -531,18 +537,26 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     if (screenPubPC) throw new Error('sfu-client: already publishing screen share');
 
     const caps = RTCRtpSender.getCapabilities('video');
-    const selectedCodec = chooseScreenCodec();
+    const selectedCodec = chooseScreenCodec(getCurrentScreenCodecPref());
     if (!caps || !selectedCodec) {
       throw new Error(SCREEN_SHARE_NO_CODEC);
     }
 
+    const pickedParams = getCurrentScreenParams();
+
     // The user's picker click is the gesture context. Any await between this
     // line and getDisplayMedia would break the gesture chain on some browsers.
+    // height-only constraint keeps aspect ratio. Ultrawide monitors stay
+    // ultrawide instead of being letterboxed into a 16:9 box; width is bumped
+    // back up in the bitrate calc below.
+    // height as `max`, not `ideal` — Chrome will upscale a smaller source to
+    // satisfy `ideal`, which wastes bits encoding synthesized pixels. `max`
+    // caps without upscaling, so 1440p monitors stay 1440p even on the 2160p
+    // preset.
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        frameRate: { ideal: SCREEN_FPS, max: SCREEN_FPS },
-        width: { ideal: SCREEN_WIDTH },
-        height: { ideal: SCREEN_HEIGHT },
+        frameRate: { ideal: pickedParams.fps, max: pickedParams.fps },
+        height: { max: pickedParams.height },
         displaySurface: 'monitor',
       },
       audio: true,
@@ -559,10 +573,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       stream.getTracks().forEach((t) => t.stop());
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
-    // contentHint='detail' biases encoders toward sharpness (text legibility)
-    // over motion smoothness — the right tradeoff for desktop / window
-    // capture. 'motion' would be the choice for game streaming.
-    videoTrack.contentHint = 'detail';
+    // 'detail' biases encoders toward sharpness, 'motion' biases toward
+    // smoothness. Driven by the selected preset — see store helper.
+    videoTrack.contentHint = getCurrentScreenContentHint();
 
     const audioTrack = stream.getAudioTracks()[0];
     const hasSystemAudio = !!audioTrack;
@@ -633,15 +646,13 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
             params.encodings[0] = {
               ...params.encodings[0],
               ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
-              maxBitrate: SCREEN_MAX_BITRATE,
-              maxFramerate: SCREEN_FPS,
+              maxBitrate: scaledBitrate(videoTrack, pickedParams),
+              maxFramerate: pickedParams.fps,
               priority: 'high',
             } as RTCRtpEncodingParameters;
             screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
               console.warn('[sfu] setParameters on screen video failed', err);
             });
-            screenPubHealthMonitor?.stop();
-            screenPubHealthMonitor = startScreenShareHealthMonitor(videoSender, selectedCodec);
           } catch (err) {
             console.warn('[sfu] setParameters on screen video failed', err);
           }
@@ -666,8 +677,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         screenPubPC = null;
         screenPubStream = null;
         screenPubVideoSender = null;
-        screenPubHealthMonitor?.stop();
-        screenPubHealthMonitor = null;
         screenPubInitialParams = null;
         screenPubStopped = false;
       }
@@ -694,10 +703,61 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubStream = null;
     screenPubToken = null;
     screenPubVideoSender = null;
-    screenPubHealthMonitor?.stop();
-    screenPubHealthMonitor = null;
     screenPubInitialParams = null;
     on.onScreenShareSelfStopped();
+  }
+
+  // Ultrawide adjustment: actual track width exceeds the 16:9 nominal width,
+  // so we scale the bitrate ceiling up proportionally (capped at 2× to stay
+  // sane on extreme dimensions). When the source matches 16:9 the multiplier
+  // is exactly 1.
+  function scaledBitrate(track: MediaStreamTrack | undefined, p: ScreenParams): number {
+    const actualW = track?.getSettings().width;
+    if (!actualW || actualW <= p.width) return p.maxBitrate;
+    const scale = Math.min(actualW / p.width, 2);
+    return Math.round(p.maxBitrate * scale);
+  }
+
+  async function updateScreenShareParams(): Promise<void> {
+    const sender = screenPubVideoSender;
+    const stream = screenPubStream;
+    if (!sender || !stream) return;
+    if (screenPubInitialParams) {
+      try {
+        await screenPubInitialParams;
+      } catch {
+        // already logged in the watcher
+      }
+    }
+    const next = getCurrentScreenParams();
+
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      track.contentHint = getCurrentScreenContentHint();
+      try {
+        await track.applyConstraints({
+          frameRate: { ideal: next.fps, max: next.fps },
+          height: { max: next.height },
+        });
+      } catch (err) {
+        console.warn('[sfu] applyConstraints on screen video failed', err);
+      }
+    }
+
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    params.encodings[0] = {
+      ...params.encodings[0],
+      maxBitrate: scaledBitrate(track, next),
+      maxFramerate: next.fps,
+    } as RTCRtpEncodingParameters;
+    try {
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn('[sfu] setParameters(update) on screen video failed', err);
+    }
   }
 
   async function applyScreenEncodeActive(active: boolean): Promise<void> {
@@ -904,6 +964,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     getId,
     startScreenShare,
     stopScreenShare,
+    updateScreenShareParams,
     subscribeScreenShare,
     unsubscribeScreenShare,
     isPublishingScreenShare,

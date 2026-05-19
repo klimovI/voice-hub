@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { ScreenShare, ScreenShareOff } from 'lucide-react';
+import { ChevronDown, ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
 import { useVideoFps } from '../screenshare/useVideoFps';
+import { ScreenShareSettings } from './ScreenShareSettings';
 
 interface Props {
   onStart: () => void | Promise<void>;
   onStop: () => void;
+  onUpdateParams: () => void | Promise<void>;
 }
 
 // Android Chrome and a few mobile browsers ship MediaDevices without
@@ -22,11 +24,12 @@ const screenCaptureSupported =
  * "starting" / "stopping" states disable the button to prevent double-fire
  * during getDisplayMedia / WS round-trip.
  */
-export function ScreenShareButton({ onStart, onStop }: Props) {
+export function ScreenShareButton({ onStart, onStop, onUpdateParams }: Props) {
   const joinState = useStore((s) => s.joinState);
   const myStatus = useScreenShareStore((s) => s.myStatus);
   const myStream = useScreenShareStore((s) => s.myStream);
   const myVideoCodec = useScreenShareStore((s) => s.myVideoCodec);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!screenCaptureSupported) return null;
 
@@ -47,18 +50,41 @@ export function ScreenShareButton({ onStart, onStop }: Props) {
   else label = 'Поделиться экраном';
 
   const Icon = publishing ? ScreenShareOff : ScreenShare;
+  const mainBtnClass = publishing ? 'btn-danger' : 'btn-secondary';
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={!joined || busy}
-        className={`btn w-full ${publishing ? 'btn-danger' : 'btn-secondary'}`}
-      >
-        <Icon size={16} strokeWidth={2.25} />
-        <span>{label}</span>
-      </button>
+      <div className="grid gap-2">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={!joined || busy}
+            className={`btn flex-1 ${mainBtnClass}`}
+          >
+            <Icon size={16} strokeWidth={2.25} />
+            <span>{label}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Настройки демонстрации"
+            aria-expanded={menuOpen}
+            className="btn btn-secondary px-2!"
+          >
+            <ChevronDown
+              size={16}
+              strokeWidth={2.25}
+              className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+        </div>
+        {menuOpen && (
+          <div className="border border-line/60 bg-bg-input/30 p-2">
+            <ScreenShareSettings onLiveUpdate={onUpdateParams} />
+          </div>
+        )}
+      </div>
       {myStream && <SelfPreview stream={myStream} videoCodec={myVideoCodec} />}
     </>
   );
@@ -97,7 +123,7 @@ function SelfPreview({
     };
   }, [stream]);
 
-  const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+  const qualityLabel = videoSize ? formatQualityLabel(videoSize.w, videoSize.h) : null;
   const fpsLabel = fps !== null ? formatFpsLabel(fps) : null;
 
   return (

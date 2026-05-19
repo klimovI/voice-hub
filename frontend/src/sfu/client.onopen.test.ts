@@ -18,10 +18,6 @@ vi.mock('../screenshare/codec', () => ({
   isScreenVideoCodec: (v: unknown) => v === 'av1' || v === 'vp9',
 }));
 
-vi.mock('../screenshare/health', () => ({
-  startScreenShareHealthMonitor: () => ({ stop: () => undefined }),
-}));
-
 import { createSFUClient, createChatClient } from './client';
 
 type WsMessage = { event: string; data: unknown };

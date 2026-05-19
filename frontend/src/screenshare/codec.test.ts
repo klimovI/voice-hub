@@ -22,12 +22,14 @@ const codecs = [
 ] as RTCRtpCodec[];
 
 describe('screen codec policy', () => {
-  it('prefers AV1 when both screen codecs are available', () => {
-    expect(chooseScreenCodec(support(['av1', 'vp9']))).toBe('av1');
+  it('returns the requested codec when it is supported', () => {
+    expect(chooseScreenCodec('av1', support(['av1', 'vp9']))).toBe('av1');
+    expect(chooseScreenCodec('vp9', support(['av1', 'vp9']))).toBe('vp9');
   });
 
-  it('falls back to VP9 when AV1 send support is absent', () => {
-    expect(chooseScreenCodec(support(['vp9']))).toBe('vp9');
+  it('falls back to AV1 > VP9 order when the requested codec is unsupported', () => {
+    expect(chooseScreenCodec('av1', support(['vp9']))).toBe('vp9');
+    expect(chooseScreenCodec('vp9', support(['av1'])) ).toBe('av1');
   });
 
   it('orders AV1 before VP9 while retaining VP9 as negotiation fallback', () => {

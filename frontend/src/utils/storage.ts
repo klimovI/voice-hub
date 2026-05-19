@@ -48,6 +48,11 @@ export const KEYS = {
   pingWindowFlashEnabled: 'voice-hub.ping-window-flash-enabled',
   // Selected room slug
   roomSlug: 'voice-hub.room-slug',
+  // Screen share capture preferences
+  screenResolution: 'voice-hub.screen-resolution',
+  screenFps: 'voice-hub.screen-fps',
+  screenCodec: 'voice-hub.screen-codec',
+  screenMode: 'voice-hub.screen-mode',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].

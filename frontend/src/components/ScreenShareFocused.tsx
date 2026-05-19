@@ -127,7 +127,7 @@ export function ScreenShareFocused({ onClose }: Props) {
 
   if (!focusedId) return null;
 
-  const qualityLabel = videoSize ? formatQualityLabel(videoSize.h) : null;
+  const qualityLabel = videoSize ? formatQualityLabel(videoSize.w, videoSize.h) : null;
   const fpsLabel = fps !== null ? formatFpsLabel(fps) : null;
   const ended = !shareStillLive;
 

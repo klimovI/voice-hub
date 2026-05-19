@@ -1,4 +1,4 @@
-import { SCREEN_FPS, SCREEN_HEIGHT, SCREEN_MAX_BITRATE, SCREEN_WIDTH } from './params';
+import { buildScreenParams, type ScreenCodecPref } from './params';
 
 export type ScreenVideoCodec = 'av1' | 'vp9';
 
@@ -19,14 +19,9 @@ const WEB_CODECS: Record<ScreenVideoCodec, string> = {
 
 let supportProbe: Promise<ScreenCodecSupport> | null = null;
 let lastSupport: ScreenCodecSupport | null = null;
-let demotedCodec: ScreenVideoCodec | null = null;
 
 export function isScreenVideoCodec(value: unknown): value is ScreenVideoCodec {
   return value === 'av1' || value === 'vp9';
-}
-
-export function rememberScreenCodecDemotion(codec: ScreenVideoCodec): void {
-  demotedCodec = codec;
 }
 
 function normalizeCodec(codec: Codec): ScreenVideoCodec | null {
@@ -61,13 +56,16 @@ async function probeHardware(codec: ScreenVideoCodec): Promise<boolean | null> {
   const videoEncoder = globalThis.VideoEncoder;
   if (!videoEncoder?.isConfigSupported) return null;
   try {
+    // Probe at the ceiling (1440p60) so a "yes" means HW can carry any user
+    // pick. False/null at the ceiling doesn't rule out lower resolutions.
+    const ceiling = buildScreenParams('1440', 60);
     const result = await videoEncoder.isConfigSupported({
       codec: WEB_CODECS[codec],
       hardwareAcceleration: 'prefer-hardware',
-      width: SCREEN_WIDTH,
-      height: SCREEN_HEIGHT,
-      framerate: SCREEN_FPS,
-      bitrate: SCREEN_MAX_BITRATE,
+      width: ceiling.width ?? 2560,
+      height: ceiling.height ?? 1440,
+      framerate: ceiling.fps,
+      bitrate: ceiling.maxBitrate,
     });
     return result.supported ?? false;
   } catch {
@@ -107,8 +105,13 @@ export function getScreenCodecSupportSync(): ScreenCodecSupport {
   };
 }
 
-export function chooseScreenCodec(support = getScreenCodecSupportSync()): ScreenVideoCodec | null {
-  if (demotedCodec && support.send.has(demotedCodec)) return demotedCodec;
+export function chooseScreenCodec(
+  pref: ScreenCodecPref,
+  support = getScreenCodecSupportSync(),
+): ScreenVideoCodec | null {
+  if (support.send.has(pref)) return pref;
+  // Pref unsupported on this device — fall back to whichever screen codec the
+  // device does support, preserving the AV1 > VP9 order.
   for (const codec of CODEC_PRIORITY) {
     if (support.send.has(codec)) return codec;
   }

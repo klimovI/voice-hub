@@ -92,6 +92,8 @@ export type UseSessionManagerReturn = {
   startScreenShare: () => Promise<void>;
   /** Stop the active publisher session. No-op when not publishing. */
   stopScreenShare: () => void;
+  /** Live-apply current resolution/fps/bitrate settings to an active share. */
+  updateScreenShareParams: () => Promise<void>;
   /** Subscribe to a peer's share (called from gallery tile click). */
   subscribeScreenShare: (publisherId: string) => void;
   /** Unsubscribe from a peer's share (called from focused close). */
@@ -879,6 +881,13 @@ export function useSessionManager({
     // onScreenShareSelfStopped will flip status back to idle.
   }, [sfu]);
 
+  const updateScreenShareParams = useCallback(async (): Promise<void> => {
+    const client = sfu.getClient();
+    if (!client) return;
+    if (!client.isPublishingScreenShare()) return;
+    await client.updateScreenShareParams();
+  }, [sfu]);
+
   const subscribeScreenShare = useCallback(
     (publisherId: string): void => {
       sfu.getClient()?.subscribeScreenShare(publisherId);
@@ -907,6 +916,7 @@ export function useSessionManager({
     sendPing,
     startScreenShare,
     stopScreenShare,
+    updateScreenShareParams,
     subscribeScreenShare,
     unsubscribeScreenShare,
     getRoomId,

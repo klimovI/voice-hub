@@ -341,6 +341,7 @@ export function App() {
               <ScreenShareButton
                 onStart={session.startScreenShare}
                 onStop={session.stopScreenShare}
+                onUpdateParams={session.updateScreenShareParams}
               />
             )}
             <ScreenShareGallery onTileClick={handleTileClick} />
