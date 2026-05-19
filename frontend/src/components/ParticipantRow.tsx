@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Bell, EarOff, MicOff, ScreenShare, Tag, Volume2, VolumeX } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { PEER_LABEL_MAX, savePeerLabel, savePeerVolume } from '../utils/storage';
@@ -10,7 +10,7 @@ interface Props {
   onPing?: (targetId: string) => void;
 }
 
-export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Props) {
+function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) {
   const updateParticipant = useStore((s) => s.updateParticipant);
   const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
   const [, forceTick] = useState(0);
@@ -297,3 +297,5 @@ export function ParticipantRow({ participant, onRemoteGainChange, onPing }: Prop
     </div>
   );
 }
+
+export const ParticipantRow = memo(ParticipantRowImpl);

@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { selectChatOnlyParticipants, selectVoiceParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect }: Props) {
+  const noopGainChange = useCallback(() => undefined, []);
   const participants = useStore(useShallow(selectVoiceParticipants));
   const lurkers = useStore(useShallow(selectChatOnlyParticipants));
   const joinState = useStore((s) => s.joinState);
@@ -143,7 +145,7 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
               <ParticipantRow
                 key={p.id}
                 participant={p}
-                onRemoteGainChange={() => undefined}
+                onRemoteGainChange={noopGainChange}
                 onPing={onPingUser}
               />
             ))}
