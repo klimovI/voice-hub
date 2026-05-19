@@ -10,15 +10,23 @@ import {
   SCREEN_FPS_OPTIONS,
   SCREEN_PRESETS,
   SCREEN_RESOLUTIONS,
+  SHARE_MODES,
   type ScreenCodecPref,
   type ScreenFps,
   type ScreenMode,
   type ScreenResolution,
+  type ShareMode,
 } from '../screenshare/params';
 
 interface Props {
   onLiveUpdate?: () => void | Promise<void>;
+  onShareModeChange?: (mode: ShareMode) => void | Promise<void>;
 }
+
+const SHARE_MODE_LABELS: Record<ShareMode, string> = {
+  sharp: 'Чёткость',
+  motion: 'Плавность',
+};
 
 const RESOLUTION_LABELS: Record<ScreenResolution, string> = {
   '720': '720p',
@@ -36,25 +44,37 @@ function fpsLabel(f: ScreenFps): string {
   return `${f} fps`;
 }
 
-export function ScreenShareSettings({ onLiveUpdate }: Props) {
+export function ScreenShareSettings({ onLiveUpdate, onShareModeChange }: Props) {
   const mode = useScreenShareSettingsStore((s) => s.mode);
   const effective = useEffectiveScreenSettings();
   const setMode = useScreenShareSettingsStore((s) => s.setMode);
+  const setShareMode = useScreenShareSettingsStore((s) => s.setShareMode);
   const setCodec = useScreenShareSettingsStore((s) => s.setCodec);
   const setResolution = useScreenShareSettingsStore((s) => s.setResolution);
   const setFps = useScreenShareSettingsStore((s) => s.setFps);
   const publishing = useScreenShareStore((s) => s.myStatus === 'publishing');
 
-  // Re-apply resolution/fps live when settings change while publishing. Codec
-  // is excluded — SDP renegotiate isn't supported here; codec applies on next
-  // start.
+  // Re-apply resolution/fps/shareMode live when settings change while
+  // publishing. Codec is excluded — SDP renegotiate isn't supported here;
+  // codec applies on next start. ShareMode change additionally fires the
+  // dedicated handler so the SFU swaps its adaptation policy.
   const firstRender = useRef(true);
+  const lastShareMode = useRef(effective.shareMode);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
+      lastShareMode.current = effective.shareMode;
       return;
     }
-    if (!publishing || !onLiveUpdate) return;
+    if (!publishing) {
+      lastShareMode.current = effective.shareMode;
+      return;
+    }
+    if (lastShareMode.current !== effective.shareMode && onShareModeChange) {
+      void onShareModeChange(effective.shareMode);
+      lastShareMode.current = effective.shareMode;
+    }
+    if (!onLiveUpdate) return;
     const t = window.setTimeout(() => {
       void onLiveUpdate();
     }, 250);
@@ -63,16 +83,18 @@ export function ScreenShareSettings({ onLiveUpdate }: Props) {
     mode,
     effective.resolution,
     effective.fps,
+    effective.shareMode,
     publishing,
     onLiveUpdate,
+    onShareModeChange,
   ]);
 
   return (
     <div className="grid gap-3">
       <div className="grid gap-2">
-        <span className="section-label">Режим</span>
+        <span className="section-label">Пресет</span>
         <ModeRadio mode={mode} onChange={setMode} />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <Dropdown
             label="Качество"
             value={effective.resolution}
@@ -86,6 +108,13 @@ export function ScreenShareSettings({ onLiveUpdate }: Props) {
             disabled={mode !== 'custom'}
             onChange={(v) => setFps(Number(v) as ScreenFps)}
             options={SCREEN_FPS_OPTIONS.map((f) => ({ value: String(f), label: fpsLabel(f) }))}
+          />
+          <Dropdown
+            label="Приоритет"
+            value={effective.shareMode}
+            disabled={mode !== 'custom'}
+            onChange={(v) => setShareMode(v as ShareMode)}
+            options={SHARE_MODES.map((m) => ({ value: m, label: SHARE_MODE_LABELS[m] }))}
           />
         </div>
       </div>
@@ -117,9 +146,10 @@ function ModeRadio({ mode, onChange }: { mode: ScreenMode; onChange: (m: ScreenM
             aria-checked={active}
             onClick={() => onChange(o.id)}
             className={`px-2 py-1.5 text-xs uppercase tracking-[0.08em] border transition-colors
-              ${active
-                ? 'border-accent text-accent bg-accent/10'
-                : 'border-line text-muted hover:border-muted-2'
+              ${
+                active
+                  ? 'border-accent text-accent bg-accent/10'
+                  : 'border-line text-muted hover:border-muted-2'
               }`}
           >
             {o.label}

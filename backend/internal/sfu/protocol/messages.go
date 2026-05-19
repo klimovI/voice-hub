@@ -42,6 +42,28 @@ const (
 	ScreenVideoCodecVP9 ScreenVideoCodec = "vp9"
 )
 
+// ScreenShareMode lets the streamer pick the adaptation policy the SFU
+// applies for their share. Sharp protects readability — when bandwidth
+// tightens the SFU drops FPS first, keeping resolution and bitrate where
+// they are. Motion protects smoothness — the SFU is more tolerant of
+// loss before dropping FPS, and the floor is one notch higher.
+//
+// Mode is orthogonal to the resolution/FPS preset. The publisher sets
+// both at start; mode can be changed mid-share via screen-share-mode-change
+// without renegotiating.
+type ScreenShareMode string
+
+const (
+	ScreenShareModeSharp  ScreenShareMode = "sharp"
+	ScreenShareModeMotion ScreenShareMode = "motion"
+)
+
+// IsValid reports whether m is one of the defined ScreenShareMode constants.
+// Empty / unknown values fall back to sharp at the call site.
+func (m ScreenShareMode) IsValid() bool {
+	return m == ScreenShareModeSharp || m == ScreenShareModeMotion
+}
+
 // OfferEnvelope is the data field of every "offer" message. PC discriminates
 // the target PeerConnection. PublisherID is set only when PC=screen-sub and
 // names the publisher whose stream this subscriber PC is being offered.
@@ -372,8 +394,9 @@ const (
 // system-audio Opus track; the server uses this to decide whether to pre-
 // create an audio TrackLocalStaticRTP for fan-out.
 type ScreenShareStartData struct {
-	SDP            string `json:"sdp"`
-	HasSystemAudio bool   `json:"hasSystemAudio"`
+	SDP            string          `json:"sdp"`
+	HasSystemAudio bool            `json:"hasSystemAudio"`
+	Mode           ScreenShareMode `json:"mode,omitempty"`
 }
 
 // ScreenShareStopData — C→S. Empty payload by design: a peer publishes at
@@ -400,6 +423,7 @@ type ScreenShareAvailableData struct {
 	PublisherID    string           `json:"publisherId"`
 	HasSystemAudio bool             `json:"hasSystemAudio"`
 	VideoCodec     ScreenVideoCodec `json:"videoCodec,omitempty"`
+	Mode           ScreenShareMode  `json:"mode,omitempty"`
 }
 
 // ScreenShareEndedData — S→all. Sent on publisher stop, grace expiry, or
@@ -427,6 +451,21 @@ type ScreenShareSubscribeData struct {
 // the per-subscriber forward state.
 type ScreenShareUnsubscribeData struct {
 	PublisherID string `json:"publisherId"`
+}
+
+// ScreenShareModeChangeData — C→S. Sent by the publisher mid-share to swap
+// the adaptation mode without renegotiating. Server updates the session's
+// mode, broadcasts screen-share-mode-changed to viewers, and sends a PLI to
+// the publisher so the encoder hands out a fresh keyframe under the new hint.
+type ScreenShareModeChangeData struct {
+	Mode ScreenShareMode `json:"mode"`
+}
+
+// ScreenShareModeChangedData — S→all. Broadcast after a successful
+// ScreenShareModeChange so viewers can update any mode-derived UI state.
+type ScreenShareModeChangedData struct {
+	PublisherID string          `json:"publisherId"`
+	Mode        ScreenShareMode `json:"mode"`
 }
 
 // ScreenShareEncodePauseData — S→C (to publisher). Dynacast: tells the

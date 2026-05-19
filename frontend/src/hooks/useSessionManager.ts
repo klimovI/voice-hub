@@ -23,6 +23,7 @@ import {
   loadPeerVolume,
 } from '../utils/storage';
 import type { ChatPayload, PingPayload, ScreenShareReason } from '../sfu/protocol';
+import type { ShareMode } from '../screenshare/params';
 import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
@@ -94,6 +95,8 @@ export type UseSessionManagerReturn = {
   stopScreenShare: () => void;
   /** Live-apply current resolution/fps/bitrate settings to an active share. */
   updateScreenShareParams: () => Promise<void>;
+  /** Swap sharp/motion mode on an active share. No-op when not publishing. */
+  changeScreenShareMode: (mode: ShareMode) => Promise<void>;
   /** Subscribe to a peer's share (called from gallery tile click). */
   subscribeScreenShare: (publisherId: string) => void;
   /** Unsubscribe from a peer's share (called from focused close). */
@@ -888,6 +891,16 @@ export function useSessionManager({
     await client.updateScreenShareParams();
   }, [sfu]);
 
+  const changeScreenShareMode = useCallback(
+    async (mode: ShareMode): Promise<void> => {
+      const client = sfu.getClient();
+      if (!client) return;
+      if (!client.isPublishingScreenShare()) return;
+      await client.changeScreenShareMode(mode);
+    },
+    [sfu],
+  );
+
   const subscribeScreenShare = useCallback(
     (publisherId: string): void => {
       sfu.getClient()?.subscribeScreenShare(publisherId);
@@ -917,6 +930,7 @@ export function useSessionManager({
     startScreenShare,
     stopScreenShare,
     updateScreenShareParams,
+    changeScreenShareMode,
     subscribeScreenShare,
     unsubscribeScreenShare,
     getRoomId,

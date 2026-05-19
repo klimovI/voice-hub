@@ -10,6 +10,27 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// useScreenShareSettingsStore touches localStorage at module-init, which
+// is undefined in vitest/node. vi.hoisted runs before any ESM import in
+// this file, so the shim is in place when the store module is evaluated.
+vi.hoisted(() => {
+  const memoryStore = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => memoryStore.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      memoryStore.set(k, v);
+    },
+    removeItem: (k: string) => {
+      memoryStore.delete(k);
+    },
+    clear: () => memoryStore.clear(),
+    key: (i: number) => Array.from(memoryStore.keys())[i] ?? null,
+    get length() {
+      return memoryStore.size;
+    },
+  };
+});
+
 vi.mock('../screenshare/codec', () => ({
   primeScreenCodecProfile: () => Promise.resolve(),
   chooseScreenCodec: () => 'av1',
@@ -62,19 +83,31 @@ class StubRTCPeerConnection {
   connectionState = 'new';
 
   addTrack(): void {}
-  getTracks(): [] { return []; }
+  getTracks(): [] {
+    return [];
+  }
   close(): void {}
   createOffer(): Promise<RTCSessionDescriptionInit> {
     return Promise.resolve({ type: 'offer', sdp: '' });
   }
-  setLocalDescription(): Promise<void> { return Promise.resolve(); }
-  setRemoteDescription(): Promise<void> { return Promise.resolve(); }
-  addIceCandidate(): Promise<void> { return Promise.resolve(); }
-  getTransceivers(): [] { return []; }
+  setLocalDescription(): Promise<void> {
+    return Promise.resolve();
+  }
+  setRemoteDescription(): Promise<void> {
+    return Promise.resolve();
+  }
+  addIceCandidate(): Promise<void> {
+    return Promise.resolve();
+  }
+  getTransceivers(): [] {
+    return [];
+  }
 }
 
 class StubMediaStream {
-  getTracks(): [] { return []; }
+  getTracks(): [] {
+    return [];
+  }
 }
 
 let lastWs: StubWebSocket | null = null;

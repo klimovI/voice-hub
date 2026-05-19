@@ -5,11 +5,13 @@ import { useStore } from '../store/useStore';
 import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
 import { useVideoFps } from '../screenshare/useVideoFps';
 import { ScreenShareSettings } from './ScreenShareSettings';
+import type { ShareMode } from '../screenshare/params';
 
 interface Props {
   onStart: () => void | Promise<void>;
   onStop: () => void;
   onUpdateParams: () => void | Promise<void>;
+  onShareModeChange: (mode: ShareMode) => void | Promise<void>;
 }
 
 // Android Chrome and a few mobile browsers ship MediaDevices without
@@ -24,7 +26,7 @@ const screenCaptureSupported =
  * "starting" / "stopping" states disable the button to prevent double-fire
  * during getDisplayMedia / WS round-trip.
  */
-export function ScreenShareButton({ onStart, onStop, onUpdateParams }: Props) {
+export function ScreenShareButton({ onStart, onStop, onUpdateParams, onShareModeChange }: Props) {
   const joinState = useStore((s) => s.joinState);
   const myStatus = useScreenShareStore((s) => s.myStatus);
   const myStream = useScreenShareStore((s) => s.myStream);
@@ -81,7 +83,10 @@ export function ScreenShareButton({ onStart, onStop, onUpdateParams }: Props) {
         </div>
         {menuOpen && (
           <div className="border border-line/60 bg-bg-input/30 p-2">
-            <ScreenShareSettings onLiveUpdate={onUpdateParams} />
+            <ScreenShareSettings
+              onLiveUpdate={onUpdateParams}
+              onShareModeChange={onShareModeChange}
+            />
           </div>
         )}
       </div>

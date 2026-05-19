@@ -17,6 +17,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"voice-hub/backend/internal/sfu/codec"
 	"voice-hub/backend/internal/sfu/dd"
 	"voice-hub/backend/internal/sfu/protocol"
 )
@@ -36,16 +37,48 @@ const screenShareGracePeriod = 5 * time.Second
 // out of scope until BWE-driven auto-downgrade lands.
 var allScreenEncodeLayers = []int{0, 1, 2}
 
-// Auto-downgrade thresholds. Hysteresis windows are deliberately asymmetric:
-// fast reaction down when the network hurts, slow climb back up so the
-// publisher's encoder doesn't yo-yo on transient blips.
-const (
-	autoDowngradePollInterval = 2 * time.Second
-	autoDowngradeHighLossPM   = 80              // 8% in per-mille — sustained drop triggers downgrade
-	autoDowngradeLowLossPM    = 20              // 2% — sustained quiet triggers upgrade
-	autoDowngradeHighWindow   = 3 * time.Second // observe high loss this long before stepping down
-	autoDowngradeLowWindow    = 5 * time.Second // and this long of calm before stepping back up
+// autoDowngradePollInterval is the cadence at which the decision loop wakes
+// up to evaluate every subscriber's loss state. Tied to the RTCP RR cadence
+// (~1s): sampling faster than RRs arrive would add noise without info.
+const autoDowngradePollInterval = 2 * time.Second
+
+// modePolicy bundles the loss thresholds, sustain windows, and layer floor
+// for one ScreenShareMode. Sharp protects readability — it drops FPS at the
+// first sign of trouble (low threshold, short sustain) and can fall all the
+// way to T0 (~3-7 fps). Motion protects smoothness — it tolerates more loss
+// before dropping FPS (high threshold, long sustain) and stops at T1 so the
+// stream never falls below half-FPS, where motion content becomes choppy.
+type modePolicy struct {
+	highLossPM uint32        // ≥ this per-mille triggers a downstep streak
+	lowLossPM  uint32        // ≤ this per-mille triggers an upstep streak
+	highWindow time.Duration // sustain duration before stepping down
+	lowWindow  time.Duration // sustain duration before stepping back up
+	floorTemp  int32         // minimum target temporal layer (inclusive)
+}
+
+var (
+	sharpPolicy = modePolicy{
+		highLossPM: 50,
+		lowLossPM:  10,
+		highWindow: 2 * time.Second,
+		lowWindow:  4 * time.Second,
+		floorTemp:  0,
+	}
+	motionPolicy = modePolicy{
+		highLossPM: 120,
+		lowLossPM:  30,
+		highWindow: 3 * time.Second,
+		lowWindow:  7 * time.Second,
+		floorTemp:  1,
+	}
 )
+
+func policyForMode(m protocol.ScreenShareMode) modePolicy {
+	if m == protocol.ScreenShareModeMotion {
+		return motionPolicy
+	}
+	return sharpPolicy
+}
 
 // ScreenShareSession owns one publisher's screen-share state. Lifecycle:
 //
@@ -75,15 +108,17 @@ type ScreenShareSession struct {
 	publisherPC *webrtc.PeerConnection
 	room        *Room
 
-	// parser produces DD descriptors per packet. Owned by the session, read
-	// serially from forwardVideo — not safe for concurrent use.
-	parser dd.Parser
+	// codecAdapter abstracts per-codec RTP parsing (AV1 DD vs VP9 payload
+	// header). Created at handleScreenShareStart from the negotiated codec;
+	// OnTrackNegotiated runs once on the first OnTrack to capture any per-PC
+	// state (e.g. AV1's DD extension ID). Used serially by forwardVideo.
+	codecAdapter codec.Adapter
 
-	// ddExtID is the negotiated RTP header extension ID for the DD URI. Set
-	// once per session inside the video OnTrack callback from the receiver's
-	// HeaderExtensions list; zero until the first OnTrack fires. Read by
-	// forwardVideo to pull DD bytes off each inbound packet.
-	ddExtID atomic.Uint32
+	// mode stores the publisher-selected ScreenShareMode encoded as a small
+	// integer so it can be swapped lock-free from a mid-share mode-change
+	// without disturbing the forward path. Read by the auto-downgrade loop;
+	// the forward goroutine itself doesn't branch on mode.
+	mode atomic.Uint32
 
 	mu          sync.RWMutex
 	subscribers map[string]*screenSubscriber // key = subscriber peer ID
@@ -171,7 +206,35 @@ func screenVideoCodecFromCapability(codec webrtc.RTPCodecCapability) protocol.Sc
 }
 
 func (s *ScreenShareSession) supportsTemporalFiltering() bool {
-	return s.VideoCodec == protocol.ScreenVideoCodecAV1
+	return s.codecAdapter != nil && s.codecAdapter.SupportsTemporalFiltering()
+}
+
+// modeEncoding maps protocol.ScreenShareMode to the uint32 representation
+// stored on ScreenShareSession.mode. Sharp is the default fallback for
+// unknown / empty values, mirroring the client-side default.
+const (
+	modeSharp  uint32 = 0
+	modeMotion uint32 = 1
+)
+
+func encodeMode(m protocol.ScreenShareMode) uint32 {
+	if m == protocol.ScreenShareModeMotion {
+		return modeMotion
+	}
+	return modeSharp
+}
+
+func decodeMode(v uint32) protocol.ScreenShareMode {
+	if v == modeMotion {
+		return protocol.ScreenShareModeMotion
+	}
+	return protocol.ScreenShareModeSharp
+}
+
+// Mode returns the active ScreenShareMode for the session. Safe for
+// concurrent reads — backed by an atomic.
+func (s *ScreenShareSession) Mode() protocol.ScreenShareMode {
+	return decodeMode(s.mode.Load())
 }
 
 // handleScreenShareStart is the entry point for the publisher's first
@@ -213,17 +276,22 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 
 	ctx, cancel := context.WithCancel(p.ctx)
 
+	initialMode := data.Mode
+	if !initialMode.IsValid() {
+		initialMode = protocol.ScreenShareModeSharp
+	}
+
 	session := &ScreenShareSession{
 		PublisherID:    p.id,
 		SessionToken:   token,
 		HasSystemAudio: data.HasSystemAudio,
 		publisherPC:    pc,
 		room:           r,
-		parser:         dd.NewParser(),
 		subscribers:    make(map[string]*screenSubscriber),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+	session.mode.Store(encodeMode(initialMode))
 
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: data.SDP}
 	if err := pc.SetRemoteDescription(offer); err != nil {
@@ -302,6 +370,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
 		return
 	}
+	session.codecAdapter = codec.New(session.VideoCodec)
 
 	// Publisher PC connection state: cancel session on failure / close.
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -330,19 +399,12 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	pc.OnTrack(func(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		switch remote.Kind() {
 		case webrtc.RTPCodecTypeVideo:
-			// DD ext ID is per-PC: the publisher's MediaEngine has agreed an
-			// ID with us during SDP negotiation. The receiver's GetParameters
-			// reflects that negotiated state, so we pull the ID once here
-			// and store it for the lifetime of the session. Subscriber PCs
-			// negotiate their own IDs independently — we strip the publisher
+			// codecAdapter captures any per-PC negotiated state here (e.g.
+			// AV1's DD extension ID). Subscriber PCs negotiate their own
+			// extension IDs independently — we strip the publisher's
 			// extension on forward and let pion re-insert the right ID on
 			// each subscriber side.
-			for _, ext := range receiver.GetParameters().HeaderExtensions {
-				if ext.URI == dd.RTPExtensionURI {
-					session.ddExtID.Store(uint32(ext.ID))
-					break
-				}
-			}
+			session.codecAdapter.OnTrackNegotiated(receiver)
 			r.firstScreenVideoReady(p, session)
 			session.forwardVideo(remote)
 		case webrtc.RTPCodecTypeAudio:
@@ -414,6 +476,7 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 		PublisherID:    session.PublisherID,
 		HasSystemAudio: session.HasSystemAudio,
 		VideoCodec:     session.VideoCodec,
+		Mode:           session.Mode(),
 	})
 	availableEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-available", Data: availableData})
 
@@ -460,13 +523,13 @@ func (s *ScreenShareSession) forwardVideo(remote *webrtc.TrackRemote) {
 			}
 			return
 		}
-		desc, parseErr := s.parser.Parse(s.extDD(pkt))
+		desc, parseErr := s.codecAdapter.Parse(pkt)
 		if parseErr != nil {
-			// Malformed DD bytes — keep forwarding so video doesn't blackhole,
+			// Malformed payload — keep forwarding so video doesn't blackhole,
 			// but log so we notice if real publishers start to misbehave. A
 			// keyframe-bearing packet that re-attaches structure will re-arm
 			// the parser, so noise here is bounded.
-			log.Printf("sfu: screen forwardVideo (%s) DD parse: %v", s.PublisherID, parseErr)
+			log.Printf("sfu: screen forwardVideo (%s) %s parse: %v", s.PublisherID, s.codecAdapter.Name(), parseErr)
 			desc = nil
 		}
 
@@ -539,22 +602,6 @@ func (s *ScreenShareSession) forwardAudio(remote *webrtc.TrackRemote) {
 			return
 		}
 	}
-}
-
-// extDD pulls the DD extension bytes off pkt using the negotiated ID cached
-// on the session. Returns nil when no ID has been observed yet (i.e. before
-// OnTrack reads it from receiver.GetParameters().HeaderExtensions) or when
-// the packet doesn't carry that extension.
-//
-// pion's rtp.Packet.GetExtension handles both one-byte (RFC5285) and two-byte
-// header extension forms, so callers do not need to branch on form. The DD
-// payload is often >16 bytes (two-byte form required) for bootstrap packets.
-func (s *ScreenShareSession) extDD(pkt *rtp.Packet) []byte {
-	id := uint8(s.ddExtID.Load())
-	if id == 0 {
-		return nil
-	}
-	return pkt.GetExtension(id)
 }
 
 // addSubscriber creates a new subscriber PC for the given peer, attaches the
@@ -889,6 +936,7 @@ func (r *Room) runAutoDowngradeTick(session *ScreenShareSession, now time.Time) 
 	if !session.supportsTemporalFiltering() {
 		return
 	}
+	policy := policyForMode(session.Mode())
 	session.mu.RLock()
 	subs := make([]*screenSubscriber, 0, len(session.subscribers))
 	for _, s := range session.subscribers {
@@ -898,7 +946,7 @@ func (r *Room) runAutoDowngradeTick(session *ScreenShareSession, now time.Time) 
 
 	anyChange := false
 	for _, sub := range subs {
-		if evalAutoDowngrade(sub, now, session.PublisherID) {
+		if evalAutoDowngrade(sub, now, session.PublisherID, policy) {
 			anyChange = true
 		}
 	}
@@ -913,16 +961,16 @@ func (r *Room) runAutoDowngradeTick(session *ScreenShareSession, now time.Time) 
 //
 // The pubID parameter is only used for log lines — passing it in keeps the
 // function free of *Room and trivial to unit-test.
-func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool {
+func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string, policy modePolicy) bool {
 	loss := sub.lossPerMille.Load()
 	target := sub.targetTemp.Load()
 	nowNs := now.UnixNano()
 
-	if loss >= autoDowngradeHighLossPM {
+	if loss >= policy.highLossPM {
 		// Streak of low quality. Cancel any pending upgrade timer.
 		sub.lowLossSince.Store(0)
-		if target == 0 {
-			sub.highLossSince.Store(0) // nothing more to downgrade to
+		if target <= policy.floorTemp {
+			sub.highLossSince.Store(0) // already at the policy floor
 			return false
 		}
 		since := sub.highLossSince.Load()
@@ -930,7 +978,7 @@ func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool 
 			sub.highLossSince.Store(nowNs)
 			return false
 		}
-		if time.Duration(nowNs-since) < autoDowngradeHighWindow {
+		if time.Duration(nowNs-since) < policy.highWindow {
 			return false
 		}
 		sub.SetTargetTemp(target - 1)
@@ -940,7 +988,7 @@ func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool 
 		return true
 	}
 
-	if loss <= autoDowngradeLowLossPM {
+	if loss <= policy.lowLossPM {
 		// Streak of clean reception. Cancel any pending downgrade timer.
 		sub.highLossSince.Store(0)
 		if target >= 2 {
@@ -952,7 +1000,7 @@ func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool 
 			sub.lowLossSince.Store(nowNs)
 			return false
 		}
-		if time.Duration(nowNs-since) < autoDowngradeLowWindow {
+		if time.Duration(nowNs-since) < policy.lowWindow {
 			return false
 		}
 		sub.SetTargetTemp(target + 1)
@@ -967,6 +1015,54 @@ func evalAutoDowngrade(sub *screenSubscriber, now time.Time, pubID string) bool 
 	sub.highLossSince.Store(0)
 	sub.lowLossSince.Store(0)
 	return false
+}
+
+// handleScreenShareModeChange swaps the active ScreenShareMode mid-share.
+// Updates session.mode (atomic), broadcasts screen-share-mode-changed to
+// every other peer in the room so viewers can refresh any mode-derived UI
+// state, and PLIs the publisher so the encoder hands out a fresh keyframe
+// under the new contentHint (the client side reapplies setParameters with
+// the new bitrate/framerate cap; the encoder benefits from a clean IDR).
+//
+// Invalid / unchanged mode is a silent no-op — clients should not depend on
+// an ack frame for this transition.
+func (r *Room) handleScreenShareModeChange(p *peer, data protocol.ScreenShareModeChangeData) {
+	if !data.Mode.IsValid() {
+		return
+	}
+	r.mu.Lock()
+	session := p.screenSession
+	r.mu.Unlock()
+	if session == nil {
+		r.sendScreenShareError(p, "", protocol.ReasonNotFound)
+		return
+	}
+
+	newEnc := encodeMode(data.Mode)
+	if session.mode.Swap(newEnc) == newEnc {
+		return
+	}
+
+	session.requestKeyframe()
+
+	r.mu.Lock()
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != p.id {
+			others = append(others, op)
+		}
+	}
+	r.mu.Unlock()
+
+	payload, _ := json.Marshal(protocol.ScreenShareModeChangedData{
+		PublisherID: session.PublisherID,
+		Mode:        data.Mode,
+	})
+	envBytes, _ := json.Marshal(protocol.Envelope{Event: "screen-share-mode-changed", Data: payload})
+	for _, op := range others {
+		_ = op.writeRaw(envBytes)
+	}
+	log.Printf("sfu: screen-share mode-change pub=%s mode=%s", session.PublisherID, data.Mode)
 }
 
 // handleScreenShareUnsubscribe is the client-initiated path. It defers
@@ -1262,6 +1358,7 @@ func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeD
 		PublisherID:    p.id,
 		HasSystemAudio: session.HasSystemAudio,
 		VideoCodec:     session.VideoCodec,
+		Mode:           session.Mode(),
 	})
 	availEnv, _ := json.Marshal(protocol.Envelope{Event: "screen-share-available", Data: availData})
 

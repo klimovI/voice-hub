@@ -88,6 +88,20 @@ export type PeerInfo = {
 
 export type ScreenVideoCodec = 'av1' | 'vp9';
 
+/**
+ * Publisher's adaptation mode for a screen share. Picked at start and
+ * swappable mid-share via the screen-share-mode-change message.
+ *
+ *  - sharp  → biases the encoder ('text' contentHint), uses a tighter
+ *             bitrate cap, and tells the SFU to drop FPS first when
+ *             bandwidth tightens. Floor is the lowest temporal layer.
+ *  - motion → biases the encoder ('motion' contentHint), uses the full
+ *             bitrate cap, and tells the SFU to tolerate more loss before
+ *             dropping FPS. Floor is the middle temporal layer so the
+ *             stream never falls below half-FPS.
+ */
+export type ScreenShareMode = 'sharp' | 'motion';
+
 // Server → Client payloads
 
 /** Data field of the "welcome" message. Sent once, on connect. */
@@ -207,6 +221,18 @@ export type ScreenShareReason = 'not-found' | 'invalid-token' | 'already-publish
 export type ScreenShareStartPayload = {
   sdp: string;
   hasSystemAudio: boolean;
+  mode?: ScreenShareMode;
+};
+
+/** C→S — swap the active mode on a live share without renegotiating. */
+export type ScreenShareModeChangePayload = {
+  mode: ScreenShareMode;
+};
+
+/** S→all — broadcast after a successful mode change. */
+export type ScreenShareModeChangedPayload = {
+  publisherId: string;
+  mode: ScreenShareMode;
 };
 
 /** Server-issued ack carrying the resume token. Delivered BEFORE the matching answer. */
@@ -222,6 +248,7 @@ export type ScreenShareAvailablePayload = {
   publisherId: string;
   hasSystemAudio: boolean;
   videoCodec?: ScreenVideoCodec;
+  mode?: ScreenShareMode;
 };
 
 export type ScreenShareEndedPayload = {
@@ -271,7 +298,8 @@ export type ServerMessage =
   | { event: 'screen-share-ended'; data: ScreenShareEndedPayload }
   | { event: 'screen-share-error'; data: ScreenShareErrorPayload }
   | { event: 'screen-share-encode-pause'; data: ScreenShareEncodeLayersPayload }
-  | { event: 'screen-share-encode-resume'; data: ScreenShareEncodeLayersPayload };
+  | { event: 'screen-share-encode-resume'; data: ScreenShareEncodeLayersPayload }
+  | { event: 'screen-share-mode-changed'; data: ScreenShareModeChangedPayload };
 
 // ClientMessage union (used in send helpers)
 
@@ -295,7 +323,8 @@ export type ClientMessage =
   | { event: 'screen-share-stop'; data: Record<string, never> }
   | { event: 'screen-share-resume'; data: ScreenShareResumePayload }
   | { event: 'screen-share-subscribe'; data: ScreenShareSubscribePayload }
-  | { event: 'screen-share-unsubscribe'; data: ScreenShareUnsubscribePayload };
+  | { event: 'screen-share-unsubscribe'; data: ScreenShareUnsubscribePayload }
+  | { event: 'screen-share-mode-change'; data: ScreenShareModeChangePayload };
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
@@ -316,6 +345,10 @@ function isPCKind(v: unknown): v is PCKind {
 
 function isScreenVideoCodec(v: unknown): v is ScreenVideoCodec {
   return v === 'av1' || v === 'vp9';
+}
+
+function isScreenShareMode(v: unknown): v is ScreenShareMode {
+  return v === 'sharp' || v === 'motion';
 }
 
 export function parseServerMessage(raw: string): ServerMessage | null {
@@ -453,12 +486,27 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         data === null ||
         typeof d.publisherId !== 'string' ||
         typeof d.hasSystemAudio !== 'boolean' ||
-        ('videoCodec' in d && !isScreenVideoCodec(d.videoCodec))
+        ('videoCodec' in d && !isScreenVideoCodec(d.videoCodec)) ||
+        ('mode' in d && !isScreenShareMode(d.mode))
       ) {
         console.warn("[protocol] malformed 'screen-share-available' payload:", data);
         return null;
       }
       return { event, data: data as ScreenShareAvailablePayload };
+    }
+
+    case 'screen-share-mode-changed': {
+      const d = data as Record<string, unknown>;
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof d.publisherId !== 'string' ||
+        !isScreenShareMode(d.mode)
+      ) {
+        console.warn("[protocol] malformed 'screen-share-mode-changed' payload:", data);
+        return null;
+      }
+      return { event, data: data as ScreenShareModeChangedPayload };
     }
 
     case 'screen-share-ended': {

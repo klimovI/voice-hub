@@ -5,18 +5,21 @@ import {
   DEFAULT_SCREEN_FPS,
   DEFAULT_SCREEN_MODE,
   DEFAULT_SCREEN_RESOLUTION,
+  DEFAULT_SHARE_MODE,
   buildScreenParams,
   getPreset,
   isScreenCodecPref,
   isScreenFps,
   isScreenMode,
   isScreenResolution,
+  isShareMode,
+  shareModeToContentHint,
   type ScreenCodecPref,
   type ScreenFps,
   type ScreenMode,
   type ScreenParams,
-  type ScreenPresetId,
   type ScreenResolution,
+  type ShareMode,
 } from '../screenshare/params';
 import { KEYS } from '../utils/storage';
 
@@ -40,12 +43,19 @@ function loadMode(): ScreenMode {
   return isScreenMode(raw) ? raw : DEFAULT_SCREEN_MODE;
 }
 
+function loadShareMode(): ShareMode {
+  const raw = localStorage.getItem(KEYS.screenShareMode);
+  return isShareMode(raw) ? raw : DEFAULT_SHARE_MODE;
+}
+
 type State = {
   mode: ScreenMode;
+  shareMode: ShareMode;
   codec: ScreenCodecPref;
   customResolution: ScreenResolution;
   customFps: ScreenFps;
   setMode: (m: ScreenMode) => void;
+  setShareMode: (m: ShareMode) => void;
   setCodec: (c: ScreenCodecPref) => void;
   setResolution: (r: ScreenResolution) => void;
   setFps: (f: ScreenFps) => void;
@@ -53,12 +63,17 @@ type State = {
 
 export const useScreenShareSettingsStore = create<State>((set) => ({
   mode: loadMode(),
+  shareMode: loadShareMode(),
   codec: loadCodec(),
   customResolution: loadResolution(),
   customFps: loadFps(),
   setMode: (m) => {
     localStorage.setItem(KEYS.screenMode, m);
     set({ mode: m });
+  },
+  setShareMode: (m) => {
+    localStorage.setItem(KEYS.screenShareMode, m);
+    set({ shareMode: m });
   },
   setCodec: (c) => {
     localStorage.setItem(KEYS.screenCodec, c);
@@ -74,53 +89,49 @@ export const useScreenShareSettingsStore = create<State>((set) => ({
   },
 }));
 
-// Returns the resolution/fps/codec triple currently in effect. Resolution +
-// fps come from the active preset (or custom dropdowns when mode='custom').
-// Codec is global and orthogonal to the preset choice.
-export function getEffectiveSettings(): {
+type EffectiveSettings = {
   resolution: ScreenResolution;
   fps: ScreenFps;
   codec: ScreenCodecPref;
-} {
-  const s = useScreenShareSettingsStore.getState();
+  shareMode: ShareMode;
+};
+
+function pickEffectiveSettings(
+  s: Pick<State, 'mode' | 'codec' | 'shareMode' | 'customResolution' | 'customFps'>,
+): EffectiveSettings {
   if (s.mode === 'custom') {
-    return { resolution: s.customResolution, fps: s.customFps, codec: s.codec };
+    return {
+      resolution: s.customResolution,
+      fps: s.customFps,
+      codec: s.codec,
+      shareMode: s.shareMode,
+    };
   }
   const p = getPreset(s.mode);
-  return { resolution: p.resolution, fps: p.fps, codec: s.codec };
+  return { resolution: p.resolution, fps: p.fps, codec: s.codec, shareMode: p.shareMode };
 }
 
-export function useEffectiveScreenSettings(): {
-  resolution: ScreenResolution;
-  fps: ScreenFps;
-  codec: ScreenCodecPref;
-} {
-  return useScreenShareSettingsStore(
-    useShallow((s) => {
-      if (s.mode === 'custom') {
-        return { resolution: s.customResolution, fps: s.customFps, codec: s.codec };
-      }
-      const p = getPreset(s.mode as ScreenPresetId);
-      return { resolution: p.resolution, fps: p.fps, codec: s.codec };
-    }),
-  );
+export function getEffectiveSettings(): EffectiveSettings {
+  return pickEffectiveSettings(useScreenShareSettingsStore.getState());
+}
+
+export function useEffectiveScreenSettings(): EffectiveSettings {
+  return useScreenShareSettingsStore(useShallow(pickEffectiveSettings));
 }
 
 export function getCurrentScreenParams(): ScreenParams {
-  const { resolution, fps } = getEffectiveSettings();
-  return buildScreenParams(resolution, fps);
+  const { resolution, fps, shareMode } = getEffectiveSettings();
+  return buildScreenParams(resolution, fps, shareMode);
 }
 
 export function getCurrentScreenCodecPref(): ScreenCodecPref {
   return getEffectiveSettings().codec;
 }
 
-// 'detail' biases the encoder toward sharpness — text legibility wins,
-// fps drops under load. Used only for the screenshare preset, where the user
-// is showing static or slow-moving content. Everything else (gaming, custom)
-// uses 'motion' so the encoder keeps motion fluid and sacrifices per-frame
-// sharpness when starved.
-export function getCurrentScreenContentHint(): 'detail' | 'motion' {
-  const mode = useScreenShareSettingsStore.getState().mode;
-  return mode === 'screenshare' ? 'detail' : 'motion';
+export function getCurrentShareMode(): ShareMode {
+  return getEffectiveSettings().shareMode;
+}
+
+export function getCurrentScreenContentHint(): 'text' | 'motion' {
+  return shareModeToContentHint(getCurrentShareMode());
 }

@@ -24,8 +24,10 @@ import {
   getCurrentScreenCodecPref,
   getCurrentScreenContentHint,
   getCurrentScreenParams,
+  getCurrentShareMode,
 } from '../store/useScreenShareSettingsStore';
-import type { ScreenParams } from '../screenshare/params';
+import type { ScreenParams, ShareMode } from '../screenshare/params';
+import { buildScreenParams, shareModeToContentHint } from '../screenshare/params';
 
 export const SCREEN_SHARE_NO_CODEC = 'SCREEN_SHARE_NO_CODEC';
 
@@ -103,6 +105,13 @@ export type SFUClient = {
    * changes still require stop+restart; this call ignores codec drift.
    */
   updateScreenShareParams(): Promise<void>;
+  /**
+   * Swap the active screen-share mode (sharp ↔ motion). Reapplies the
+   * publisher-side encoder hint + bitrate cap and notifies the SFU so it
+   * switches to the matching adaptation policy. No SDP renegotiation.
+   * No-op when not publishing.
+   */
+  changeScreenShareMode(mode: ShareMode): Promise<void>;
   /**
    * Subscribe to a specific publisher's share. UI calls this when the user
    * clicks a gallery tile.
@@ -618,7 +627,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const offer = await newPC.createOffer();
     await newPC.setLocalDescription(offer);
 
-    send('screen-share-start', { sdp: offer.sdp ?? '', hasSystemAudio });
+    const initialShareMode = getCurrentShareMode();
+    send('screen-share-start', {
+      sdp: offer.sdp ?? '',
+      hasSystemAudio,
+      mode: initialShareMode,
+    });
 
     // The server replies with screen-share-started (token) followed by an
     // answer envelope with pc='screen-pub'. setParameters needs encodings[]
@@ -758,6 +772,35 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     } catch (err) {
       console.warn('[sfu] setParameters(update) on screen video failed', err);
     }
+  }
+
+  async function changeScreenShareMode(mode: ShareMode): Promise<void> {
+    if (!screenPubVideoSender || !screenPubStream) return;
+    const track = screenPubStream.getVideoTracks()[0];
+    if (track) {
+      track.contentHint = shareModeToContentHint(mode);
+    }
+    // Recompute bitrate cap with the new mode — buildScreenParams applies
+    // the share-mode modifier so sharp drops back to the tighter cap and
+    // motion restores the full one.
+    const eff = getCurrentScreenParams();
+    const next = buildScreenParams(eff.resolution, eff.fps, mode);
+    const sender = screenPubVideoSender;
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    params.encodings[0] = {
+      ...params.encodings[0],
+      maxBitrate: scaledBitrate(track, next),
+      maxFramerate: next.fps,
+    } as RTCRtpEncodingParameters;
+    try {
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn('[sfu] setParameters(mode-change) on screen video failed', err);
+    }
+    send('screen-share-mode-change', { mode });
   }
 
   async function applyScreenEncodeActive(active: boolean): Promise<void> {
@@ -965,6 +1008,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     startScreenShare,
     stopScreenShare,
     updateScreenShareParams,
+    changeScreenShareMode,
     subscribeScreenShare,
     unsubscribeScreenShare,
     isPublishingScreenShare,

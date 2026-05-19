@@ -397,7 +397,7 @@ func TestEvalAutoDowngradeNoChangeBelowWindow(t *testing.T) {
 	sub := newTestSub("s1", 2, 120) // 12% loss
 	t0 := time.Now()
 
-	if evalAutoDowngrade(sub, t0, "pub") {
+	if evalAutoDowngrade(sub, t0, "pub", sharpPolicy) {
 		t.Fatal("first tick should arm timer, not flip layer")
 	}
 	if sub.targetTemp.Load() != 2 {
@@ -408,7 +408,7 @@ func TestEvalAutoDowngradeNoChangeBelowWindow(t *testing.T) {
 	}
 
 	// Still well within the 3s window.
-	if evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub") {
+	if evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub", sharpPolicy) {
 		t.Fatal("flip before window elapsed")
 	}
 	if sub.targetTemp.Load() != 2 {
@@ -421,8 +421,8 @@ func TestEvalAutoDowngradeAfterSustainedLoss(t *testing.T) {
 	sub := newTestSub("s1", 2, 120)
 	t0 := time.Now()
 
-	evalAutoDowngrade(sub, t0, "pub")
-	if !evalAutoDowngrade(sub, t0.Add(autoDowngradeHighWindow+10*time.Millisecond), "pub") {
+	evalAutoDowngrade(sub, t0, "pub", sharpPolicy)
+	if !evalAutoDowngrade(sub, t0.Add(sharpPolicy.highWindow+10*time.Millisecond), "pub", sharpPolicy) {
 		t.Fatal("expected flip after high-loss window elapsed")
 	}
 	if sub.targetTemp.Load() != 1 {
@@ -433,8 +433,12 @@ func TestEvalAutoDowngradeAfterSustainedLoss(t *testing.T) {
 	}
 }
 
-func TestRunAutoDowngradeTickSkipsVP9Fallback(t *testing.T) {
+func TestRunAutoDowngradeTickSkipsWhenAdapterMissing(t *testing.T) {
 	t.Parallel()
+	// codecAdapter nil → temporal filtering unsupported. Models the brief
+	// window between session struct creation and codec.New() in
+	// handleScreenShareStart: any tick that runs in that window must be a
+	// no-op so we don't strand a subscriber at a phantom downgraded layer.
 	session := &ScreenShareSession{
 		PublisherID: "pub",
 		VideoCodec:  protocol.ScreenVideoCodecVP9,
@@ -446,13 +450,13 @@ func TestRunAutoDowngradeTickSkipsVP9Fallback(t *testing.T) {
 	t0 := time.Now()
 
 	room.runAutoDowngradeTick(session, t0)
-	room.runAutoDowngradeTick(session, t0.Add(autoDowngradeHighWindow+time.Second))
+	room.runAutoDowngradeTick(session, t0.Add(sharpPolicy.highWindow+time.Second))
 
 	if sub.targetTemp.Load() != 2 {
-		t.Errorf("VP9 target layer changed: %d, want 2", sub.targetTemp.Load())
+		t.Errorf("target layer changed without codec adapter: %d, want 2", sub.targetTemp.Load())
 	}
 	if sub.highLossSince.Load() != 0 {
-		t.Error("VP9 fallback should not arm temporal downgrade timers")
+		t.Error("no codec adapter should not arm temporal downgrade timers")
 	}
 }
 
@@ -461,10 +465,10 @@ func TestEvalAutoDowngradeStaysClampedAtZero(t *testing.T) {
 	sub := newTestSub("s1", 0, 200) // 20% loss, but already at T0
 	t0 := time.Now()
 
-	if evalAutoDowngrade(sub, t0, "pub") {
+	if evalAutoDowngrade(sub, t0, "pub", sharpPolicy) {
 		t.Fatal("T0 cannot downgrade further; must not flip")
 	}
-	if evalAutoDowngrade(sub, t0.Add(autoDowngradeHighWindow+time.Second), "pub") {
+	if evalAutoDowngrade(sub, t0.Add(sharpPolicy.highWindow+time.Second), "pub", sharpPolicy) {
 		t.Fatal("T0 still cannot downgrade after window")
 	}
 	if sub.highLossSince.Load() != 0 {
@@ -477,15 +481,15 @@ func TestEvalAutoDowngradeUpgradeAfterCalm(t *testing.T) {
 	sub := newTestSub("s1", 1, 10) // 1% loss, sub at T1
 	t0 := time.Now()
 
-	evalAutoDowngrade(sub, t0, "pub")
+	evalAutoDowngrade(sub, t0, "pub", sharpPolicy)
 	if sub.lowLossSince.Load() == 0 {
 		t.Error("lowLossSince not armed on first calm tick")
 	}
 	// Mid-window — no flip yet.
-	if evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub") {
+	if evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub", sharpPolicy) {
 		t.Fatal("upgraded before window elapsed")
 	}
-	if !evalAutoDowngrade(sub, t0.Add(autoDowngradeLowWindow+10*time.Millisecond), "pub") {
+	if !evalAutoDowngrade(sub, t0.Add(sharpPolicy.lowWindow+10*time.Millisecond), "pub", sharpPolicy) {
 		t.Fatal("expected upgrade after low-loss window")
 	}
 	if sub.targetTemp.Load() != 2 {
@@ -497,20 +501,61 @@ func TestEvalAutoDowngradeMidBandResetsStreaks(t *testing.T) {
 	t.Parallel()
 	sub := newTestSub("s1", 2, 120) // start high
 	t0 := time.Now()
-	evalAutoDowngrade(sub, t0, "pub")
+	evalAutoDowngrade(sub, t0, "pub", sharpPolicy)
 	if sub.highLossSince.Load() == 0 {
 		t.Fatal("highLossSince not armed")
 	}
 
-	// Drop into mid-band. The high-loss streak must clear so a future high
+	// Drop into mid-band (sharp: above 10‰ low threshold, below 50‰ high
+	// threshold). The high-loss streak must clear so a future high
 	// excursion has to start over.
-	sub.lossPerMille.Store(50)
-	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub")
+	sub.lossPerMille.Store(25)
+	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub", sharpPolicy)
 	if sub.highLossSince.Load() != 0 {
 		t.Error("highLossSince must reset on mid-band reading")
 	}
 	if sub.lowLossSince.Load() != 0 {
 		t.Error("lowLossSince must also be zero — mid-band, neither streak")
+	}
+}
+
+func TestEvalAutoDowngradeMotionPolicyFloor(t *testing.T) {
+	t.Parallel()
+	// Motion mode floor is T1 — a subscriber at T1 with sustained heavy
+	// loss must not step down to T0 even after the window elapses, because
+	// motion content at quarter-FPS (T0) is unusable. The streak timer must
+	// also clear so we don't repeatedly re-arm against an unreachable goal.
+	sub := newTestSub("s1", 1, 300) // 30% loss, at motion floor
+	t0 := time.Now()
+
+	evalAutoDowngrade(sub, t0, "pub", motionPolicy)
+	if evalAutoDowngrade(sub, t0.Add(motionPolicy.highWindow+time.Second), "pub", motionPolicy) {
+		t.Fatal("motion floor breached — sub dropped to T0")
+	}
+	if sub.targetTemp.Load() != 1 {
+		t.Errorf("layer = %d, want 1 (motion floor)", sub.targetTemp.Load())
+	}
+	if sub.highLossSince.Load() != 0 {
+		t.Error("highLossSince should clear at floor (no further downgrade possible)")
+	}
+}
+
+func TestEvalAutoDowngradeMotionPolicyToleratesMidLoss(t *testing.T) {
+	t.Parallel()
+	// 80‰ loss is well above the sharp policy's 50‰ trigger but below the
+	// motion policy's 120‰ trigger. Under motion the layer must not flip.
+	sub := newTestSub("s1", 2, 80)
+	t0 := time.Now()
+
+	evalAutoDowngrade(sub, t0, "pub", motionPolicy)
+	if evalAutoDowngrade(sub, t0.Add(motionPolicy.highWindow+time.Second), "pub", motionPolicy) {
+		t.Fatal("motion policy flipped on sub-threshold loss")
+	}
+	if sub.targetTemp.Load() != 2 {
+		t.Errorf("layer = %d, want 2", sub.targetTemp.Load())
+	}
+	if sub.highLossSince.Load() != 0 {
+		t.Error("mid-band reading should clear high streak under motion policy")
 	}
 }
 
@@ -522,12 +567,12 @@ func TestEvalAutoDowngradeFlapDoesNotFlip(t *testing.T) {
 	// 1s @ 12%, then 1s @ 1%, then 1s @ 12%. Total wall time = 3s but no
 	// continuous high-loss streak of 3s, so layer must stay at 2.
 	sub.lossPerMille.Store(120)
-	evalAutoDowngrade(sub, t0, "pub")
+	evalAutoDowngrade(sub, t0, "pub", sharpPolicy)
 	sub.lossPerMille.Store(10)
-	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub")
+	evalAutoDowngrade(sub, t0.Add(1*time.Second), "pub", sharpPolicy)
 	sub.lossPerMille.Store(120)
-	evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub")
-	evalAutoDowngrade(sub, t0.Add(3*time.Second), "pub")
+	evalAutoDowngrade(sub, t0.Add(2*time.Second), "pub", sharpPolicy)
+	evalAutoDowngrade(sub, t0.Add(3*time.Second), "pub", sharpPolicy)
 	if sub.targetTemp.Load() != 2 {
 		t.Errorf("layer flipped on flap: %d, want 2", sub.targetTemp.Load())
 	}

@@ -772,6 +772,12 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.handleScreenShareUnsubscribe(p, d)
+	case "screen-share-mode-change":
+		var d protocol.ScreenShareModeChangeData
+		if err := json.Unmarshal(msg.Data, &d); err != nil {
+			return
+		}
+		r.handleScreenShareModeChange(p, d)
 	}
 }
 

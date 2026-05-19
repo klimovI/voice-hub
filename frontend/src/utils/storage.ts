@@ -53,6 +53,7 @@ export const KEYS = {
   screenFps: 'voice-hub.screen-fps',
   screenCodec: 'voice-hub.screen-codec',
   screenMode: 'voice-hub.screen-mode',
+  screenShareMode: 'voice-hub.screen-share-mode',
 } as const;
 
 // Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].

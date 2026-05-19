@@ -342,6 +342,7 @@ export function App() {
                 onStart={session.startScreenShare}
                 onStop={session.stopScreenShare}
                 onUpdateParams={session.updateScreenShareParams}
+                onShareModeChange={session.changeScreenShareMode}
               />
             )}
             <ScreenShareGallery onTileClick={handleTileClick} />
