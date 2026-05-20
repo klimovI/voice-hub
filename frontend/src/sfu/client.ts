@@ -556,14 +556,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
     videoTrack.contentHint = getCurrentScreenContentHint();
-    try {
-      await videoTrack.applyConstraints({
-        frameRate: { ideal: pickedParams.fps, max: pickedParams.fps },
-        height: { max: pickedParams.height },
-      });
-    } catch (err) {
-      console.warn('[sfu] applyConstraints on initial screen video failed', err);
-    }
 
     const audioTrack = stream.getAudioTracks()[0];
     const hasSystemAudio = !!audioTrack;
