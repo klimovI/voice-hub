@@ -461,10 +461,35 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   // ---- Screen share: publisher ----
 
+  function isTabOrWindowSurface(track: MediaStreamTrack): boolean {
+    const surface = track.getSettings().displaySurface;
+    return surface === 'browser' || surface === 'window';
+  }
+
+  function tabSourceParams(params: ScreenParams, track?: MediaStreamTrack): ScreenParams {
+    if (params.resolution !== 'source' || track?.getSettings().displaySurface !== 'browser') {
+      return params;
+    }
+    // Tabs can expose a backing surface larger than the monitor.
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.round(window.screen.width * dpr);
+    const height = Math.round(window.screen.height * dpr);
+    if (!width || !height) return params;
+    const maxPixels = Math.min(width * height, params.width * params.height);
+    const basePixels = params.width * params.height;
+    return {
+      ...params,
+      width,
+      height,
+      maxBitrate: Math.round(params.maxBitrate * (maxPixels / basePixels)),
+    };
+  }
+
   function screenCaptureConstraints(
     params: ScreenParams,
     track?: MediaStreamTrack,
   ): MediaTrackConstraints {
+    params = tabSourceParams(params, track);
     const constraints: MediaTrackConstraints = {
       frameRate: { ideal: params.fps, max: params.fps },
     };
@@ -478,11 +503,16 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     const maxPixels = params.width * params.height;
     const actualPixels = actualW * actualH;
-    if (actualPixels <= maxPixels) return constraints;
+    if (actualPixels <= maxPixels) {
+      constraints.height = { max: params.height };
+      return constraints;
+    }
 
     const scale = Math.sqrt(maxPixels / actualPixels);
-    constraints.width = { max: Math.max(1, Math.floor(actualW * scale)) };
-    constraints.height = { max: Math.max(1, Math.floor(actualH * scale)) };
+    const maxW = Math.max(1, Math.floor(actualW * scale));
+    const maxH = Math.max(1, Math.floor(actualH * scale));
+    constraints.width = { ideal: maxW, max: maxW };
+    constraints.height = { ideal: maxH, max: maxH };
     return constraints;
   }
 
@@ -495,6 +525,55 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     } catch (err) {
       console.warn('[sfu] applyConstraints on screen video failed', err);
     }
+  }
+
+  async function applyScreenSenderParams(
+    sender: RTCRtpSender,
+    track: MediaStreamTrack | undefined,
+    params: ScreenParams,
+  ): Promise<void> {
+    params = track ? tabSourceParams(params, track) : params;
+    const senderParams = sender.getParameters();
+    if (!senderParams.encodings || senderParams.encodings.length === 0) {
+      senderParams.encodings = [{}];
+    }
+    senderParams.encodings[0] = {
+      ...senderParams.encodings[0],
+      maxBitrate: scaledBitrate(track, params),
+      maxFramerate: params.fps,
+    } as RTCRtpEncodingParameters;
+    try {
+      await sender.setParameters(senderParams);
+    } catch (err) {
+      console.warn('[sfu] setParameters(update) on screen video failed', err);
+    }
+  }
+
+  function finishTabOrWindowMotionBootstrap(
+    videoTrack: MediaStreamTrack,
+    videoSender: RTCRtpSender,
+    targetParams: ScreenParams,
+    targetMode: ShareMode,
+  ): void {
+    if (targetMode !== 'motion' || !isTabOrWindowSurface(videoTrack)) return;
+    // Chrome tab/window capture can start thumbnail-sized when initialized as
+    // motion. Starting as sharp/source first matches the manual recovery path;
+    // restore motion after capture and the publisher sender have settled.
+    window.setTimeout(() => {
+      if (screenPubStopped || screenPubVideoSender !== videoSender) return;
+      const current = getCurrentScreenParams();
+      if (
+        getCurrentShareMode() !== targetMode ||
+        current.resolution !== targetParams.resolution ||
+        current.fps !== targetParams.fps
+      ) {
+        return;
+      }
+      videoTrack.contentHint = shareModeToContentHint(targetMode);
+      void applyScreenCaptureConstraints(videoTrack, targetParams).then(() =>
+        applyScreenSenderParams(videoSender, videoTrack, targetParams),
+      );
+    }, 500);
   }
 
   async function applyInitialEncoderParams(
@@ -518,6 +597,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         clearTimeout(t);
         newPC.removeEventListener('signalingstatechange', watcher);
         try {
+          const effectiveParams = tabSourceParams(pickedParams, videoTrack);
           const params = videoSender.getParameters();
           if (!params.encodings || params.encodings.length === 0) {
             params.encodings = [{}];
@@ -525,8 +605,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
           params.encodings[0] = {
             ...params.encodings[0],
             ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
-            maxBitrate: scaledBitrate(videoTrack, pickedParams),
-            maxFramerate: pickedParams.fps,
+            maxBitrate: scaledBitrate(videoTrack, effectiveParams),
+            maxFramerate: effectiveParams.fps,
             priority: 'high',
           } as RTCRtpEncodingParameters;
           screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
@@ -572,6 +652,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     }
 
     const pickedParams = getCurrentScreenParams();
+    const requestedMode = getCurrentShareMode();
+    const bootstrapParams = buildScreenParams('source', pickedParams.fps, 'sharp');
 
     // Must stay sync from here to getDisplayMedia — any await breaks the gesture context.
     const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -591,8 +673,13 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       stream.getTracks().forEach((t) => t.stop());
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
-    videoTrack.contentHint = getCurrentScreenContentHint();
-    await applyScreenCaptureConstraints(videoTrack, pickedParams);
+    const shouldBootstrapBrowserMotion =
+      requestedMode === 'motion' && isTabOrWindowSurface(videoTrack);
+    videoTrack.contentHint = shouldBootstrapBrowserMotion ? 'text' : getCurrentScreenContentHint();
+    await applyScreenCaptureConstraints(
+      videoTrack,
+      shouldBootstrapBrowserMotion ? bootstrapParams : pickedParams,
+    );
 
     const audioTrack = stream.getAudioTracks()[0];
     const hasSystemAudio = !!audioTrack;
@@ -631,15 +718,15 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const offer = await newPC.createOffer();
     await newPC.setLocalDescription(offer);
 
-    const initialShareMode = getCurrentShareMode();
     send('screen-share-start', {
       sdp: offer.sdp ?? '',
       hasSystemAudio,
-      mode: initialShareMode,
+      mode: requestedMode,
     });
 
     try {
       await applyInitialEncoderParams(newPC, videoSender, videoTrack, selectedCodec, pickedParams);
+      finishTabOrWindowMotionBootstrap(videoTrack, videoSender, pickedParams, requestedMode);
     } catch (err) {
       teardownNewPubPC(newPC, stream);
       throw err;
@@ -693,21 +780,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       track.contentHint = getCurrentScreenContentHint();
       await applyScreenCaptureConstraints(track, next);
     }
-
-    const params = sender.getParameters();
-    if (!params.encodings || params.encodings.length === 0) {
-      params.encodings = [{}];
-    }
-    params.encodings[0] = {
-      ...params.encodings[0],
-      maxBitrate: scaledBitrate(track, next),
-      maxFramerate: next.fps,
-    } as RTCRtpEncodingParameters;
-    try {
-      await sender.setParameters(params);
-    } catch (err) {
-      console.warn('[sfu] setParameters(update) on screen video failed', err);
-    }
+    await applyScreenSenderParams(sender, track, next);
   }
 
   async function changeScreenShareMode(mode: ShareMode): Promise<void> {
