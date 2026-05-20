@@ -12,7 +12,7 @@ interface Props {
 
 function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) {
   const updateParticipant = useStore((s) => s.updateParticipant);
-  const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
+  const lastPingSentAt = useStore((s) => s.lastPingSentByTarget[participant.id] ?? 0);
   const [, forceTick] = useState(0);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');

@@ -22,9 +22,7 @@ import (
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
-// seqSeed returns a random uint16-range value to seed a per-subscriber RTP
-// sequence number. Non-cryptographic: only collision-avoidance matters; the
-// stream is authenticated separately via SRTP.
+// Non-cryptographic; collision-avoidance only.
 func seqSeed() uint32 { return mathrand.Uint32() & 0xffff }
 
 // screenShareGracePeriod is the window during which a publisher's session
@@ -32,8 +30,7 @@ func seqSeed() uint32 { return mathrand.Uint32() & 0xffff }
 // expiry; Stage 2 will add real token-validated reattach.
 const screenShareGracePeriod = 5 * time.Second
 
-// allScreenEncodeLayers names the full L1T3 temporal-layer set. Used for
-// "full pause" / "full resume" dynacast — selective per-layer pause is
+// Used for "full pause" / "full resume" dynacast — selective per-layer pause is
 // out of scope until BWE-driven auto-downgrade lands.
 var allScreenEncodeLayers = []int{0, 1, 2}
 
@@ -242,26 +239,17 @@ func (s *ScreenShareSession) Mode() protocol.ScreenShareMode {
 	return decodeMode(s.mode.Load())
 }
 
-// handleScreenShareStart is the entry point for the publisher's first
-// screen-share-start message. It creates a new PC dedicated to the screen
-// share, parses the publisher's offer, creates AV1-capable forwarder
-// tracks, answers, and on first OnTrack broadcasts screen-share-available
-// to the room.
-func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartData) {
-	r.mu.Lock()
-	if p.screenSession != nil {
-		r.mu.Unlock()
-		log.Printf("sfu: screen-share-start (%s): already publishing", p.id)
-		r.sendScreenShareError(p, "", protocol.ReasonAlreadyPublishing)
-		return
-	}
-	r.mu.Unlock()
-
+// setupScreenPubPC creates the publisher PC, performs the SDP exchange, and
+// builds the ScreenShareSession. Returns the session (which owns the PC and
+// cancel func) together with the negotiated answer SDP on success. On any
+// error the PC is closed and a screen-share-error is sent; the caller must
+// return immediately.
+func (r *Room) setupScreenPubPC(p *peer, data protocol.ScreenShareStartData) (*ScreenShareSession, webrtc.SessionDescription, error) {
 	token, err := newSessionToken()
 	if err != nil {
 		log.Printf("sfu: screen-share-start (%s): token: %v", p.id, err)
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, err
 	}
 
 	r.pcCreateMu.Lock()
@@ -276,7 +264,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	if err != nil {
 		log.Printf("sfu: screen-share-start (%s) new pc: %v", p.id, err)
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, err
 	}
 
 	ctx, cancel := context.WithCancel(p.ctx)
@@ -304,7 +292,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		pc.Close()
 		cancel()
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, err
 	}
 
 	answer, err := pc.CreateAnswer(nil)
@@ -313,14 +301,14 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		pc.Close()
 		cancel()
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, err
 	}
 	if err := pc.SetLocalDescription(answer); err != nil {
 		log.Printf("sfu: screen-share-start (%s) set local: %v", p.id, err)
 		pc.Close()
 		cancel()
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, err
 	}
 
 	// Capture negotiated codecs. Video: snapshot capability only — the actual
@@ -341,21 +329,21 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		if len(params.Codecs) == 0 {
 			continue
 		}
-		codec := params.Codecs[0].RTPCodecCapability
+		c := params.Codecs[0].RTPCodecCapability
 		switch track.Kind() {
 		case webrtc.RTPCodecTypeVideo:
-			session.videoCodec = codec
+			session.videoCodec = c
 		case webrtc.RTPCodecTypeAudio:
 			if !data.HasSystemAudio {
 				continue
 			}
-			at, err := webrtc.NewTrackLocalStaticRTP(codec, "screen-audio", p.id)
+			at, err := webrtc.NewTrackLocalStaticRTP(c, "screen-audio", p.id)
 			if err != nil {
 				log.Printf("sfu: screen-share-start (%s) new audio track: %v", p.id, err)
 				pc.Close()
 				cancel()
 				r.sendScreenShareError(p, "", protocol.ReasonInternal)
-				return
+				return nil, webrtc.SessionDescription{}, err
 			}
 			session.AudioTrack = at
 		}
@@ -365,7 +353,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		pc.Close()
 		cancel()
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, errors.New("no video transceiver")
 	}
 	session.VideoCodec = screenVideoCodecFromCapability(session.videoCodec)
 	if session.VideoCodec == "" {
@@ -373,11 +361,16 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		pc.Close()
 		cancel()
 		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-		return
+		return nil, webrtc.SessionDescription{}, errors.New("unsupported video codec")
 	}
 	session.codecAdapter = codec.New(session.VideoCodec)
 
-	// Publisher PC connection state: cancel session on failure / close.
+	return session, answer, nil
+}
+
+// wireScreenPubCallbacks registers the three publisher PC event callbacks
+// (OnConnectionStateChange, OnICECandidate, OnTrack) on pc.
+func (r *Room) wireScreenPubCallbacks(p *peer, pc *webrtc.PeerConnection, session *ScreenShareSession) {
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		switch s {
 		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
@@ -385,7 +378,6 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 		}
 	})
 
-	// Trickle ICE on publisher PC.
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
@@ -417,13 +409,36 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 			session.forwardAudio(remote)
 		}
 	})
+}
+
+// handleScreenShareStart is the entry point for the publisher's first
+// screen-share-start message. It creates a new PC dedicated to the screen
+// share, parses the publisher's offer, creates AV1-capable forwarder
+// tracks, answers, and on first OnTrack broadcasts screen-share-available
+// to the room.
+func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartData) {
+	r.mu.Lock()
+	if p.screenSession != nil {
+		r.mu.Unlock()
+		log.Printf("sfu: screen-share-start (%s): already publishing", p.id)
+		r.sendScreenShareError(p, "", protocol.ReasonAlreadyPublishing)
+		return
+	}
+	r.mu.Unlock()
+
+	session, answer, err := r.setupScreenPubPC(p, data)
+	if err != nil {
+		return
+	}
+
+	r.wireScreenPubCallbacks(p, session.publisherPC, session)
 
 	r.mu.Lock()
 	p.screenSession = session
 	p.screenSharing = true
 	p.screenSharingHasAudio = data.HasSystemAudio
 	p.screenSharingVideoCodec = session.VideoCodec
-	r.screenSessionsByToken[token] = session
+	r.screenSessionsByToken[session.SessionToken] = session
 	r.mu.Unlock()
 
 	if session.supportsTemporalFiltering() {
@@ -434,7 +449,7 @@ func (r *Room) handleScreenShareStart(p *peer, data protocol.ScreenShareStartDat
 	// the SDP. Both go through the same FIFO writeLoop, so writing -started
 	// first guarantees the publisher reads the token before processing the
 	// answer (and so can recover it for screen-share-resume on reconnect).
-	startedData, _ := json.Marshal(protocol.ScreenShareStartedData{SessionToken: token})
+	startedData, _ := json.Marshal(protocol.ScreenShareStartedData{SessionToken: session.SessionToken})
 	_ = p.write(protocol.Envelope{Event: "screen-share-started", Data: startedData})
 
 	answerEnv := protocol.AnswerEnvelope{
@@ -763,9 +778,9 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 	// Only the video sender's RTCP path collects loss — audio-side RR would
 	// overwrite lossPerMille with Opus stats and confuse the temporal-layer
 	// decision loop.
-	go r.forwardScreenRTCPToPublisher(session, subEntry, videoSender, true)
+	go r.forwardScreenVideoRTCPToPublisher(session, subEntry, videoSender)
 	if audioSender != nil {
-		go r.forwardScreenRTCPToPublisher(session, subEntry, audioSender, false)
+		go r.forwardScreenAudioRTCPToPublisher(session, audioSender)
 	}
 
 	offerEnv := protocol.OfferEnvelope{
@@ -793,17 +808,10 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 	}
 }
 
-// forwardScreenRTCPToPublisher relays PLI/FIR from a subscriber's sender to
-// the publisher's PC so a fresh keyframe is requested on subscribe and on
-// recovery from packet loss. Same idea as forwardSubscriberRTCP for audio,
-// but the publisher's MediaSSRC is the screen-share video sender's, not the
-// long-lived publisher SSRC tracked in r.publishers.
-//
-// On the same RTCP path we also harvest ReceiverReport.FractionLost into the
-// subscriber's lossPerMille — the auto-downgrade loop consumes it lock-free.
-// Only enabled when collectLoss=true (i.e. the video-sender goroutine); the
-// audio path passes false so its RR does not clobber the video-side signal.
-func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sub *screenSubscriber, sender *webrtc.RTPSender, collectLoss bool) {
+// forwardScreenVideoRTCPToPublisher relays PLI/FIR from a subscriber's video
+// sender to the publisher's PC and harvests ReceiverReport.FractionLost into
+// sub.lossPerMille for the auto-downgrade loop.
+func (r *Room) forwardScreenVideoRTCPToPublisher(session *ScreenShareSession, sub *screenSubscriber, sender *webrtc.RTPSender) {
 	buf := make([]byte, 1500)
 	for {
 		n, _, err := sender.Read(buf)
@@ -820,7 +828,7 @@ func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sub *sc
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
 				forward = append(forward, pkt)
 			case *rtcp.ReceiverReport:
-				if collectLoss && sub != nil && len(p.Reports) > 0 {
+				if len(p.Reports) > 0 {
 					// A compound RR may carry blocks for both video and audio
 					// SSRCs (RFC 3550 §6.4.1). Without matching by SSRC the
 					// "first" block is ambiguous, so take the worst loss
@@ -846,6 +854,46 @@ func (r *Room) forwardScreenRTCPToPublisher(session *ScreenShareSession, sub *sc
 		// MediaSSRC on the inbound RTCP to the subscriber-side sender's
 		// SSRC. We rewrite to the publisher's RTP SSRC so the browser-side
 		// encoder treats it as a keyframe request for its own stream.
+		pubSSRC := session.publisherVideoSSRC.Load()
+		if pubSSRC == 0 {
+			continue
+		}
+		for _, pkt := range forward {
+			switch p := pkt.(type) {
+			case *rtcp.PictureLossIndication:
+				p.MediaSSRC = pubSSRC
+			case *rtcp.FullIntraRequest:
+				p.MediaSSRC = pubSSRC
+			}
+		}
+		_ = session.publisherPC.WriteRTCP(forward)
+	}
+}
+
+// forwardScreenAudioRTCPToPublisher relays PLI/FIR from a subscriber's audio
+// sender to the publisher's PC. Audio-side RRs are dropped so they do not
+// clobber the video-side lossPerMille used by the auto-downgrade loop.
+func (r *Room) forwardScreenAudioRTCPToPublisher(session *ScreenShareSession, sender *webrtc.RTPSender) {
+	buf := make([]byte, 1500)
+	for {
+		n, _, err := sender.Read(buf)
+		if err != nil {
+			return
+		}
+		pkts, err := rtcp.Unmarshal(buf[:n])
+		if err != nil {
+			continue
+		}
+		var forward []rtcp.Packet
+		for _, pkt := range pkts {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				forward = append(forward, pkt)
+			}
+		}
+		if len(forward) == 0 {
+			continue
+		}
 		pubSSRC := session.publisherVideoSSRC.Load()
 		if pubSSRC == 0 {
 			continue

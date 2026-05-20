@@ -245,7 +245,7 @@ export function App() {
   const handlePingUser = useCallback(
     (targetId: string): void => {
       const s = useStore.getState(); // snapshot read, not subscription
-      const last = s.lastPingSentByTarget.get(targetId) ?? 0;
+      const last = s.lastPingSentByTarget[targetId] ?? 0;
       if (Date.now() - last < 10000) return;
       if (voiceActive) session.sendPing(targetId);
       else lurker.sendPing(targetId);

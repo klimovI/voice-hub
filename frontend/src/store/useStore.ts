@@ -126,7 +126,7 @@ export interface AppState {
   incomingPing: { fromName: string; at: number } | null;
   setIncomingPing: (p: { fromName: string; at: number }) => void;
   clearIncomingPing: () => void;
-  lastPingSentByTarget: Map<string, number>;
+  lastPingSentByTarget: Record<string, number>;
   markPingSent: (targetId: string) => void;
 
   // Chat — per-room message history. roomId matches the SFU room / host.
@@ -238,13 +238,9 @@ export const useStore = create<AppState>((set, get) => ({
       return { incomingPing: p };
     }),
   clearIncomingPing: () => set({ incomingPing: null }),
-  lastPingSentByTarget: new Map(),
+  lastPingSentByTarget: {},
   markPingSent: (targetId) =>
-    set((s) => {
-      const m = new Map(s.lastPingSentByTarget);
-      m.set(targetId, Date.now());
-      return { lastPingSentByTarget: m };
-    }),
+    set((s) => ({ lastPingSentByTarget: { ...s.lastPingSentByTarget, [targetId]: Date.now() } })),
 
   participants: new Map(),
   upsertParticipant: (partial) => {

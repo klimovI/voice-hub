@@ -81,8 +81,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
     () => async (b: InputBinding) => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('set_shortcut', { binding: b });
-        await invoke('cancel_capture');
+        await Promise.all([invoke('set_shortcut', { binding: b }), invoke('cancel_capture')]);
         setShortcut(b);
         setCapturing(false);
         onStatusMessage(`Горячая клавиша: ${formatBinding(b)}`);

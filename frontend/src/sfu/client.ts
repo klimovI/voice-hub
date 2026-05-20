@@ -155,9 +155,7 @@ function isFullLayerSet(layers: number[]): boolean {
   return true;
 }
 
-function noop(): void {
-  /* no-op */
-}
+function noop(): void {}
 
 export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient {
   const on: SFUHandlers = {
@@ -542,6 +540,71 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   // ---- Screen share: publisher ----
 
+  async function applyInitialEncoderParams(
+    newPC: RTCPeerConnection,
+    videoSender: RTCRtpSender,
+    videoTrack: MediaStreamTrack,
+    selectedCodec: ScreenVideoCodec,
+    pickedParams: ReturnType<typeof getCurrentScreenParams>,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const t = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('sfu-client: screen-share answer timeout'));
+        }
+      }, 10000);
+      const watcher = () => {
+        if (newPC.signalingState !== 'stable' || settled) return;
+        settled = true;
+        clearTimeout(t);
+        newPC.removeEventListener('signalingstatechange', watcher);
+        try {
+          const params = videoSender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          params.encodings[0] = {
+            ...params.encodings[0],
+            ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
+            maxBitrate: scaledBitrate(videoTrack, pickedParams),
+            maxFramerate: pickedParams.fps,
+            priority: 'high',
+          } as RTCRtpEncodingParameters;
+          screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
+            console.warn('[sfu] setParameters on screen video failed', err);
+          });
+        } catch (err) {
+          console.warn('[sfu] setParameters on screen video failed', err);
+        }
+        resolve();
+      };
+      newPC.addEventListener('signalingstatechange', watcher);
+    });
+  }
+
+  function teardownNewPubPC(newPC: RTCPeerConnection, stream: MediaStream): void {
+    try {
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    try {
+      newPC.close();
+    } catch {
+      /* ignore */
+    }
+    if (screenPubPC === newPC) {
+      screenPubPC = null;
+      screenPubStream = null;
+      screenPubVideoSender = null;
+      screenPubInitialParams = null;
+      screenPubStopped = false;
+    }
+    on.onScreenShareSelfStopped();
+  }
+
   async function startScreenShare(): Promise<void> {
     if (screenPubPC) throw new Error('sfu-client: already publishing screen share');
 
@@ -639,62 +702,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     // to be populated, which happens at setRemoteDescription(answer) time.
     // Wait for signaling-state=stable then apply L1T3 + bitrate caps.
     try {
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const t = setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            reject(new Error('sfu-client: screen-share answer timeout'));
-          }
-        }, 10000);
-        const watcher = () => {
-          if (newPC.signalingState !== 'stable' || settled) return;
-          settled = true;
-          clearTimeout(t);
-          newPC.removeEventListener('signalingstatechange', watcher);
-          try {
-            const params = videoSender.getParameters();
-            if (!params.encodings || params.encodings.length === 0) {
-              params.encodings = [{}];
-            }
-            params.encodings[0] = {
-              ...params.encodings[0],
-              ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
-              maxBitrate: scaledBitrate(videoTrack, pickedParams),
-              maxFramerate: pickedParams.fps,
-              priority: 'high',
-            } as RTCRtpEncodingParameters;
-            screenPubInitialParams = videoSender.setParameters(params).catch((err: unknown) => {
-              console.warn('[sfu] setParameters on screen video failed', err);
-            });
-          } catch (err) {
-            console.warn('[sfu] setParameters on screen video failed', err);
-          }
-          resolve();
-        };
-        newPC.addEventListener('signalingstatechange', watcher);
-      });
+      await applyInitialEncoderParams(newPC, videoSender, videoTrack, selectedCodec, pickedParams);
     } catch (err) {
       // Don't leak the PC if the answer never arrives — without nulling
       // screenPubPC the next startScreenShare would throw "already publishing".
-      try {
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        /* ignore */
-      }
-      try {
-        newPC.close();
-      } catch {
-        /* ignore */
-      }
-      if (screenPubPC === newPC) {
-        screenPubPC = null;
-        screenPubStream = null;
-        screenPubVideoSender = null;
-        screenPubInitialParams = null;
-        screenPubStopped = false;
-      }
-      on.onScreenShareSelfStopped();
+      teardownNewPubPC(newPC, stream);
       throw err;
     }
   }
