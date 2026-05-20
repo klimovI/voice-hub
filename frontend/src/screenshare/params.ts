@@ -1,10 +1,11 @@
-export type ScreenResolution = '720' | '1080' | '1440' | '2160';
+export type ScreenResolution = 'source' | '720' | '1080' | '1440' | '2160';
 export type ScreenFps = 15 | 30 | 60;
 export type ScreenCodecPref = 'av1' | 'vp9';
 
 export type ShareMode = 'sharp' | 'motion';
 
 export const SCREEN_RESOLUTIONS: readonly ScreenResolution[] = [
+  'source',
   '720',
   '1080',
   '1440',
@@ -20,7 +21,7 @@ export const DEFAULT_SCREEN_CODEC: ScreenCodecPref = 'av1';
 export const DEFAULT_SHARE_MODE: ShareMode = 'motion';
 
 export function isScreenResolution(v: unknown): v is ScreenResolution {
-  return v === '720' || v === '1080' || v === '1440' || v === '2160';
+  return v === 'source' || v === '720' || v === '1080' || v === '1440' || v === '2160';
 }
 
 export function isScreenFps(v: unknown): v is ScreenFps {
@@ -36,6 +37,7 @@ export function isShareMode(v: unknown): v is ShareMode {
 }
 
 const DIMENSIONS: Record<ScreenResolution, { width: number; height: number }> = {
+  source: { width: 3840, height: 2160 },
   '720': { width: 1280, height: 720 },
   '1080': { width: 1920, height: 1080 },
   '1440': { width: 2560, height: 1440 },
@@ -47,6 +49,7 @@ const DIMENSIONS: Record<ScreenResolution, { width: number; height: number }> = 
 // cleaner static frames at lower CPU/network cost, motion keeps them
 // at full to let motion content render without smear.
 const BITRATES: Record<ScreenResolution, Record<ScreenFps, number>> = {
+  source: { 15: 8_000_000, 30: 14_000_000, 60: 20_000_000 },
   '720': { 15: 1_000_000, 30: 2_000_000, 60: 3_500_000 },
   '1080': { 15: 2_000_000, 30: 4_000_000, 60: 6_500_000 },
   '1440': { 15: 4_000_000, 30: 8_000_000, 60: 12_000_000 },
@@ -100,13 +103,11 @@ export type ScreenPreset = {
 
 // Codec is intentionally NOT part of presets — it's a one-time per-PC pick
 // (depends on hardware encode support) and shouldn't get clobbered when the
-// user flips between presets. ShareMode IS part of the preset (unlike codec)
-// because the right priority is content-shaped: 4K capture is typically
-// readability-oriented (text, docs), Full HD / 2K is typically motion-
-// oriented (games, video). Custom mode lets the user override.
+// user flips between presets. ShareMode is content-shaped: demos favour
+// readable detail, games favour fluid motion. Custom mode lets users override.
 export const SCREEN_PRESETS: readonly ScreenPreset[] = [
   { id: 'gaming', label: 'Игры', resolution: '1080', fps: 60, shareMode: 'motion' },
-  { id: 'screenshare', label: 'Демонстрация', resolution: '2160', fps: 60, shareMode: 'sharp' },
+  { id: 'screenshare', label: 'Демонстрация', resolution: 'source', fps: 60, shareMode: 'sharp' },
 ] as const;
 
 export const DEFAULT_SCREEN_MODE: ScreenMode = 'gaming';

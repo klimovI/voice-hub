@@ -461,6 +461,42 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   // ---- Screen share: publisher ----
 
+  function screenCaptureConstraints(
+    params: ScreenParams,
+    track?: MediaStreamTrack,
+  ): MediaTrackConstraints {
+    const constraints: MediaTrackConstraints = {
+      frameRate: { ideal: params.fps, max: params.fps },
+    };
+    const settings = track?.getSettings();
+    const actualW = settings?.width;
+    const actualH = settings?.height;
+    if (!actualW || !actualH) {
+      constraints.height = { max: params.height };
+      return constraints;
+    }
+
+    const maxPixels = params.width * params.height;
+    const actualPixels = actualW * actualH;
+    if (actualPixels <= maxPixels) return constraints;
+
+    const scale = Math.sqrt(maxPixels / actualPixels);
+    constraints.width = { max: Math.max(1, Math.floor(actualW * scale)) };
+    constraints.height = { max: Math.max(1, Math.floor(actualH * scale)) };
+    return constraints;
+  }
+
+  async function applyScreenCaptureConstraints(
+    track: MediaStreamTrack,
+    params: ScreenParams,
+  ): Promise<void> {
+    try {
+      await track.applyConstraints(screenCaptureConstraints(params, track));
+    } catch (err) {
+      console.warn('[sfu] applyConstraints on screen video failed', err);
+    }
+  }
+
   async function applyInitialEncoderParams(
     newPC: RTCPeerConnection,
     videoSender: RTCRtpSender,
@@ -556,6 +592,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
     videoTrack.contentHint = getCurrentScreenContentHint();
+    await applyScreenCaptureConstraints(videoTrack, pickedParams);
 
     const audioTrack = stream.getAudioTracks()[0];
     const hasSystemAudio = !!audioTrack;
@@ -654,14 +691,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const track = stream.getVideoTracks()[0];
     if (track) {
       track.contentHint = getCurrentScreenContentHint();
-      try {
-        await track.applyConstraints({
-          frameRate: { ideal: next.fps, max: next.fps },
-          height: { max: next.height },
-        });
-      } catch (err) {
-        console.warn('[sfu] applyConstraints on screen video failed', err);
-      }
+      await applyScreenCaptureConstraints(track, next);
     }
 
     const params = sender.getParameters();

@@ -29,6 +29,7 @@ const SHARE_MODE_LABELS: Record<ShareMode, string> = {
 };
 
 const RESOLUTION_LABELS: Record<ScreenResolution, string> = {
+  source: 'Источник',
   '720': '720p',
   '1080': '1080p',
   '1440': '1440p (2K)',
