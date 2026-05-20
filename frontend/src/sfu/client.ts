@@ -91,8 +91,6 @@ export type SFUClient = {
   resumeScreenShare(token: string): Promise<void>;
 };
 
-const ALL_SCREEN_ENCODE_LAYERS = [0, 1, 2] as const;
-
 function isFullLayerSet(layers: number[]): boolean {
   return layers.length === 3 && layers.includes(0) && layers.includes(1) && layers.includes(2);
 }
