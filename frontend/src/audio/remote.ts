@@ -1,19 +1,13 @@
-// Remote audio: per-participant MediaStreamSource → GainNode → destination.
-// <audio> element is muted and used only to keep the stream alive.
-// Volume can exceed 100% (WebAudio gain).
-
-import { resolveAudioContextCtor } from './context';
-
-export interface RemoteParticipantAudio {
+export type RemoteParticipantAudio = {
   audioEl: HTMLAudioElement;
   gainNode: GainNode;
   sourceNode: MediaStreamAudioSourceNode | null;
   analyser: AnalyserNode;
   monitorData: Float32Array<ArrayBuffer>;
-}
+};
 
 export function createRemoteAudioContext(): AudioContext {
-  const ctx = new (resolveAudioContextCtor())({ sampleRate: 48000 });
+  const ctx = new AudioContext({ sampleRate: 48000 });
   ctx.resume().catch((err: unknown) => console.warn('[remote-audio] ctx resume failed:', err));
   return ctx;
 }

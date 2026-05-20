@@ -12,7 +12,6 @@ import (
 	"errors"
 	"log"
 	"log/slog"
-	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,17 +20,10 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/oklog/ulid/v2"
-	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
-	"github.com/pion/interceptor/pkg/gcc"
-	"github.com/pion/interceptor/pkg/intervalpli"
-	"github.com/pion/interceptor/pkg/nack"
-	"github.com/pion/interceptor/pkg/twcc"
-	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
-	"voice-hub/backend/internal/sfu/dd"
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
@@ -150,8 +142,6 @@ const pingCooldown = 10 * time.Second
 // renegotiate triggers an offer/answer round-trip on every other peer, so
 // without this a single tight-looping client amplifies into N peers of work.
 const renegotiateCooldown = 250 * time.Millisecond
-
-const rtpExtURITWCC = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
 
 // bwCapNone: sentinel above the TID range (uint32, since atomic.Uint8 doesn't exist).
 const bwCapNone uint32 = 255
@@ -273,136 +263,6 @@ type Room struct {
 	// clientId eviction. Token is opaque-and-secret, so it doubles as the
 	// auth check that this peer owns the session. Guarded by r.mu.
 	screenSessionsByToken map[string]*ScreenShareSession
-}
-
-func NewRoom(cfg Config) (*Room, error) {
-	settingEngine := webrtc.SettingEngine{}
-	if len(cfg.NAT1To1IPs) > 0 {
-		settingEngine.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
-			External:        cfg.NAT1To1IPs,
-			AsCandidateType: webrtc.ICECandidateTypeHost,
-		})
-	}
-	if cfg.UDPPortMin > 0 && cfg.UDPPortMax >= cfg.UDPPortMin {
-		if err := settingEngine.SetEphemeralUDPPortRange(cfg.UDPPortMin, cfg.UDPPortMax); err != nil {
-			return nil, err
-		}
-	}
-	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeOpus,
-			ClockRate:   48000,
-			Channels:    2,
-			SDPFmtpLine: "minptime=10;useinbandfec=1;usedtx=1;stereo=0",
-		},
-		PayloadType: 111,
-	}, webrtc.RTPCodecTypeAudio); err != nil {
-		return nil, err
-	}
-	// Screen-share video codecs. AV1 stays preferred by client-side codec
-	// ordering; VP9 is registered as the compatibility fallback when AV1 is
-	// absent or has proven CPU-bound on this client.
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeAV1,
-			ClockRate:   90000,
-			SDPFmtpLine: "level-idx=5;profile=0;tier=0",
-		},
-		PayloadType: 45,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, err
-	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:  webrtc.MimeTypeVP9,
-			ClockRate: 90000,
-		},
-		PayloadType: 98,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, err
-	}
-	// DD header extension: the SFU parses temporal/spatial layer info from
-	// here for layer-aware forwarding. Stage 1 uses a no-op parser, but the
-	// extension must still be SDP-negotiated end-to-end so publishers and
-	// subscribers exchange the right ID for Stage 2 to drop in.
-	if err := mediaEngine.RegisterHeaderExtension(
-		webrtc.RTPHeaderExtensionCapability{URI: dd.RTPExtensionURI},
-		webrtc.RTPCodecTypeVideo,
-	); err != nil {
-		return nil, err
-	}
-
-	// Stats interceptor skipped — getStats is never consumed server-side.
-	ir := &interceptor.Registry{}
-	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
-		return nil, err
-	}
-	pliFactory, err := intervalpli.NewReceiverInterceptor(
-		intervalpli.GeneratorInterval(3 * time.Second),
-	)
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(pliFactory)
-	nackFactory, err := nack.NewResponderInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(nackFactory)
-
-	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
-		// default LeakyBucketPacer queues packets at the estimated rate and
-		// stalls the wire when the encoder briefly outpaces it.
-		return gcc.NewSendSideBWE(
-			gcc.SendSideBWEInitialBitrate(bweInitialBitrate),
-			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
-		)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	r := &Room{
-		peers:                 make(map[string]*peer),
-		tracks:                make(map[string]*webrtc.TrackLocalStaticRTP),
-		publishers:            make(map[string]publisherRef),
-		screenSessionsByToken: make(map[string]*ScreenShareSession),
-		cfg:                   cfg,
-	}
-	ccFactory.OnNewPeerConnection(func(_ string, bwe cc.BandwidthEstimator) {
-		r.pendingBWE = bwe
-	})
-
-	// Interceptor chain order matters: last-added is OUTERMOST on the write
-	// path. cc/gcc's OnSent reads the TWCC header extension, so the writer
-	// that SETS the extension must wrap cc (be outer).
-	//
-	// Two distinct TWCC interceptors:
-	//   - HeaderExtensionInterceptor sets the seq# in outgoing RTP headers.
-	//   - SenderInterceptor generates RTCP feedback for INCOMING RTP and
-	//     does not touch the RTP write path.
-	// We need both: HE outboard of cc so cc.OnSent finds the extension,
-	// and Sender so publishers receive TWCC feedback for their own BWE.
-	ir.Add(ccFactory)
-	twccHeaderExt, err := twcc.NewHeaderExtensionInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(twccHeaderExt)
-	twccSender, err := twcc.NewSenderInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(twccSender)
-
-	r.api = webrtc.NewAPI(
-		webrtc.WithSettingEngine(settingEngine),
-		webrtc.WithMediaEngine(mediaEngine),
-		webrtc.WithInterceptorRegistry(ir),
-	)
-	return r, nil
 }
 
 func (r *Room) setPublisher(key string, ref publisherRef) {
@@ -559,7 +419,7 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// that subscribers did not, so forwarding them would cause subscribers
 			// to misparse the extension block.
 			pkt.Extension = false
-			pkt.Extensions = pkt.Extensions[:0]
+			pkt.Extensions = nil
 
 			if err := local.WriteRTP(pkt); err != nil {
 				return
@@ -622,6 +482,72 @@ func (r *Room) serveWSlurker(ctx context.Context, cancel context.CancelFunc, ws 
 	}
 }
 
+func (r *Room) handleAnswer(p *peer, env protocol.AnswerEnvelope) {
+	switch env.PC {
+	case protocol.PCAudio:
+		if err := p.pc.SetRemoteDescription(env.SessionDescription); err != nil {
+			log.Printf("sfu: set remote audio (%s): %v", p.id, err)
+			return
+		}
+		// Drain a sync skipped while this peer was mid-negotiation.
+		// Conditional: unconditional re-sync creates an offer ping-pong
+		// (every answer triggers fresh offers for all peers).
+		if p.syncPending.Swap(false) {
+			r.signalPeerConnections()
+		}
+	case protocol.PCScreenSub:
+		r.mu.Lock()
+		subPC := p.screenSubs[env.PublisherID]
+		r.mu.Unlock()
+		if subPC == nil {
+			log.Printf("sfu: screen-sub answer (%s→%s) no PC", p.id, env.PublisherID)
+			return
+		}
+		if err := subPC.pc.SetRemoteDescription(env.SessionDescription); err != nil {
+			log.Printf("sfu: screen-sub set remote (%s→%s): %v", p.id, env.PublisherID, err)
+		}
+	case protocol.PCScreenPub:
+		// SFU is the answerer on screen-pub, never the offerer. A client
+		// "answer" with pc=screen-pub is a protocol misuse; log and drop.
+		log.Printf("sfu: unexpected answer pc=screen-pub from %s", p.id)
+	default:
+		log.Printf("sfu: answer with unknown pc=%q from %s", env.PC, p.id)
+	}
+}
+
+func (r *Room) handleCandidate(p *peer, env protocol.CandidateEnvelope) {
+	switch env.PC {
+	case protocol.PCAudio:
+		if err := p.pc.AddICECandidate(env.ICECandidateInit); err != nil {
+			log.Printf("sfu: add audio candidate (%s): %v", p.id, err)
+		}
+	case protocol.PCScreenPub:
+		r.mu.Lock()
+		session := p.screenSession
+		r.mu.Unlock()
+		if session == nil {
+			log.Printf("sfu: screen-pub candidate (%s) no session", p.id)
+			return
+		}
+		if err := session.publisherPC.AddICECandidate(env.ICECandidateInit); err != nil {
+			log.Printf("sfu: screen-pub add candidate (%s): %v", p.id, err)
+		}
+	case protocol.PCScreenSub:
+		r.mu.Lock()
+		subPC := p.screenSubs[env.PublisherID]
+		r.mu.Unlock()
+		if subPC == nil {
+			log.Printf("sfu: screen-sub candidate (%s→%s) no PC", p.id, env.PublisherID)
+			return
+		}
+		if err := subPC.pc.AddICECandidate(env.ICECandidateInit); err != nil {
+			log.Printf("sfu: screen-sub add candidate (%s→%s): %v", p.id, env.PublisherID, err)
+		}
+	default:
+		log.Printf("sfu: candidate with unknown pc=%q from %s", env.PC, p.id)
+	}
+}
+
 func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 	if msg.Event == protocol.MsgTypePing {
 		r.handlePing(p, msg)
@@ -647,71 +573,13 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		if err := json.Unmarshal(msg.Data, &env); err != nil {
 			return
 		}
-		switch env.PC {
-		case protocol.PCAudio:
-			if err := p.pc.SetRemoteDescription(env.SessionDescription); err != nil {
-				log.Printf("sfu: set remote audio (%s): %v", p.id, err)
-				return
-			}
-			// Drain a sync skipped while this peer was mid-negotiation.
-			// Conditional: unconditional re-sync creates an offer ping-pong
-			// (every answer triggers fresh offers for all peers).
-			if p.syncPending.Swap(false) {
-				r.signalPeerConnections()
-			}
-		case protocol.PCScreenSub:
-			r.mu.Lock()
-			subPC := p.screenSubs[env.PublisherID]
-			r.mu.Unlock()
-			if subPC == nil {
-				log.Printf("sfu: screen-sub answer (%s→%s) no PC", p.id, env.PublisherID)
-				return
-			}
-			if err := subPC.pc.SetRemoteDescription(env.SessionDescription); err != nil {
-				log.Printf("sfu: screen-sub set remote (%s→%s): %v", p.id, env.PublisherID, err)
-			}
-		case protocol.PCScreenPub:
-			// SFU is the answerer on screen-pub, never the offerer. A client
-			// "answer" with pc=screen-pub is a protocol misuse; log and drop.
-			log.Printf("sfu: unexpected answer pc=screen-pub from %s", p.id)
-		default:
-			log.Printf("sfu: answer with unknown pc=%q from %s", env.PC, p.id)
-		}
+		r.handleAnswer(p, env)
 	case "candidate":
 		var env protocol.CandidateEnvelope
 		if err := json.Unmarshal(msg.Data, &env); err != nil {
 			return
 		}
-		switch env.PC {
-		case protocol.PCAudio:
-			if err := p.pc.AddICECandidate(env.ICECandidateInit); err != nil {
-				log.Printf("sfu: add audio candidate (%s): %v", p.id, err)
-			}
-		case protocol.PCScreenPub:
-			r.mu.Lock()
-			session := p.screenSession
-			r.mu.Unlock()
-			if session == nil {
-				log.Printf("sfu: screen-pub candidate (%s) no session", p.id)
-				return
-			}
-			if err := session.publisherPC.AddICECandidate(env.ICECandidateInit); err != nil {
-				log.Printf("sfu: screen-pub add candidate (%s): %v", p.id, err)
-			}
-		case protocol.PCScreenSub:
-			r.mu.Lock()
-			subPC := p.screenSubs[env.PublisherID]
-			r.mu.Unlock()
-			if subPC == nil {
-				log.Printf("sfu: screen-sub candidate (%s→%s) no PC", p.id, env.PublisherID)
-				return
-			}
-			if err := subPC.pc.AddICECandidate(env.ICECandidateInit); err != nil {
-				log.Printf("sfu: screen-sub add candidate (%s→%s): %v", p.id, env.PublisherID, err)
-			}
-		default:
-			log.Printf("sfu: candidate with unknown pc=%q from %s", env.PC, p.id)
-		}
+		r.handleCandidate(p, env)
 	case "set-displayname":
 		var dn protocol.SetDisplayNamePayload
 		if err := json.Unmarshal(msg.Data, &dn); err != nil {
@@ -1125,250 +993,6 @@ func (r *Room) dropTracksForPeer(ownerID string) {
 		}
 	}
 	r.publishersMu.Unlock()
-}
-
-// signalPeerConnections renegotiates each peer so it has senders for all
-// current room tracks (minus its own). Optimistic retry pattern from sfu-ws.
-func (r *Room) signalPeerConnections() {
-	if r.runSyncAttempts() {
-		return
-	}
-	if !r.resyncPending.CompareAndSwap(false, true) {
-		return
-	}
-	go r.deferredResyncLoop()
-}
-
-// runSyncAttempts runs up to maxAttempts inline passes of attemptSync.
-// Returns true if any pass settled cleanly (no retry needed). Returns
-// false only when all attempts exhausted with attemptSync still wanting
-// to retry.
-func (r *Room) runSyncAttempts() bool {
-	const maxAttempts = 5
-	for range maxAttempts {
-		if !r.attemptSync() {
-			return true
-		}
-	}
-	return false
-}
-
-// deferredResyncLoop is the body of the single in-flight retry
-// goroutine. It keeps issuing maxAttempts passes every 3s until one
-// settles or the room closes. Single-flight is enforced by
-// r.resyncPending; this goroutine clears the flag only on exit so any
-// concurrent exhaustion correctly folds into the in-flight retry rather
-// than spawning a duplicate.
-//
-// Earlier we recursed into signalPeerConnections() from this goroutine,
-// which silently stopped scheduling further retries: the recursive call
-// hit CompareAndSwap(false, true) while the outer goroutine still held
-// the flag, so it returned without queuing another pass, then the outer
-// defer cleared the flag — and nothing else was scheduled. A peer stuck
-// for longer than one 3s window would leave the room un-resynced.
-func (r *Room) deferredResyncLoop() {
-	defer r.resyncPending.Store(false)
-	for {
-		time.Sleep(3 * time.Second)
-		if r.closed.Load() {
-			return
-		}
-		if r.runSyncAttempts() {
-			return
-		}
-	}
-}
-
-func (r *Room) attemptSync() (retry bool) {
-	r.mu.Lock()
-	peers := make([]*peer, 0, len(r.peers))
-	for _, p := range r.peers {
-		peers = append(peers, p)
-	}
-	tracks := make(map[string]*webrtc.TrackLocalStaticRTP, len(r.tracks))
-	maps.Copy(tracks, r.tracks)
-	r.mu.Unlock()
-
-	for _, p := range peers {
-		if r.syncOnePeer(p, tracks) {
-			return true
-		}
-	}
-	return false
-}
-
-// syncBufs holds the per-iteration scratch maps used by syncOnePeer.
-// Pooled to avoid 2 map allocations per peer per attemptSync call,
-// which is the dominant alloc source during a join/leave storm.
-type syncBufs struct {
-	want map[string]bool
-	have map[string]bool
-}
-
-var syncBufsPool = sync.Pool{
-	New: func() any {
-		return &syncBufs{
-			want: make(map[string]bool, 16),
-			have: make(map[string]bool, 16),
-		}
-	},
-}
-
-func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRTP) (retry bool) {
-	// Lurker peers have no PeerConnection; nothing to sync.
-	if p.pc == nil {
-		return false
-	}
-	p.syncMu.Lock()
-	defer p.syncMu.Unlock()
-	// Peer context already cancelled (e.g. PC failed, outq full, ws closed):
-	// removePeer will fire from ServeWS's defer shortly. Skipping here avoids
-	// log spam from CreateOffer/AddTrack on a doomed PC during the brief
-	// window before defer runs.
-	if p.ctx.Err() != nil {
-		return false
-	}
-	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
-		r.removePeer(p.id)
-		return true
-	}
-	// Offer-in-flight: SetLocalDescription rejects while signaling is
-	// have-local-offer. Mark a re-sync request; the answer handler drains
-	// it once the remote answer lands.
-	if p.pc.SignalingState() != webrtc.SignalingStateStable {
-		p.syncPending.Store(true)
-		return false
-	}
-
-	bufs := syncBufsPool.Get().(*syncBufs)
-	defer syncBufsPool.Put(bufs)
-	want := bufs.want
-	have := bufs.have
-	clear(want)
-	clear(have)
-
-	for key, t := range tracks {
-		owner := ownerOf(key)
-		if owner == p.id {
-			continue
-		}
-		want[t.ID()] = true
-	}
-
-	for _, sender := range p.pc.GetSenders() {
-		t := sender.Track()
-		if t == nil {
-			continue
-		}
-		id := t.ID()
-		have[id] = true
-		if !want[id] {
-			if err := p.pc.RemoveTrack(sender); err != nil {
-				log.Printf("sfu: syncOnePeer (%s) RemoveTrack: %v", p.id, err)
-				return true
-			}
-		}
-	}
-
-	for _, recv := range p.pc.GetReceivers() {
-		t := recv.Track()
-		if t == nil {
-			continue
-		}
-		have[t.ID()] = true
-	}
-
-	for key, t := range tracks {
-		owner := ownerOf(key)
-		if owner == p.id {
-			continue
-		}
-		if have[t.ID()] {
-			continue
-		}
-		sender, err := p.pc.AddTrack(t)
-		if err != nil {
-			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
-			return true
-		}
-		if t.Kind() == webrtc.RTPCodecTypeVideo {
-			if pub, ok := r.lookupPublisher(key); ok {
-				if pub.lastKeyframeNS == nil ||
-					time.Since(time.Unix(0, pub.lastKeyframeNS.Load())) > pliCooldown {
-					_ = pub.pc.WriteRTCP([]rtcp.Packet{
-						&rtcp.PictureLossIndication{MediaSSRC: pub.ssrc},
-					})
-				}
-				go r.forwardSubscriberRTCP(sender, key)
-			}
-		}
-	}
-
-	offer, err := p.pc.CreateOffer(nil)
-	if err != nil {
-		log.Printf("sfu: syncOnePeer (%s) CreateOffer: %v", p.id, err)
-		return true
-	}
-	if err := p.pc.SetLocalDescription(offer); err != nil {
-		log.Printf("sfu: syncOnePeer (%s) SetLocalDescription: %v", p.id, err)
-		return true
-	}
-	sd, err := json.Marshal(protocol.OfferEnvelope{
-		PC:                 protocol.PCAudio,
-		SessionDescription: offer,
-	})
-	if err != nil {
-		log.Printf("sfu: syncOnePeer (%s) marshal offer: %v", p.id, err)
-		return true
-	}
-	if err := p.write(protocol.Envelope{Event: "offer", Data: sd}); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			log.Printf("sfu: syncOnePeer (%s) send offer: %v", p.id, err)
-		}
-		return true
-	}
-	return false
-}
-
-// forwardSubscriberRTCP relays PLI/FIR from a subscriber's sender back to
-// the publisher's pc, rewriting MediaSSRC to the publisher's original
-// (pion allocates a fresh SSRC for each forwarded sender). NACK is handled
-// locally by the responder interceptor; everything else is dropped.
-func (r *Room) forwardSubscriberRTCP(sender *webrtc.RTPSender, key string) {
-	buf := make([]byte, 1500)
-	for {
-		n, _, err := sender.Read(buf)
-		if err != nil {
-			return
-		}
-		pkts, err := rtcp.Unmarshal(buf[:n])
-		if err != nil {
-			continue
-		}
-		var forward []rtcp.Packet
-		for _, pkt := range pkts {
-			switch pkt.(type) {
-			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
-				forward = append(forward, pkt)
-			}
-		}
-		if len(forward) == 0 {
-			continue
-		}
-		pub, ok := r.lookupPublisher(key)
-		if !ok {
-			continue
-		}
-		for _, pkt := range forward {
-			switch p := pkt.(type) {
-			case *rtcp.PictureLossIndication:
-				p.MediaSSRC = pub.ssrc
-			case *rtcp.FullIntraRequest:
-				p.MediaSSRC = pub.ssrc
-			}
-		}
-		_ = pub.pc.WriteRTCP(forward)
-	}
 }
 
 // bitrateToTIDCap returns bwCapNone above the high threshold so a healthy

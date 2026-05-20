@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
 import { defaultBinding, formatBinding, type InputBinding } from '../utils/binding';
 import { useKeyboardCapture, type HotkeyApi } from './useKeyboardCapture';
@@ -26,10 +27,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
     let cancelled = false;
 
     void (async () => {
-      const [{ invoke }, { listen }] = await Promise.all([
-        import('@tauri-apps/api/core'),
-        import('@tauri-apps/api/event'),
-      ]);
+      const { listen } = await import('@tauri-apps/api/event');
 
       try {
         const current = await invoke<InputBinding | null>('get_shortcut');
@@ -58,7 +56,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
     if (!capturingRef.current) return;
     setCapturing(false);
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('cancel_capture');
     } catch (err) {
       console.error('cancel_capture failed', err);
@@ -69,7 +66,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
     if (capturingRef.current) return;
     setCapturing(true);
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('start_capture');
     } catch (err) {
       console.error('start_capture failed', err);
@@ -80,7 +76,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
   const onCommit = useMemo(
     () => async (b: InputBinding) => {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
         await Promise.all([invoke('set_shortcut', { binding: b }), invoke('cancel_capture')]);
         setShortcut(b);
         setCapturing(false);
@@ -96,7 +91,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
 
   const clear = useCallback(async () => {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('clear_shortcut');
       setShortcut(null);
       onStatusMessage('Горячая клавиша очищена');
@@ -107,7 +101,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
 
   const reset = useCallback(async () => {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       const def = defaultBinding();
       await invoke('set_shortcut', { binding: def });
       setShortcut(def);

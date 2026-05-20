@@ -32,17 +32,14 @@ function getAudioSender(pc: RTCPeerConnection | null): RTCRtpSender | null {
   return pc?.getSenders().find((s) => s.track?.kind === 'audio') ?? null;
 }
 
-export interface AudioEngineRef {
+export type AudioEngineRef = {
   rawLocalStream: MediaStream | null;
   rawLocalStreamUsesBrowserNs: boolean | null;
   micGraph: MicGraph | null;
-  // per-participant audio nodes keyed by participant id
   remoteAudio: Map<string, RemoteParticipantAudio>;
-  // one AudioContext shared across all remote participants; created lazily
   remoteAudioCtx: AudioContext | null;
-  // central setInterval-driven speaking detector for local + all remotes
   speakingLoop: SpeakingLoop;
-}
+};
 
 export function useAudioEngine() {
   const setStatus = useStore((s) => s.setStatus);
@@ -162,10 +159,7 @@ export function useAudioEngine() {
 
   const prepareLocalAudio = useCallback(
     async (engine: EngineKind, onProgress?: (stage: 'mic-ready') => void) => {
-      // Kick off engine WASM warm-up in parallel with mic+context creation.
       void preloadEngine(engine);
-      // AudioContext creation+resume runs in parallel with getUserMedia.
-      // Both gate buildMicGraph; serializing them was needless waiting.
       const ctxPromise = (async () => {
         const ctx = createLocalAudioContext();
         await ctx.resume();
@@ -185,10 +179,6 @@ export function useAudioEngine() {
       _peerId: string | null,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
-      // For worklet-only switches, build the new graph before tearing down
-      // the old one so the SFU sender keeps a live track. Capture-level
-      // switches (Browser NS on/off) must recreate the raw mic first because
-      // browsers often only apply native noise suppression at getUserMedia.
       const r = refs.current;
       const oldGraph = r.micGraph;
       const { stream: rawStream, captureModeChanged } = await prepareRawMicForEngine(engine);
@@ -220,9 +210,6 @@ export function useAudioEngine() {
         try {
           await sender.replaceTrack(newTrack);
         } catch (err) {
-          // Sender rejected the new track — discard the freshly-built graph
-          // and restore the old one so the user keeps a working mic when
-          // possible. Capture-level switches already stopped the old mic.
           teardownMicGraph(graph);
           if (captureModeChanged) {
             clearRawMic();
@@ -291,7 +278,7 @@ export function useAudioEngine() {
     const r = refs.current;
     const { outputVolume, deafened, participants } = useStore.getState();
     for (const [id, audio] of r.remoteAudio.entries()) {
-      const p = participants.get(id);
+      const p = participants[id];
       applyParticipantGain(
         audio,
         outputVolume,
@@ -318,14 +305,11 @@ export function useAudioEngine() {
       const audio = setupParticipantAudio(r.remoteAudioCtx, stream);
       r.remoteAudio.set(participantId, audio);
       applyAllRemoteGains();
-      // useStore.getState() inside the tick callback is intentional: this is a
-      // periodic snapshot read, not a reactive subscription. Audio modules
-      // must not re-render on store changes.
       r.speakingLoop.register(participantId, {
         analyser: audio.analyser,
         data: audio.monitorData,
         onChange: (speaking) => {
-          const current = useStore.getState().participants.get(participantId);
+          const current = useStore.getState().participants[participantId];
           if (current && current.speaking !== speaking) {
             useStore.getState().updateParticipant(participantId, { speaking });
           }

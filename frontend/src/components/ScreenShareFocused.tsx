@@ -6,18 +6,12 @@ import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
 import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
 import { useVideoFps } from '../screenshare/useVideoFps';
 
-interface Props {
-  /** Called when user dismisses the overlay — owner unsubscribes from SFU. */
+type Props = {
   onClose: () => void;
-}
+};
 
-// Grace window before auto-closing after publisher ends the stream. Gives
-// the user a beat to read the "Стрим завершён" overlay instead of the
-// fullscreen view vanishing without warning.
 const ENDED_GRACE_MS = 1500;
 
-// System audio routes through a sibling <audio> element, not the voice mixer,
-// so the publisher's screen-capture audio isn't ducked by mic/output sliders.
 export function ScreenShareFocused({ onClose }: Props) {
   const focusedId = useScreenShareStore((s) => s.focusedId);
   const videoStream = useScreenShareStore((s) => s.focusedStream);
@@ -31,7 +25,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   const shareStillLive = useScreenShareStore((s) =>
     s.focusedId ? s.shares.has(s.focusedId) : false,
   );
-  const publisher = useStore((s) => (focusedId ? s.participants.get(focusedId) : undefined));
+  const publisher = useStore((s) => (focusedId ? s.participants[focusedId] : undefined));
   const display = publisher?.display ?? (focusedId ? `user-${focusedId}` : '');
   const publisherClientId = publisher?.clientId ?? '';
 
@@ -81,8 +75,6 @@ export function ScreenShareFocused({ onClose }: Props) {
     el.volume = volume;
     el.muted = audioMuted;
     el.play().catch(() => {});
-    // volume / muted re-apply when the user scrubs is handled below — this
-    // effect only runs on stream attach.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioStream]);
 
@@ -107,7 +99,6 @@ export function ScreenShareFocused({ onClose }: Props) {
     }
   }
 
-  // Escape closes the overlay — matches the native browser fullscreen UX.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -116,9 +107,6 @@ export function ScreenShareFocused({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Publisher ended (server -ended or user stopped) — show a brief overlay
-  // and auto-dismiss. Switching to another tile within the grace window
-  // cancels the timer via dependency change.
   useEffect(() => {
     if (!focusedId || shareStillLive) return;
     const t = setTimeout(onClose, ENDED_GRACE_MS);

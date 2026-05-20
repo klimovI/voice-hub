@@ -38,21 +38,33 @@ function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
   return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
 }
 
-function selectSortedParticipants(
-  state: AppState,
-  predicate: (participant: ParticipantUI) => boolean,
-): ParticipantUI[] {
-  return Array.from(state.participants.values()).filter(predicate).sort(compareParticipants);
+type SortedCache = {
+  source: Record<string, ParticipantUI>;
+  voice: ParticipantUI[];
+  chatOnly: ParticipantUI[];
+};
+
+let sortedCache: SortedCache | null = null;
+
+function getSortedCache(participants: Record<string, ParticipantUI>): SortedCache {
+  if (sortedCache && sortedCache.source === participants) return sortedCache;
+  const all = Object.values(participants);
+  sortedCache = {
+    source: participants,
+    voice: all.filter((p) => !p.chatOnly).sort(compareParticipants),
+    chatOnly: all.filter((p) => Boolean(p.chatOnly)).sort(compareParticipants),
+  };
+  return sortedCache;
 }
 
 export const selectVoiceParticipants = (state: AppState): ParticipantUI[] =>
-  selectSortedParticipants(state, (participant) => !participant.chatOnly);
+  getSortedCache(state.participants).voice;
 
 export const selectChatOnlyParticipants = (state: AppState): ParticipantUI[] =>
-  selectSortedParticipants(state, (participant) => Boolean(participant.chatOnly));
+  getSortedCache(state.participants).chatOnly;
 
 export const selectSelfPeerId = (state: AppState): string | null => {
-  for (const [id, participant] of state.participants) {
+  for (const [id, participant] of Object.entries(state.participants)) {
     if (participant.isSelf) return id;
   }
   return null;
@@ -110,7 +122,7 @@ export interface AppState {
   statusState: StatusState;
   setStatus: (text: string, isError?: boolean, joined?: boolean) => void;
 
-  participants: Map<string, ParticipantUI>;
+  participants: Record<string, ParticipantUI>;
   upsertParticipant: (p: Partial<ParticipantUI> & { id: string }) => ParticipantUI;
   removeParticipant: (id: string) => void;
   clearParticipants: () => void;
@@ -126,7 +138,7 @@ export interface AppState {
   incomingPing: { fromName: string; at: number } | null;
   setIncomingPing: (p: { fromName: string; at: number }) => void;
   clearIncomingPing: () => void;
-  lastPingSentByTarget: Record<string, number>;
+  lastPingSentByTarget: Map<string, number>;
   markPingSent: (targetId: string) => void;
 
   // Chat — per-room message history. roomId matches the SFU room / host.
@@ -238,15 +250,20 @@ export const useStore = create<AppState>((set, get) => ({
       return { incomingPing: p };
     }),
   clearIncomingPing: () => set({ incomingPing: null }),
-  lastPingSentByTarget: {},
+  lastPingSentByTarget: new Map(),
   markPingSent: (targetId) =>
-    set((s) => ({ lastPingSentByTarget: { ...s.lastPingSentByTarget, [targetId]: Date.now() } })),
+    set((s) => {
+      const now = Date.now();
+      const next = new Map(s.lastPingSentByTarget);
+      next.set(targetId, now);
+      return { lastPingSentByTarget: next };
+    }),
 
-  participants: new Map(),
+  participants: {},
   upsertParticipant: (partial) => {
     let result!: ParticipantUI;
     set((s) => {
-      const existing = s.participants.get(partial.id);
+      const existing = s.participants[partial.id];
       const merged: ParticipantUI = existing
         ? { ...existing, ...partial }
         : {
@@ -259,9 +276,6 @@ export const useStore = create<AppState>((set, get) => ({
             localVolume: partial.localVolume ?? 100,
             hasStream: partial.hasStream ?? false,
           };
-      // Hydrate persisted custom label the moment we learn the peer's
-      // stable clientId — covers both fresh entries and the case where
-      // clientId arrives in a later patch.
       if (
         merged.clientId &&
         !merged.isSelf &&
@@ -271,39 +285,36 @@ export const useStore = create<AppState>((set, get) => ({
         const stored = loadPeerLabel(merged.clientId);
         if (stored) merged.localLabel = stored;
       }
-      const m = new Map(s.participants);
+      let next = { ...s.participants, [partial.id]: merged };
       // Mirror server-side eviction: a peer arriving with a clientId already
       // held by another entry replaces that entry (e.g. voice → lurker
       // transition where peer-joined Y can race peer-left X). Keeps the
       // roster consistent even if broadcast order at the source is loose.
       if (partial.clientId) {
-        for (const [id, p] of m) {
-          if (id !== partial.id && p.clientId === partial.clientId) {
-            m.delete(id);
+        for (const id of Object.keys(next)) {
+          if (id !== partial.id && next[id].clientId === partial.clientId) {
+            const { [id]: _evicted, ...rest } = next;
+            next = rest;
           }
         }
       }
-      m.set(partial.id, merged);
       result = merged;
-      return { participants: m };
+      return { participants: next };
     });
     return result;
   },
   removeParticipant: (id) =>
     set((s) => {
-      const m = new Map(s.participants);
-      m.delete(id);
-      return { participants: m };
+      const { [id]: _removed, ...rest } = s.participants;
+      return { participants: rest };
     }),
-  clearParticipants: () => set({ participants: new Map() }),
+  clearParticipants: () => set({ participants: {} }),
 
   updateParticipant: (id, patch) =>
     set((s) => {
-      const existing = s.participants.get(id);
+      const existing = s.participants[id];
       if (!existing) return {};
-      const m = new Map(s.participants);
-      m.set(id, { ...existing, ...patch });
-      return { participants: m };
+      return { participants: { ...s.participants, [id]: { ...existing, ...patch } } };
     }),
 
   chatByRoom: {},

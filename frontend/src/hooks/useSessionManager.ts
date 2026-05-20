@@ -8,7 +8,7 @@
 // Does NOT own: mute/deafen boolean state (App), output mute/deafen UX (App),
 // status messages for engine switch (App wraps switchEngine in try/catch).
 
-import { useRef, useEffect, useCallback, type MutableRefObject } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useAudioEngine } from './useAudioEngine';
@@ -20,19 +20,18 @@ import {
   saveDisplayName,
   consumeRejoinFlag,
   loadOrCreateClientId,
-  loadPeerVolume,
 } from '../utils/storage';
-import type { ChatPayload, PingPayload, ScreenShareReason } from '../sfu/protocol';
+import type { ChatPayload, PingPayload } from '../sfu/protocol';
 import type { ShareMode } from '../screenshare/params';
 import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
 import { flashFavicon } from '../utils/favicon';
-import { retryPendingChats } from '../utils/chat-retry';
 import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
 import { isTauri } from '../utils/tauri';
 import { createReconnectScheduler } from '../utils/reconnect';
+import { buildSFUHandlers } from './sfu-handlers';
 import type { EngineKind, ParticipantUI } from '../types';
 import type { RoomSlug } from '../rooms';
 import type { MicGraph } from '../audio/mic-graph';
@@ -40,287 +39,33 @@ import type { MicGraph } from '../audio/mic-graph';
 export type UseSessionManagerDeps = {
   audio: ReturnType<typeof useAudioEngine>;
   sfu: ReturnType<typeof useSFU>;
-  /**
-   * Stable callback (updated by App via a ref) that fires a mute toggle.
-   * The Tauri event bridge calls this when the OS hotkey fires while the
-   * window is unfocused. App owns the actual toggle logic; the hook just
-   * owns the subscription.
-   */
   onTauriToggleMute: () => void;
 };
 
 export type UseSessionManagerReturn = {
   join: (name: string) => Promise<void>;
   leave: () => void;
-  /** Switch to a different room. No-op if already in that room or mid-join. */
   switchRoom: (slug: RoomSlug) => Promise<void>;
-  /** Read the peer id on demand. Returns null when not joined. No ref escape. */
   getPeerId: () => string | null;
-  /**
-   * Apply enabled/disabled to the mic track and update the self-participant in
-   * the store. No-op when there is no active graph.
-   * Does NOT write store.selfMuted — App owns that boolean.
-   */
   setMicEnabled: (enabled: boolean) => void;
-  /**
-   * Rebuild the audio graph with the given engine and replace the SFU sender
-   * track. Throws on failure; caller wraps in try/catch and sets status.
-   */
   switchEngine: (engine: EngineKind) => Promise<void>;
-  /**
-   * Re-acquire the mic on the currently selected device (read from the store)
-   * and replace the SFU sender track. Caller must update store.micDeviceId
-   * before calling. Throws on failure; caller wraps in try/catch.
-   */
   switchMicDevice: () => Promise<void>;
-  /**
-   * Sync the display name to the SFU and update the self-participant in the
-   * store. No-op when not joined.
-   */
   setRemoteDisplayName: (name: string) => void;
-  /**
-   * Broadcast local mic/deafen state to all peers. No-op when not joined.
-   */
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
-  /**
-   * Send a chat message. No-op when not joined.
-   * Caller must have already appended the optimistic entry to the store.
-   */
   sendChat: (text: string, clientMsgId: string) => void;
-  /** Send a ping to a specific peer. No-op when not joined. */
   sendPing: (targetId: string) => void;
-  /** Open the system picker and start publishing a screen share. */
   startScreenShare: () => Promise<void>;
-  /** Stop the active publisher session. No-op when not publishing. */
   stopScreenShare: () => void;
-  /** Live-apply current resolution/fps/bitrate settings to an active share. */
   updateScreenShareParams: () => Promise<void>;
-  /** Swap sharp/motion mode on an active share. No-op when not publishing. */
   changeScreenShareMode: (mode: ShareMode) => Promise<void>;
-  /** Subscribe to a peer's share (called from gallery tile click). */
   subscribeScreenShare: (publisherId: string) => void;
-  /** Unsubscribe from a peer's share (called from focused close). */
   unsubscribeScreenShare: (publisherId: string) => void;
-  /** Room ID used as the localStorage key for chat history. */
   getRoomId: () => string;
-  /**
-   * Stable callback — funnels an incoming ChatPayload into the store.
-   * Both the voice WS and the lurker WS call this so dedup/persist run once.
-   */
   handleChatReceive: (data: ChatPayload) => void;
-  /**
-   * Stable callback — handles an incoming ping from any transport (voice or lurker WS).
-   * Respects muteIncomingPings, schedules 4s clear, plays sound, flashes tray.
-   */
   handlePingReceive: (data: PingPayload) => void;
 };
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000, 30000] as const;
-
-type SFUHandlerDeps = {
-  display: string;
-  audio: ReturnType<typeof useAudioEngine>;
-  sfu: ReturnType<typeof useSFU>;
-  getStore: typeof useStore.getState;
-  handleChatReceive: (data: ChatPayload) => void;
-  handlePingReceive: (data: PingPayload) => void;
-  peerIdRef: MutableRefObject<string | null>;
-  clientIdRef: MutableRefObject<string>;
-  reconnectSchedulerRef: MutableRefObject<ReturnType<typeof createReconnectScheduler>>;
-  userLeavingRef: MutableRefObject<boolean>;
-};
-
-function buildSFUHandlers(deps: SFUHandlerDeps): Partial<import('../sfu/client').SFUHandlers> {
-  const {
-    display,
-    audio,
-    sfu,
-    getStore,
-    handleChatReceive,
-    handlePingReceive,
-    peerIdRef,
-    clientIdRef,
-    reconnectSchedulerRef,
-    userLeavingRef,
-  } = deps;
-  return {
-    onState: (s) => {
-      if (s === 'connected') {
-        reconnectSchedulerRef.current.reset();
-        getStore().setStatus('Подключено', false, true);
-      } else if (s === 'failed' || s === 'closed') {
-        if (useStore.getState().joinState === 'joined' && !userLeavingRef.current) {
-          const nextAttempt = reconnectSchedulerRef.current.attemptIndex + 1;
-          getStore().setStatus(
-            `Соединение оборвалось, переподключаюсь (попытка ${nextAttempt})…`,
-            true,
-            true,
-          );
-          reconnectSchedulerRef.current.schedule();
-        }
-      }
-    },
-    onWelcome: ({ id, peers }) => {
-      peerIdRef.current = id;
-      getStore().clearParticipants();
-      getStore().upsertParticipant({
-        id,
-        display,
-        isSelf: true,
-        clientId: clientIdRef.current,
-        chatOnly: false,
-      });
-      const share = useScreenShareStore.getState();
-      share.clearShares();
-      for (const p of peers ?? []) {
-        const stored = p.clientId ? loadPeerVolume(p.clientId) : null;
-        getStore().upsertParticipant({
-          id: p.id,
-          display: p.displayName ?? `peer-${p.id}`,
-          clientId: p.clientId,
-          remoteMuted: p.selfMuted ?? false,
-          remoteDeafened: p.deafened ?? false,
-          chatOnly: p.chatOnly ?? false,
-          screenSharing: p.screenSharing ?? false,
-          ...(stored !== null ? { localVolume: stored } : {}),
-        });
-        if (p.screenSharing) {
-          share.upsertShare({
-            publisherId: p.id,
-            hasSystemAudio: p.screenSharingHasAudio ?? false,
-            videoCodec: p.screenSharingVideoCodec,
-          });
-        }
-      }
-      retryPendingChats((payload) => sfu.getClient()?.sendChat(payload), clientIdRef.current);
-    },
-    onPeerJoined: ({
-      id,
-      displayName: peerDisplay,
-      clientId,
-      selfMuted,
-      deafened,
-      chatOnly,
-      screenSharing,
-      screenSharingHasAudio,
-      screenSharingVideoCodec,
-    }) => {
-      const stored = clientId ? loadPeerVolume(clientId) : null;
-      getStore().upsertParticipant({
-        id,
-        display: peerDisplay ?? `peer-${id}`,
-        clientId,
-        remoteMuted: selfMuted ?? false,
-        remoteDeafened: deafened ?? false,
-        chatOnly: chatOnly ?? false,
-        screenSharing: screenSharing ?? false,
-        ...(stored !== null ? { localVolume: stored } : {}),
-      });
-      if (screenSharing) {
-        useScreenShareStore.getState().upsertShare({
-          publisherId: id,
-          hasSystemAudio: screenSharingHasAudio ?? false,
-          videoCodec: screenSharingVideoCodec,
-        });
-      }
-    },
-    onPeerLeft: ({ id }) => {
-      audio.detachRemoteStream(id);
-      getStore().removeParticipant(id);
-      useScreenShareStore.getState().removeShare(id);
-    },
-    onPeerInfo: ({
-      id,
-      displayName: peerDisplay,
-      clientId,
-      screenSharing,
-      screenSharingHasAudio,
-      screenSharingVideoCodec,
-    }) => {
-      const patch: {
-        display?: string;
-        clientId?: string;
-        screenSharing?: boolean;
-      } = { screenSharing: Boolean(screenSharing) };
-      if (peerDisplay) patch.display = peerDisplay;
-      if (clientId) patch.clientId = clientId;
-      getStore().updateParticipant(id, patch);
-      const share = useScreenShareStore.getState();
-      if (screenSharing) {
-        share.upsertShare({
-          publisherId: id,
-          hasSystemAudio: screenSharingHasAudio ?? false,
-          videoCodec: screenSharingVideoCodec,
-        });
-      } else {
-        share.removeShare(id);
-      }
-    },
-    onPeerState: ({ id, selfMuted, deafened }) => {
-      getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
-    },
-    onChat: handleChatReceive,
-    onPing: handlePingReceive,
-    onTrack: ({ track, stream, peerId }) => {
-      if (!peerId) return;
-      if (track.kind === 'audio') {
-        getStore().upsertParticipant({ id: peerId, hasStream: true });
-        audio.attachRemoteStream(peerId, stream);
-      }
-    },
-    onScreenShareAvailable: ({ publisherId, hasSystemAudio, videoCodec }) => {
-      useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio, videoCodec });
-    },
-    onScreenShareEnded: ({ publisherId }) => {
-      const store = useScreenShareStore.getState();
-      store.removeShare(publisherId);
-      if (publisherId === peerIdRef.current && store.myStatus === 'publishing') {
-        store.setMyStatus('idle');
-        getStore().setStatus('Демонстрация прервана разрывом соединения.', true, true);
-      }
-    },
-    onScreenShareError: ({ publisherId, reason }) => {
-      const store = useScreenShareStore.getState();
-      if (publisherId) store.removeShare(publisherId);
-      if (!publisherId || reason === 'already-publishing' || reason === 'internal') {
-        store.setMyStatus('idle');
-      }
-      const msg = screenShareErrorRu(reason);
-      if (msg) getStore().setStatus(msg, true, true);
-    },
-    onScreenShareTrack: ({ publisherId, stream, kind }) => {
-      const store = useScreenShareStore.getState();
-      if (kind === 'video') store.attachFocusedVideo(publisherId, stream);
-      else store.attachFocusedAudio(publisherId, stream);
-    },
-    onScreenShareSelfStarted: ({ stream, videoCodec }) => {
-      useScreenShareStore.getState().setMyStream(stream, videoCodec);
-    },
-    onScreenShareSelfStopped: () => {
-      const store = useScreenShareStore.getState();
-      store.setMyStatus('idle');
-      store.setMyStream(null);
-    },
-    onError: (err) => {
-      console.warn('[sfu]', err);
-    },
-  };
-}
-
-function screenShareErrorRu(reason: ScreenShareReason): string | null {
-  switch (reason) {
-    case 'not-found':
-      return 'Сессия демонстрации не найдена.';
-    case 'invalid-token':
-      return 'Не удалось восстановить демонстрацию. Поделитесь экраном заново.';
-    case 'already-publishing':
-      return 'Вы уже делитесь экраном.';
-    case 'internal':
-      return 'Ошибка сервера демонстрации.';
-    default:
-      return null;
-  }
-}
 
 export function useSessionManager({
   audio,
@@ -397,7 +142,7 @@ export function useSessionManager({
         (speaking) => {
           const pid = peerIdRef.current;
           if (!pid) return;
-          const current = useStore.getState().participants.get(pid);
+          const current = useStore.getState().participants[pid];
           if (current && current.speaking !== speaking) {
             getStore().updateParticipant(pid, { speaking });
           }
@@ -492,7 +237,7 @@ export function useSessionManager({
 
   const handleChatReceive = useCallback(
     (data: ChatPayload): void => {
-      const sender = useStore.getState().participants.get(data.from);
+      const sender = useStore.getState().participants[data.from];
       // Prefer server-snapshotted name (survives lurker / post-leave lookup).
       // Fall back to participants map entry for older server versions.
       useStore.getState().chatReceive(roomSlugRef.current, {
@@ -540,11 +285,6 @@ export function useSessionManager({
         const cfg = configRef.current;
         if (!cfg) throw new Error('Config not loaded');
 
-        // Soft path: if a screen share is in flight, keep the publisher PC
-        // alive and ask the server to rebind the session via screen-share-
-        // resume. Only valid within the 5s grace window the SFU keeps.
-        // Anything else (resume reject, welcome timeout) falls through to the
-        // cold path below — screen share is then lost cleanly.
         const liveClient = sfu.getClient();
         const screenToken = liveClient?.getScreenShareToken() ?? null;
         const hadActiveShare = liveClient?.isPublishingScreenShare() ?? false;
@@ -561,8 +301,6 @@ export function useSessionManager({
               clientId: clientIdRef.current,
             });
             await liveClient.resumeScreenShare(screenToken);
-            // Re-broadcast persisted mute/deafen state — fresh peer ID on the
-            // server side means peers don't carry over our prior peer-state.
             const s = useStore.getState();
             if (s.selfMuted || s.deafened) {
               liveClient.sendSetState(s.selfMuted, s.deafened);
@@ -582,7 +320,6 @@ export function useSessionManager({
         audio.cleanupAllRemote();
         getStore().clearParticipants();
         peerIdRef.current = null;
-        // connectSfuRef always points at the latest connectSfu closure.
         await connectSfuRef.current(graph, lastDisplayNameRef.current);
       },
     }),
@@ -628,7 +365,6 @@ export function useSessionManager({
     [audio, sfu, handleChatReceive, handlePingReceive, getStore],
   );
 
-  // Keep connectSfuRef in sync so the scheduler always calls the latest closure.
   useEffect(() => {
     connectSfuRef.current = connectSfu;
   }, [connectSfu]);
@@ -644,18 +380,14 @@ export function useSessionManager({
     peerIdRef.current = null;
     useScreenShareStore.getState().clearShares();
     useScreenShareStore.getState().setMyStatus('idle');
-    // Optimistic transition: morph self into a lurker placeholder and drop
-    // voice peers. Avoids a 1–2 s empty-roster flash while the lurker WS
-    // handshakes; lurker.onWelcome will clear+repopulate authoritatively
-    // (clientId-dedup in upsertParticipant evicts the placeholder).
     const prev = useStore.getState().participants;
-    const nextMap = new Map<string, ParticipantUI>();
-    for (const [id, p] of prev) {
+    const nextRec: Record<string, ParticipantUI> = {};
+    for (const [id, p] of Object.entries(prev)) {
       if (p.isSelf) {
-        nextMap.set(id, { ...p, chatOnly: true, speaking: false, hasStream: false });
+        nextRec[id] = { ...p, chatOnly: true, speaking: false, hasStream: false };
       }
     }
-    useStore.setState({ participants: nextMap });
+    useStore.setState({ participants: nextRec });
     getStore().setJoinState('idle');
     getStore().setSelfMuted(false);
     getStore().setDeafened(false);
@@ -741,7 +473,6 @@ export function useSessionManager({
           });
         }
 
-        // Start speaking loop (graph survives reconnects — fires once per join).
         attachSpeakingLoop(graph);
       } catch (error) {
         handleLeave();
@@ -763,7 +494,6 @@ export function useSessionManager({
     loadAppConfig()
       .then((cfg) => {
         configRef.current = cfg;
-        // Single set() so subscribers don't render with role-set-but-not-ready.
         useStore.setState({ role: cfg.role, configReady: true });
         getStore().setStatus('Готово');
         if (shouldRejoin) {
@@ -862,16 +592,11 @@ export function useSessionManager({
     share.setMyStatus('starting');
     try {
       await client.startScreenShare();
-      // We can't observe -started fully here (it lives on the WS path); the
-      // status flips to 'publishing' when the SDP answer settles inside
-      // startScreenShare. Set it on success.
       useScreenShareStore.getState().setMyStatus('publishing');
     } catch (err) {
       const store = useScreenShareStore.getState();
       store.setMyStatus('idle');
       store.setMyStream(null);
-      // User cancelling the picker raises a DOMException with name "NotAllowedError"
-      // or "AbortError" — neither should produce a noisy app error.
       const name = err instanceof DOMException ? err.name : '';
       if (name === 'NotAllowedError' || name === 'AbortError') return;
       if (err instanceof Error && err.message === SCREEN_SHARE_NO_CODEC) {
@@ -891,7 +616,6 @@ export function useSessionManager({
     if (!client) return;
     useScreenShareStore.getState().setMyStatus('stopping');
     client.stopScreenShare();
-    // onScreenShareSelfStopped will flip status back to idle.
   }, [sfu]);
 
   const updateScreenShareParams = useCallback(async (): Promise<void> => {

@@ -1,22 +1,9 @@
-// Local mic AudioContext graph: mic → HPF(110Hz) → [Denoiser] →
-// GainNode → MediaStreamDestination.
-//
-// Gain control is the browser's AGC (autoGainControl: true). A graph-level
-// DynamicsCompressor on top of AGC creates a pumping feedback loop, so
-// the graph has none.
-//
-// The denoiser slot is engine-agnostic: a `DenoiserNode` exposes
-// { input, output, dispose }. Engines that need extra topology hide it
-// behind input/output passthroughs, so this module never branches on
-// engine id.
-
 import type { EngineKind } from '../types';
-import { resolveAudioContextCtor } from './context';
 import { isCaptureEngine } from './engine';
 import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
 
-export interface MicGraph {
+export type MicGraph = {
   localAudioContext: AudioContext;
   localSourceNode: MediaStreamAudioSourceNode;
   localHighPassNode: BiquadFilterNode;
@@ -25,19 +12,14 @@ export interface MicGraph {
   localMonitorAnalyser: AnalyserNode;
   localMonitorData: Float32Array<ArrayBuffer>;
   processedLocalStream: MediaStream;
-  // Active denoiser, or null when engine === 'off' or initialization
-  // failed. dispose is called via this handle — mic-graph never
-  // inspects which concrete engine is running.
   denoiser: DenoiserNode | null;
-}
+};
 
 export function createLocalAudioContext(): AudioContext {
-  const AudioContextCtor = resolveAudioContextCtor();
-  if (!AudioContextCtor) throw new Error('Browser does not support AudioContext');
   try {
-    return new AudioContextCtor({ sampleRate: 48000 });
+    return new AudioContext({ sampleRate: 48000 });
   } catch {
-    return new AudioContextCtor();
+    return new AudioContext();
   }
 }
 
@@ -113,10 +95,6 @@ export function applySendGain(graph: MicGraph, sendVolumeRef: () => number): voi
   graph.localGainNode.gain.value = sendVolume / 100;
 }
 
-// Disconnects a Web Audio node, swallowing the InvalidAccessError that
-// `disconnect()` throws when the node was never connected (or already torn
-// down). Teardown crosses async paths where the connection state can vary,
-// so this is the documented way to make it idempotent.
 function safeDisconnect(node: { disconnect(): void } | null | undefined): void {
   if (!node) return;
   try {

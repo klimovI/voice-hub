@@ -2,26 +2,14 @@ import { useScreenShareStore } from '../store/useScreenShareStore';
 import { ScreenShareTile } from './ScreenShareTile';
 import { useStore } from '../store/useStore';
 
-interface Props {
-  /** Called when a tile is clicked. Owner manages the gen-counter race guard. */
+type Props = {
   onTileClick: (publisherId: string) => void;
-}
+};
 
-/**
- * Responsive grid of placeholder tiles, one per active screen share in the
- * room. Hidden entirely when no shares are active so the chat / participants
- * panels keep their default layout.
- *
- * Filters out the caller's own share — there's no point letting users
- * subscribe to themselves; the publisher view is the picker preview.
- */
 export function ScreenShareGallery({ onTileClick }: Props) {
   const shares = useScreenShareStore((s) => s.shares);
-  // selectSelfPeerId is over-engineered here — we keep a direct iteration so
-  // the gallery re-renders only on shares/participants changes, not on the
-  // sort comparator's stable identity.
   const selfId = useStore((s) => {
-    for (const [id, p] of s.participants) {
+    for (const [id, p] of Object.entries(s.participants)) {
       if (p.isSelf) return id;
     }
     return null;

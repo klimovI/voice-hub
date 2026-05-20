@@ -13,6 +13,13 @@ import {
   type ScreenShareErrorPayload,
   type ScreenVideoCodec,
 } from './protocol';
+export type {
+  ChatOnlyHandlers,
+  ChatOnlyConnectOptions,
+  ChatOnlyClient,
+} from './chat-client';
+export { createChatClient } from './chat-client';
+import { closeWebSocket } from './chat-client';
 import {
   applyScreenCodecPreferences,
   canReceiveScreenCodec,
@@ -41,26 +48,16 @@ export type SFUHandlers = {
   onChat: (data: ChatPayload) => void;
   onPing: (data: PingPayload) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
-  /** A new screen share is publishing — UI should render a placeholder tile. */
   onScreenShareAvailable: (data: ScreenShareAvailablePayload) => void;
-  /** A screen share has stopped — UI should drop the tile and any focused subscription. */
   onScreenShareEnded: (data: ScreenShareEndedPayload) => void;
-  /** Server reported an error on a screen-share path. */
   onScreenShareError: (data: ScreenShareErrorPayload) => void;
-  /**
-   * Subscriber-side media arrival. Fires once the subscriber PC's ontrack
-   * resolves; `kind` lets the UI route audio (system audio) vs video.
-   */
   onScreenShareTrack: (data: {
     publisherId: string;
     track: MediaStreamTrack;
     stream: MediaStream;
     kind: 'video' | 'audio';
   }) => void;
-  /** Publisher-side: local capture stream available (preview). Fires once
-   * `getDisplayMedia` resolves, before the SDP round-trip completes. */
   onScreenShareSelfStarted: (data: { stream: MediaStream; videoCodec: ScreenVideoCodec }) => void;
-  /** Publisher-side: the publisher session has stopped (track ended, user cancel, server stop). */
   onScreenShareSelfStopped: () => void;
   onError: (err: unknown) => void;
 };
@@ -75,14 +72,6 @@ export type ConnectOptions = {
 
 export type SFUClient = {
   connect(opts: ConnectOptions): Promise<void>;
-  /**
-   * Reattach the live client to a fresh WebSocket + audio PC while preserving
-   * the publisher screen-share state (PC, token, video sender). Pair with
-   * resumeScreenShare(token) on the welcome to keep an active share alive
-   * across a WS hiccup.
-   *
-   * Throws if the client has been disconnect()ed.
-   */
   reconnect(opts: ConnectOptions): Promise<void>;
   disconnect(): void;
   setDisplayName(name: string): void;
@@ -91,68 +80,21 @@ export type SFUClient = {
   sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   getId(): string | null;
-  /**
-   * Open the system picker and start publishing. Resolves when the publisher
-   * PC's answer has been applied. Rejects if the user cancels the picker or
-   * if the server rejects the start.
-   */
   startScreenShare(): Promise<void>;
-  /** Tear down the publisher PC and notify the server. */
   stopScreenShare(): void;
-  /**
-   * Live re-apply current resolution/fps/bitrate settings to an active screen
-   * share via applyConstraints + setParameters (no SDP renegotiate). Codec
-   * changes still require stop+restart; this call ignores codec drift.
-   */
   updateScreenShareParams(): Promise<void>;
-  /**
-   * Swap the active screen-share mode (sharp ↔ motion). Reapplies the
-   * publisher-side encoder hint + bitrate cap and notifies the SFU so it
-   * switches to the matching adaptation policy. No SDP renegotiation.
-   * No-op when not publishing.
-   */
   changeScreenShareMode(mode: ShareMode): Promise<void>;
-  /**
-   * Subscribe to a specific publisher's share. UI calls this when the user
-   * clicks a gallery tile.
-   */
   subscribeScreenShare(publisherId: string): void;
-  /** Detach from a publisher's share and close the subscriber PC. */
   unsubscribeScreenShare(publisherId: string): void;
-  /** True when this client is currently publishing a share. */
   isPublishingScreenShare(): boolean;
-  /**
-   * Opaque resume token issued by the SFU on screen-share-start (or after a
-   * successful resume). Persists for the lifetime of the SFU-side session.
-   * Callers should snapshot it before disconnect and feed it into
-   * resumeScreenShare after reconnect.
-   */
   getScreenShareToken(): string | null;
-  /**
-   * Reattach the still-live publisher PC to a freshly reconnected WebSocket.
-   * Sends screen-share-resume {token}; on success the server replies with
-   * screen-share-started and the client issues an ICE-restart offer to
-   * re-establish transport against the new WS-pinned session.
-   *
-   * Rejects if the publisher PC isn't alive locally (you have nothing to
-   * resume), or if the server returns invalid-token.
-   */
   resumeScreenShare(token: string): Promise<void>;
 };
 
-// Full L1T3 temporal-layer set. The dynacast contract carries a layers list
-// per pause/resume; only the full set is wired today (partial pause = future
-// BWE-driven downgrade). Keep the constant local — it mirrors backend
-// `allScreenEncodeLayers` in voice-hub/backend/internal/sfu/screen_share.go.
 const ALL_SCREEN_ENCODE_LAYERS = [0, 1, 2] as const;
 
 function isFullLayerSet(layers: number[]): boolean {
-  if (layers.length !== ALL_SCREEN_ENCODE_LAYERS.length) return false;
-  const sorted = [...layers].sort();
-  for (let i = 0; i < ALL_SCREEN_ENCODE_LAYERS.length; i++) {
-    if (sorted[i] !== ALL_SCREEN_ENCODE_LAYERS[i]) return false;
-  }
-  return true;
+  return layers.length === 3 && layers.includes(0) && layers.includes(1) && layers.includes(2);
 }
 
 function noop(): void {}
@@ -183,24 +125,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let stopped = false;
   let iceServers: RTCIceServer[] = [];
 
-  // Screen share state. screenPubPC is the publisher-side PC (one at a time
-  // per client by design — multi-publish per client is out of scope). The
-  // screenSubs map is keyed by publisher peer ID; each entry is a complete
-  // subscriber PC with its own stream/track wiring.
   let screenPubPC: RTCPeerConnection | null = null;
   let screenPubStream: MediaStream | null = null;
   let screenPubStopped = false;
   let screenPubToken: string | null = null;
   let screenPubVideoSender: RTCRtpSender | null = null;
-  // Tracks the L1T3 / bitrate-caps setParameters call kicked off by the
-  // signaling-state watcher in startScreenShare. encode-pause / encode-resume
-  // must observe its completion, otherwise getParameters() races and
-  // active=true/false lands on an encoding without scalabilityMode set.
   let screenPubInitialParams: Promise<void> | null = null;
-  // resumeContinuation is set while resumeScreenShare is in flight: it resolves
-  // the awaiting promise on the next screen-share-started (success) or rejects
-  // on screen-share-error. Plain inline state — only one resume can be in
-  // flight at a time, just like one publisher PC at a time.
   let resumeContinuation: {
     resolve: () => void;
     reject: (err: Error) => void;
@@ -294,8 +224,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   }
 
   function detachAudioAndWS(): void {
-    // Detach handlers BEFORE close so the closing event doesn't fire onState
-    // and trigger an external reconnect loop that's already in flight.
     if (ws) {
       ws.onopen = null;
       ws.onerror = null;
@@ -336,15 +264,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     detachAudioAndWS();
 
-    // Subscriber screen PCs die with the server-side peer rebind — the server
-    // will re-broadcast screen-share-available for live publishers, UI rebuilds
-    // tiles, user re-clicks if they want to keep watching.
     for (const id of Array.from(screenSubs.keys())) {
       teardownScreenSub(id);
     }
     screenShareCodecs.clear();
-    // A stale resume continuation belongs to the previous WS — fail it so the
-    // caller doesn't get a spurious resolve against the new connection.
     if (resumeContinuation) {
       const cont = resumeContinuation;
       resumeContinuation = null;
@@ -616,15 +539,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
     const pickedParams = getCurrentScreenParams();
 
-    // The user's picker click is the gesture context. Any await between this
-    // line and getDisplayMedia would break the gesture chain on some browsers.
-    // height-only constraint keeps aspect ratio. Ultrawide monitors stay
-    // ultrawide instead of being letterboxed into a 16:9 box; width is bumped
-    // back up in the bitrate calc below.
-    // height as `max`, not `ideal` — Chrome will upscale a smaller source to
-    // satisfy `ideal`, which wastes bits encoding synthesized pixels. `max`
-    // caps without upscaling, so 1440p monitors stay 1440p even on the 2160p
-    // preset.
+    // Must stay sync from here to getDisplayMedia — any await breaks the gesture context.
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         frameRate: { ideal: pickedParams.fps, max: pickedParams.fps },
@@ -632,9 +547,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         displaySurface: 'monitor',
       },
       audio: true,
-      // systemAudio / selfBrowserSurface / surfaceSwitching are top-level
-      // getDisplayMedia options, NOT inside audio/video constraints. Chrome
-      // is strict about this and silently drops mistyped values.
       systemAudio: 'include',
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
@@ -645,8 +557,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       stream.getTracks().forEach((t) => t.stop());
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
-    // 'detail' biases encoders toward sharpness, 'motion' biases toward
-    // smoothness. Driven by the selected preset — see store helper.
     videoTrack.contentHint = getCurrentScreenContentHint();
 
     const audioTrack = stream.getAudioTracks()[0];
@@ -662,9 +572,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenPubVideoSender = videoSender;
     if (audioTrack) newPC.addTrack(audioTrack, stream);
 
-    // Codec preferences must be set BEFORE createOffer so the resulting SDP
-    // lists the selected screen codec first. setCodecPreferences belongs to
-    // the matching transceiver, not the PC.
     const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
     if (tx) {
       applyScreenCodecPreferences(tx, caps, selectedCodec);
@@ -683,7 +590,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     });
 
     videoTrack.addEventListener('ended', () => {
-      // Fires when the user hits "Stop sharing" in the browser's native bar.
       if (!screenPubStopped) stopScreenShare();
     });
 
@@ -697,15 +603,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       mode: initialShareMode,
     });
 
-    // The server replies with screen-share-started (token) followed by an
-    // answer envelope with pc='screen-pub'. setParameters needs encodings[]
-    // to be populated, which happens at setRemoteDescription(answer) time.
-    // Wait for signaling-state=stable then apply L1T3 + bitrate caps.
     try {
       await applyInitialEncoderParams(newPC, videoSender, videoTrack, selectedCodec, pickedParams);
     } catch (err) {
-      // Don't leak the PC if the answer never arrives — without nulling
-      // screenPubPC the next startScreenShare would throw "already publishing".
       teardownNewPubPC(newPC, stream);
       throw err;
     }
@@ -733,10 +633,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     on.onScreenShareSelfStopped();
   }
 
-  // Ultrawide adjustment: actual track width exceeds the 16:9 nominal width,
-  // so we scale the bitrate ceiling up proportionally (capped at 2× to stay
-  // sane on extreme dimensions). When the source matches 16:9 the multiplier
-  // is exactly 1.
   function scaledBitrate(track: MediaStreamTrack | undefined, p: ScreenParams): number {
     const actualW = track?.getSettings().width;
     if (!actualW || actualW <= p.width) return p.maxBitrate;
@@ -792,9 +688,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     if (track) {
       track.contentHint = shareModeToContentHint(mode);
     }
-    // Recompute bitrate cap with the new mode — buildScreenParams applies
-    // the share-mode modifier so sharp drops back to the tighter cap and
-    // motion restores the full one.
     const eff = getCurrentScreenParams();
     const next = buildScreenParams(eff.resolution, eff.fps, mode);
     const sender = screenPubVideoSender;
@@ -871,10 +764,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       clearTimeout(timeoutId);
     }
 
-    // ICE restart: the publisher PC is still alive, but the WS just
-    // reconnected — likely the network reattached and the existing ICE
-    // candidates are stale. createOffer with iceRestart asks the browser to
-    // gather fresh candidates and renegotiate transport.
     const pcRef = screenPubPC;
     if (!pcRef) {
       throw new Error('sfu-client: publisher PC vanished mid-resume');
@@ -901,9 +790,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     screenSubs.set(publisherId, subPC);
 
     subPC.addEventListener('track', (ev) => {
-      // Some browsers populate ev.streams; some don't. The fallback wraps
-      // the track in a fresh MediaStream so the consumer always has a
-      // stable handle to attach to <video>.srcObject.
       const stream = ev.streams[0] ?? new MediaStream([ev.track]);
       on.onScreenShareTrack({
         publisherId,
@@ -971,29 +857,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   function disconnect(): void {
     stopped = true;
-    // Tear screen share down first so we don't race ws.close with -stop.
     if (screenPubPC) stopScreenShare();
     for (const id of Array.from(screenSubs.keys())) {
       teardownScreenSub(id);
     }
     if (ws) {
-      // CONNECTING-state close triggers a console warning; defer until open.
-      if (ws.readyState === WebSocket.CONNECTING) {
-        const w = ws;
-        w.onopen = () => {
-          try {
-            w.close();
-          } catch {
-            /* ignore */
-          }
-        };
-      } else {
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
-      }
+      closeWebSocket(ws);
       ws = null;
     }
     if (pc) {
@@ -1027,163 +896,4 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     getScreenShareToken,
     resumeScreenShare,
   };
-}
-
-// --------------------------------------------------------------------------
-// Chat-only (lurker) client — WS only, no RTCPeerConnection.
-// Sends hello with chatOnly:true. Receives welcome/peer-joined/peer-left/chat.
-// --------------------------------------------------------------------------
-
-export type ChatOnlyHandlers = {
-  onWelcome: (data: WelcomePayload) => void;
-  onPeerJoined: (data: PeerInfo) => void;
-  onPeerLeft: (data: PeerLeftPayload) => void;
-  onChat: (data: ChatPayload) => void;
-  onPing: (data: PingPayload) => void;
-  onClose: () => void;
-  onError: (err: unknown) => void;
-};
-
-export type ChatOnlyConnectOptions = {
-  wsUrl: string;
-  displayName: string;
-  clientId: string;
-};
-
-export type ChatOnlyClient = {
-  connect(opts: ChatOnlyConnectOptions): Promise<void>;
-  disconnect(): void;
-  sendChat(payload: ChatSendPayload): void;
-  sendPing(targetId: string): void;
-  getId(): string | null;
-};
-
-export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): ChatOnlyClient {
-  const on: ChatOnlyHandlers = {
-    onWelcome: handlers.onWelcome ?? noop,
-    onPeerJoined: handlers.onPeerJoined ?? noop,
-    onPeerLeft: handlers.onPeerLeft ?? noop,
-    onChat: handlers.onChat ?? noop,
-    onPing: handlers.onPing ?? noop,
-    onClose: handlers.onClose ?? noop,
-    onError: handlers.onError ?? noop,
-  };
-
-  let ws: WebSocket | null = null;
-  let myId: string | null = null;
-  let stopped = false;
-
-  function send(event: string, data: unknown): void {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ event, data }));
-  }
-
-  function connect(opts: ChatOnlyConnectOptions): Promise<void> {
-    if (ws) throw new Error('chat-client: already connected');
-    stopped = false;
-
-    return new Promise<void>((resolve, reject) => {
-      let resolved = false;
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          reject(new Error('chat-client: welcome timeout'));
-          disconnect();
-        }
-      }, 10000);
-
-      const socket = new WebSocket(opts.wsUrl);
-      ws = socket;
-
-      socket.onopen = () => {
-        socket.send(
-          JSON.stringify({
-            event: 'hello',
-            data: { displayName: opts.displayName, clientId: opts.clientId, chatOnly: true },
-          }),
-        );
-      };
-
-      socket.onerror = (event) => {
-        on.onError(event);
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          reject(new Error('chat-client: websocket error'));
-        }
-      };
-
-      socket.onclose = () => {
-        if (!stopped) on.onClose();
-      };
-
-      socket.onmessage = (event) => {
-        const msg = parseServerMessage(event.data as string);
-        if (!msg) return;
-        switch (msg.event) {
-          case 'welcome':
-            myId = msg.data.id;
-            on.onWelcome(msg.data);
-            break;
-          case 'peer-joined':
-            on.onPeerJoined(msg.data);
-            break;
-          case 'peer-left':
-            on.onPeerLeft(msg.data);
-            break;
-          case 'chat':
-            on.onChat(msg.data);
-            break;
-          case 'ping':
-            on.onPing(msg.data);
-            break;
-          default:
-            break;
-        }
-        if (msg.event === 'welcome' && !resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve();
-        }
-      };
-    });
-  }
-
-  function disconnect(): void {
-    stopped = true;
-    if (ws) {
-      if (ws.readyState === WebSocket.CONNECTING) {
-        const w = ws;
-        w.onopen = () => {
-          try {
-            w.close();
-          } catch {
-            /* ignore */
-          }
-        };
-      } else {
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
-      }
-      ws = null;
-    }
-    myId = null;
-  }
-
-  function sendChat(payload: ChatSendPayload): void {
-    send('chat-send', payload);
-  }
-
-  function sendPing(targetId: string): void {
-    send('ping', { to: targetId });
-  }
-
-  function getId(): string | null {
-    return myId;
-  }
-
-  return { connect, disconnect, sendChat, sendPing, getId };
 }

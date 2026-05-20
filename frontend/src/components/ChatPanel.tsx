@@ -153,7 +153,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
     if (!trimmed || overLimit || !selfPeerId) return;
     const clientMsgId = crypto.randomUUID();
     const now = Date.now();
-    const selfEntry = participants.get(selfPeerId);
+    const selfEntry = participants[selfPeerId];
     chatSendOptimistic(roomId, {
       id: clientMsgId,
       from: selfPeerId,
@@ -197,7 +197,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
           ? msg.senderClientId === selfClientId
           : msg.from === selfPeerId;
       const senderName =
-        msg.senderName ?? participants.get(msg.from)?.display ?? (isSelf ? 'Вы' : 'Неизвестный');
+        msg.senderName ?? participants[msg.from]?.display ?? (isSelf ? 'Вы' : 'Неизвестный');
 
       return {
         msg,
