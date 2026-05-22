@@ -308,8 +308,8 @@ export function App() {
       <ScreenShareFocused onClose={handleFocusedClose} />
       <main
         className="grid gap-4 mx-auto
-          w-[min(1560px,100%)] px-5 pt-5 pb-4
-          max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-4"
+          w-[min(1560px,100%)] px-5 pt-5 pb-5
+          max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-3"
       >
         <TopBar />
         <UpdateBanner
