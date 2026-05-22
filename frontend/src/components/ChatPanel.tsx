@@ -211,7 +211,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
   }, [messages, participants, selfClientId, selfPeerId]);
 
   return (
-    <section className="card p-0! flex flex-col" style={{ height: 691 }}>
+    <section className="card p-0! flex flex-col flex-1 min-h-0">
       <div className="px-6 pt-5 pb-4 border-b border-line shrink-0">
         <h2 className="card-title">Чат</h2>
       </div>

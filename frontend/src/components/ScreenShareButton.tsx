@@ -56,7 +56,7 @@ export function ScreenShareButton({ onStart, onStop, onUpdateParams, onShareMode
 
   return (
     <>
-      <div className="grid gap-2">
+      <div className="grid gap-2 shrink-0">
         <div className="flex gap-1">
           <button
             type="button"

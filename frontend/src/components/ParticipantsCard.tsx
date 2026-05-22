@@ -29,8 +29,8 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
   const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
 
   return (
-    <section className="card grid gap-5 p-6">
-      <div className="grid gap-3">
+    <section className="card flex flex-col gap-5 p-6 flex-1 min-h-0 overflow-hidden">
+      <div className="grid gap-3 shrink-0">
         <h2 className="card-title">Комната</h2>
         <div className="grid gap-1.5">
           {ROOM_SLUGS.map((slug: RoomSlug) => {
@@ -101,57 +101,59 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
         </div>
       </div>
 
-      <div className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="section-label">Участники</span>
-            {liveCount > 0 && (
-              <span className="w-1.5 h-1.5 bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite] shrink-0" />
-            )}
-          </div>
-          {liveCount > 0 && (
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums shrink-0">
-              {liveCount}
-            </span>
-          )}
-        </div>
-        <div id="participants" className="grid gap-2">
-          {showEmpty && (
-            <div className="px-4 py-6 text-center text-muted-2 border border-dashed border-line bg-bg-0 text-[12px] uppercase tracking-[0.12em]">
-              Пока никого нет
-            </div>
-          )}
-          {participants.map((p) => (
-            <ParticipantRow
-              key={p.id}
-              participant={p}
-              onRemoteGainChange={onRemoteGainChange}
-              onPing={onPingUser}
-            />
-          ))}
-        </div>
-      </div>
-
-      {lurkers.length > 0 && (
+      <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6 grid gap-5 content-start">
         <div className="grid gap-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="section-label">Только чат</span>
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums shrink-0">
-              {lurkers.length}
-            </span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="section-label">Участники</span>
+              {liveCount > 0 && (
+                <span className="w-1.5 h-1.5 bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite] shrink-0" />
+              )}
+            </div>
+            {liveCount > 0 && (
+              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums shrink-0">
+                {liveCount}
+              </span>
+            )}
           </div>
-          <div className="grid gap-2">
-            {lurkers.map((p) => (
+          <div id="participants" className="grid gap-2">
+            {showEmpty && (
+              <div className="px-4 py-6 text-center text-muted-2 border border-dashed border-line bg-bg-0 text-[12px] uppercase tracking-[0.12em]">
+                Пока никого нет
+              </div>
+            )}
+            {participants.map((p) => (
               <ParticipantRow
                 key={p.id}
                 participant={p}
-                onRemoteGainChange={noopGainChange}
+                onRemoteGainChange={onRemoteGainChange}
                 onPing={onPingUser}
               />
             ))}
           </div>
         </div>
-      )}
+
+        {lurkers.length > 0 && (
+          <div className="grid gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="section-label">Только чат</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-2 tabular-nums shrink-0">
+                {lurkers.length}
+              </span>
+            </div>
+            <div className="grid gap-2">
+              {lurkers.map((p) => (
+                <ParticipantRow
+                  key={p.id}
+                  participant={p}
+                  onRemoteGainChange={noopGainChange}
+                  onPing={onPingUser}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

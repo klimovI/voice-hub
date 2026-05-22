@@ -157,9 +157,9 @@ pub fn run() {
 
             WebviewWindowBuilder::new(app, "main", initial_url)
                 .title("Voice Hub")
-                .inner_size(1440.0, 980.0)
-                .min_inner_size(1100.0, 760.0)
-                .resizable(true)
+                .inner_size(1440.0, 960.0)
+                .resizable(false)
+                .maximizable(false)
                 .visible(!start_hidden)
                 .build()?;
 

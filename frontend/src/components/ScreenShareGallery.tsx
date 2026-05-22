@@ -19,7 +19,7 @@ export function ScreenShareGallery({ onTileClick }: Props) {
   if (list.length === 0) return null;
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+    <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 shrink-0 max-h-[200px] overflow-y-auto">
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 px-1">
         Демонстрации экрана
       </h3>
