@@ -319,7 +319,7 @@ export function App() {
           desktopApplyState={desktopApplyState}
         />
         <div className="grid gap-4 grid-cols-[400px_minmax(0,1fr)_400px] max-[1340px]:grid-cols-1 items-start">
-          <div className="flex flex-col gap-4 min-h-0" style={{ height: 691 }}>
+          <div className="flex flex-col gap-4 min-h-0" style={{ height: 820 }}>
             <SessionCard
               onJoin={session.join}
               onLeave={session.leave}
@@ -334,7 +334,7 @@ export function App() {
               onRoomSelect={(slug) => void session.switchRoom(slug)}
             />
           </div>
-          <div className="flex flex-col gap-4 min-h-0" style={{ height: 691 }}>
+          <div className="flex flex-col gap-4 min-h-0" style={{ height: 820 }}>
             {voiceActive && (
               <ScreenShareButton
                 onStart={session.startScreenShare}
