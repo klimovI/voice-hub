@@ -389,8 +389,6 @@ export function useSessionManager({
     }
     useStore.setState({ participants: nextRec });
     getStore().setJoinState('idle');
-    getStore().setSelfMuted(false);
-    getStore().setDeafened(false);
     getStore().setStatus('Отключено');
   }, [sfu, audio, getStore]);
 

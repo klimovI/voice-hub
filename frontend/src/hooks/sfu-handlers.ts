@@ -197,7 +197,7 @@ export function buildSFUHandlers(deps: SFUHandlerDeps): Partial<SFUHandlers> {
     onScreenShareSystemAudioWarning: ({ reason }) => {
       if (reason === 'monitor-feedback-risk') {
         getStore().setStatus(
-          'Зрители могут слышать свои голоса при шере монитора. Выберите окно вместо монитора чтобы избежать эха.',
+          'Зрители могут слышать свои голоса. Демонстрируйте окно, а не весь монитор.',
           true,
           true,
         );
