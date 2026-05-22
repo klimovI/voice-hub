@@ -59,6 +59,7 @@ export type SFUHandlers = {
   }) => void;
   onScreenShareSelfStarted: (data: { stream: MediaStream; videoCodec: ScreenVideoCodec }) => void;
   onScreenShareSelfStopped: () => void;
+  onScreenShareSystemAudioWarning: (data: { reason: 'monitor-feedback-risk' }) => void;
   onError: (err: unknown) => void;
 };
 
@@ -114,6 +115,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onScreenShareTrack: handlers.onScreenShareTrack ?? noop,
     onScreenShareSelfStarted: handlers.onScreenShareSelfStarted ?? noop,
     onScreenShareSelfStopped: handlers.onScreenShareSelfStopped ?? noop,
+    onScreenShareSystemAudioWarning: handlers.onScreenShareSystemAudioWarning ?? noop,
     onError: handlers.onError ?? noop,
   };
 
@@ -656,14 +658,18 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const bootstrapParams = buildScreenParams('source', pickedParams.fps, 'sharp');
 
     // Must stay sync from here to getDisplayMedia — any await breaks the gesture context.
+    // windowAudio: 'window' asks Chromium for per-window (per-process) audio
+    // on window surfaces, which avoids picking up the speaker mix and stops
+    // viewers from hearing themselves. Monitor shares still capture the full
+    // system mix — we warn the user in that case.
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         frameRate: { ideal: pickedParams.fps, max: pickedParams.fps },
         height: { max: pickedParams.height },
-        displaySurface: 'monitor',
       },
       audio: true,
       systemAudio: 'include',
+      windowAudio: 'window',
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
     } as DisplayMediaStreamOptions);
@@ -672,6 +678,11 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     if (!videoTrack) {
       stream.getTracks().forEach((t) => t.stop());
       throw new Error('sfu-client: getDisplayMedia returned no video track');
+    }
+    const pickedSurface = videoTrack.getSettings().displaySurface;
+
+    if (pickedSurface === 'monitor' && stream.getAudioTracks().length > 0) {
+      on.onScreenShareSystemAudioWarning({ reason: 'monitor-feedback-risk' });
     }
     const shouldBootstrapBrowserMotion =
       requestedMode === 'motion' && isTabOrWindowSurface(videoTrack);

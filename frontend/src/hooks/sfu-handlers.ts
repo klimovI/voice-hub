@@ -194,6 +194,15 @@ export function buildSFUHandlers(deps: SFUHandlerDeps): Partial<SFUHandlers> {
       store.setMyStatus('idle');
       store.setMyStream(null);
     },
+    onScreenShareSystemAudioWarning: ({ reason }) => {
+      if (reason === 'monitor-feedback-risk') {
+        getStore().setStatus(
+          'Зрители могут слышать свои голоса при шере монитора. Выберите окно вместо монитора чтобы избежать эха.',
+          true,
+          true,
+        );
+      }
+    },
     onError: (err) => {
       console.warn('[sfu]', err);
     },
