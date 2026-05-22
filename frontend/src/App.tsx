@@ -308,8 +308,8 @@ export function App() {
       <ScreenShareFocused onClose={handleFocusedClose} />
       <main
         className="grid gap-4 mx-auto
-          w-[min(1560px,100%)] px-5 pt-5 pb-12
-          max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-8"
+          w-[min(1560px,100%)] px-5 pt-5 pb-4
+          max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-4"
       >
         <TopBar />
         <UpdateBanner
@@ -319,7 +319,7 @@ export function App() {
           desktopApplyState={desktopApplyState}
         />
         <div className="grid gap-4 grid-cols-[400px_minmax(0,1fr)_400px] max-[1340px]:grid-cols-1 items-start">
-          <div className="flex flex-col gap-4 min-h-0" style={{ height: 820 }}>
+          <div className="flex flex-col gap-4 min-h-0" style={{ height: 840 }}>
             <SessionCard
               onJoin={session.join}
               onLeave={session.leave}
@@ -334,7 +334,7 @@ export function App() {
               onRoomSelect={(slug) => void session.switchRoom(slug)}
             />
           </div>
-          <div className="flex flex-col gap-4 min-h-0" style={{ height: 820 }}>
+          <div className="flex flex-col gap-4 min-h-0" style={{ height: 840 }}>
             {voiceActive && (
               <ScreenShareButton
                 onStart={session.startScreenShare}
