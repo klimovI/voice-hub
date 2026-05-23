@@ -363,20 +363,16 @@ func mustEmptyStore(t *testing.T) *auth.ConnPassStore {
 	return store
 }
 
-func postLogin(t *testing.T, url, password string) *http.Response {
+func postLogin(t *testing.T, serverURL, password string) *http.Response {
 	t.Helper()
-	body := strings.NewReader("password=" + urlQueryEscape(password))
-	req, _ := http.NewRequest(http.MethodPost, url, body)
+	body := strings.NewReader("password=" + url.QueryEscape(password))
+	req, _ := http.NewRequest(http.MethodPost, serverURL, body)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return resp
-}
-
-func urlQueryEscape(s string) string {
-	return url.QueryEscape(s)
 }
 
 func roleFromCookie(t *testing.T, secret []byte, resp *http.Response) auth.Role {

@@ -28,7 +28,6 @@ import (
 // typical calls and brief reconnects.
 const turnCredsTTL = 6 * time.Hour
 
-// HealthResponse is the JSON body for GET /healthz.
 type HealthResponse struct {
 	Status string `json:"status"`
 }
@@ -40,19 +39,16 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-// AppConfigResponse is the JSON body for GET /api/config.
 type AppConfigResponse struct {
 	ICEServers []ICEServer `json:"iceServers"`
 	Role       string      `json:"role"`
 }
 
-// VersionResponse is the JSON body for GET /api/version.
 type VersionResponse struct {
 	Version string `json:"version"`
 }
 
-// ConnPassPlaintextResponse is the JSON body for POST endpoints that mint or
-// rotate a connection-password entry. The plaintext is shown once and discarded.
+// ConnPassPlaintextResponse carries the one-time plaintext shown after mint or rotate.
 type ConnPassPlaintextResponse struct {
 	Host       string    `json:"host"`
 	ID         string    `json:"id"`
@@ -60,16 +56,6 @@ type ConnPassPlaintextResponse struct {
 	Password   string    `json:"password"`
 	Generation uint64    `json:"generation"`
 	CreatedAt  time.Time `json:"created_at"`
-}
-
-// ConnPassCreateRequest is the JSON body for POST /api/admin/connection-passwords.
-type ConnPassCreateRequest struct {
-	Label string `json:"label"`
-}
-
-// ConnPassRenameRequest is the JSON body for POST /api/admin/connection-passwords/{id}/rename.
-type ConnPassRenameRequest struct {
-	Label string `json:"label"`
 }
 
 // FrontendVersion fingerprints the deployed frontend by hashing index.html.
@@ -326,49 +312,51 @@ func ConnPassRename(connPass *auth.ConnPassStore) http.HandlerFunc {
 	}
 }
 
-// parseLabel pulls a label out of either a JSON body ({"label":"..."}) or a
-// form field. Empty body is allowed — the entry just gets no label.
-func parseLabel(r *http.Request) string {
-	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
-		var body struct {
-			Label string `json:"label"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		return body.Label
+// decodeJSONOrForm fills v from a JSON body when Content-Type is application/json,
+// otherwise parses form values via fillForm.
+func decodeJSONOrForm(r *http.Request, v any, fillForm func()) {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		_ = json.NewDecoder(r.Body).Decode(v)
+		return
 	}
 	_ = r.ParseForm()
-	return r.PostFormValue("label")
+	fillForm()
+}
+
+// parseLabel pulls a label out of either a JSON body or a form field.
+// Empty body is allowed — the entry just gets no label.
+func parseLabel(r *http.Request) string {
+	var body struct {
+		Label string `json:"label"`
+	}
+	decodeJSONOrForm(r, &body, func() { body.Label = r.PostFormValue("label") })
+	return body.Label
 }
 
 // parseLabelAndTTL extracts {label, ttl_seconds} from the JSON body (or form),
 // converting ttl_seconds to a Duration. Missing/zero/negative TTL = no expiry.
 // TTL is capped at one year as a sanity bound — the admin can always extend.
 func parseLabelAndTTL(r *http.Request) (string, time.Duration) {
-	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
-		var body struct {
-			Label      string `json:"label"`
-			TTLSeconds int64  `json:"ttl_seconds"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		return body.Label, ttlFromSeconds(body.TTLSeconds)
+	var body struct {
+		Label      string `json:"label"`
+		TTLSeconds int64  `json:"ttl_seconds"`
 	}
-	_ = r.ParseForm()
-	ttlSec, _ := strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
-	return r.PostFormValue("label"), ttlFromSeconds(ttlSec)
+	decodeJSONOrForm(r, &body, func() {
+		body.Label = r.PostFormValue("label")
+		body.TTLSeconds, _ = strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
+	})
+	return body.Label, ttlFromSeconds(body.TTLSeconds)
 }
 
 // parseTTL extracts {ttl_seconds} from the JSON body (or form).
 func parseTTL(r *http.Request) time.Duration {
-	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
-		var body struct {
-			TTLSeconds int64 `json:"ttl_seconds"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		return ttlFromSeconds(body.TTLSeconds)
+	var body struct {
+		TTLSeconds int64 `json:"ttl_seconds"`
 	}
-	_ = r.ParseForm()
-	ttlSec, _ := strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
-	return ttlFromSeconds(ttlSec)
+	decodeJSONOrForm(r, &body, func() {
+		body.TTLSeconds, _ = strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
+	})
+	return ttlFromSeconds(body.TTLSeconds)
 }
 
 const maxConnPassTTL = 366 * 24 * time.Hour

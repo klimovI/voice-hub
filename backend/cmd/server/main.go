@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -51,15 +52,9 @@ func main() {
 	// a volume. Locally it just falls in the working directory.
 	dataDir := "./data"
 
-	// Auto-bootstrap server-only secrets. Persisted across restarts via the
-	// data dir volume; if wiped, all sessions invalidate (acceptable).
-	sessionSecret, err := auth.LoadOrCreateSecret(dataDir, "session.secret", 32)
+	sessionSecret, turnSecret, err := loadSecrets(dataDir)
 	if err != nil {
-		log.Fatalf("session secret: %v", err)
-	}
-	turnSecret, err := auth.LoadOrCreateSecret(dataDir, "turn.secret", 32)
-	if err != nil {
-		log.Fatalf("turn secret: %v", err)
+		log.Fatalf("%v", err)
 	}
 	cfg.SessionSecret = sessionSecret
 	cfg.TurnSharedSecret = hex.EncodeToString(turnSecret)
@@ -81,43 +76,13 @@ func main() {
 	stunURL := "stun:" + cfg.PublicIP + ":3478"
 	turnURL := "turn:" + cfg.PublicIP + ":3478?transport=udp"
 
-	roomSlugs := []string{"room1", "room2", "room3"}
-	rooms := make(map[string]*sfu.Room, len(roomSlugs))
-	presenceHub := presence.New(func() map[string]presence.RoomLister {
-		out := make(map[string]presence.RoomLister, len(rooms))
-		for slug, room := range rooms {
-			out[slug] = room
-		}
-		return out
-	})
+	rooms, presenceHub, err := buildRooms([]string{"room1", "room2", "room3"}, cfg, stunURL)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	defer presenceCancel()
 	go presenceHub.Run(presenceCtx)
-	for _, slug := range roomSlugs {
-		rm, err := sfu.NewRoom(sfu.Config{
-			ICEServers:    []webrtc.ICEServer{{URLs: []string{stunURL}}},
-			NAT1To1IPs:    []string{cfg.PublicIP},
-			UDPPortMin:    cfg.UDPPortMin,
-			UDPPortMax:    cfg.UDPPortMax,
-			AppHostname:   cfg.AppHostname,
-			OnPeerJoined:  func(p protocol.PeerInfo) { presenceHub.PeerJoined(slug, p) },
-			OnPeerLeft:    func(id string) { presenceHub.PeerLeft(slug, id) },
-			OnPeerUpdated: func(p protocol.PeerInfo) { presenceHub.PeerUpdated(slug, p) },
-		})
-		if err != nil {
-			log.Fatalf("sfu init %q: %v", slug, err)
-		}
-		rooms[slug] = rm
-	}
-
-	resolveRoom := func(w http.ResponseWriter, req *http.Request) (*sfu.Room, bool) {
-		rm, ok := rooms[req.PathValue("roomID")]
-		if !ok {
-			http.NotFound(w, req)
-			return nil, false
-		}
-		return rm, true
-	}
 
 	turnServer, err := turnsrv.Start(turnsrv.Config{
 		Realm:        cfg.TurnRealm,
@@ -133,6 +98,130 @@ func main() {
 
 	version := handler.FrontendVersion(cfg.WebDir)
 	log.Printf("frontend version: %s", version)
+
+	mux := wireRoutes(cfg, adminVer, version, connPass, wsRegistry, limiter, rooms, presenceHub, stunURL, turnURL)
+
+	server := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           middleware.AccessLog(cfg.TrustedProxies, mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
+		// WebSocket and per-request timeouts would terminate it. Auth gates
+		// every other endpoint.
+		IdleTimeout: 120 * time.Second,
+	}
+
+	log.Printf("auth enabled (cookie_secure=%v, connpass_entries=%d)", cfg.CookieSecure, len(connPass.Status().Entries))
+	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
+
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			srvErr <- err
+		}
+	}()
+
+	// pprof off by default: heap dumps expose in-memory secrets (session secret, TURN secret, admin password).
+	if v, _ := strconv.ParseBool(os.Getenv("APP_PPROF")); v {
+		go func() {
+			log.Printf("pprof: listening on 127.0.0.1:6060")
+			srv := &http.Server{
+				Addr:              "127.0.0.1:6060",
+				Handler:           http.DefaultServeMux,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("pprof: %v", err)
+			}
+		}()
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-srvErr:
+		log.Fatalf("http server: %v", err)
+	case sig := <-stop:
+		log.Printf("shutdown: received %s, draining...", sig)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: http: %v", err)
+	}
+	for _, rm := range rooms {
+		rm.Close()
+	}
+	if err := turnServer.Close(); err != nil {
+		log.Printf("shutdown: turn: %v", err)
+	}
+	log.Printf("shutdown: done")
+}
+
+// loadSecrets auto-bootstraps and persists the session and TURN secrets.
+// Wiping the data dir invalidates all sessions, which is acceptable.
+func loadSecrets(dataDir string) (sessionSecret, turnSecret []byte, err error) {
+	sessionSecret, err = auth.LoadOrCreateSecret(dataDir, "session.secret", 32)
+	if err != nil {
+		return nil, nil, fmt.Errorf("session secret: %w", err)
+	}
+	turnSecret, err = auth.LoadOrCreateSecret(dataDir, "turn.secret", 32)
+	if err != nil {
+		return nil, nil, fmt.Errorf("turn secret: %w", err)
+	}
+	return sessionSecret, turnSecret, nil
+}
+
+// buildRooms creates the SFU rooms and the presence hub that fans out peer events.
+func buildRooms(slugs []string, cfg config.Config, stunURL string) (map[string]*sfu.Room, *presence.Hub, error) {
+	rooms := make(map[string]*sfu.Room, len(slugs))
+	hub := presence.New(func() map[string]presence.RoomLister {
+		out := make(map[string]presence.RoomLister, len(rooms))
+		for slug, room := range rooms {
+			out[slug] = room
+		}
+		return out
+	})
+	for _, slug := range slugs {
+		rm, err := sfu.NewRoom(sfu.Config{
+			ICEServers:    []webrtc.ICEServer{{URLs: []string{stunURL}}},
+			NAT1To1IPs:    []string{cfg.PublicIP},
+			UDPPortMin:    cfg.UDPPortMin,
+			UDPPortMax:    cfg.UDPPortMax,
+			AppHostname:   cfg.AppHostname,
+			OnPeerJoined:  func(p protocol.PeerInfo) { hub.PeerJoined(slug, p) },
+			OnPeerLeft:    func(id string) { hub.PeerLeft(slug, id) },
+			OnPeerUpdated: func(p protocol.PeerInfo) { hub.PeerUpdated(slug, p) },
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("sfu init %q: %w", slug, err)
+		}
+		rooms[slug] = rm
+	}
+	return rooms, hub, nil
+}
+
+// wireRoutes registers all HTTP routes on a new ServeMux and returns it.
+func wireRoutes(
+	cfg config.Config,
+	adminVer, version string,
+	connPass *auth.ConnPassStore,
+	wsRegistry *auth.WSRegistry,
+	limiter *auth.AuthLimiter,
+	rooms map[string]*sfu.Room,
+	presenceHub *presence.Hub,
+	stunURL, turnURL string,
+) *http.ServeMux {
+	resolveRoom := func(w http.ResponseWriter, req *http.Request) (*sfu.Room, bool) {
+		rm, ok := rooms[req.PathValue("roomID")]
+		if !ok {
+			http.NotFound(w, req)
+			return nil, false
+		}
+		return rm, true
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", middleware.SecurityHeaders(middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir)))))
@@ -171,69 +260,5 @@ func main() {
 	mux.Handle("POST /api/admin/connection-passwords/{id}/ttl", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassSetTTL(connPass)))
 	mux.Handle("DELETE /api/admin/connection-passwords/{id}", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
 	mux.Handle("POST /api/admin/connection-passwords/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
-
-	server := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           middleware.AccessLog(cfg.TrustedProxies, mux),
-		ReadHeaderTimeout: 10 * time.Second,
-		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
-		// WebSocket and per-request timeouts would terminate it. Auth gates
-		// every other endpoint.
-		IdleTimeout: 120 * time.Second,
-	}
-
-	log.Printf("auth enabled (cookie_secure=%v, connpass_entries=%d)", cfg.CookieSecure, len(connPass.Status().Entries))
-	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
-
-	srvErr := make(chan error, 1)
-	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			srvErr <- err
-		}
-	}()
-
-	// pprof on a localhost-only listener, gated by APP_PPROF=1. Off in
-	// prod by default: a heap dump trivially exposes in-memory secrets
-	// (session secret, TURN secret, admin password) to anyone with
-	// shell/exec access on the box via one curl. The handlers register
-	// on http.DefaultServeMux at import time but are only reachable
-	// once this listener starts. Runtime allocation sampling has the
-	// same overhead regardless of this gate (default
-	// runtime.MemProfileRate=512KB applies process-wide).
-	if v, _ := strconv.ParseBool(os.Getenv("APP_PPROF")); v {
-		go func() {
-			log.Printf("pprof: listening on 127.0.0.1:6060")
-			srv := &http.Server{
-				Addr:              "127.0.0.1:6060",
-				Handler:           http.DefaultServeMux,
-				ReadHeaderTimeout: 5 * time.Second,
-			}
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("pprof: %v", err)
-			}
-		}()
-	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case err := <-srvErr:
-		log.Fatalf("http server: %v", err)
-	case sig := <-stop:
-		log.Printf("shutdown: received %s, draining...", sig)
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: http: %v", err)
-	}
-	for _, rm := range rooms {
-		rm.Close()
-	}
-	if err := turnServer.Close(); err != nil {
-		log.Printf("shutdown: turn: %v", err)
-	}
-	log.Printf("shutdown: done")
+	return mux
 }

@@ -43,6 +43,12 @@ var ErrEntryNotFound = errors.New("connpass: entry not found")
 // ErrTooManyEntries is returned by Create when MaxConnPassEntries is already reached.
 var ErrTooManyEntries = errors.New("connpass: too many entries")
 
+// connPassDummyHash is burned on no-match so timing doesn't reveal "no entries" vs "wrong password".
+var connPassDummyHash = func() string {
+	h, _ := hashArgon2id("dummy-for-constant-time-verify")
+	return h
+}()
+
 // connPassEntry is the on-disk representation of one connection password.
 // Plaintext is never persisted.
 type connPassEntry struct {
@@ -183,10 +189,9 @@ func (s *ConnPassStore) EntryGeneration(id string) (uint64, bool) {
 	return 0, false
 }
 
-// Verify checks whether plain matches any stored, non-expired entry. On match
-// returns the entry id and its current generation. Iterates every entry to
-// keep timing uniform across the entry set, but ignores expired entries so
-// login attempts against them fail closed.
+// Verify checks whether plain matches any stored, non-expired entry. Returns the
+// entry id and generation on first match. On no-match, burns one argon2id against
+// connPassDummyHash so attackers cannot distinguish "wrong password" from "no entries" via timing.
 func (s *ConnPassStore) Verify(plain string) (string, uint64, bool) {
 	now := time.Now().UTC()
 	s.mu.RLock()
@@ -194,20 +199,16 @@ func (s *ConnPassStore) Verify(plain string) (string, uint64, bool) {
 	copy(entries, s.state.Entries)
 	s.mu.RUnlock()
 
-	var matchedID string
-	var matchedGen uint64
-	matched := false
 	for _, e := range entries {
 		if e.IsExpired(now) {
 			continue
 		}
-		if verifyArgon2id(e.Hash, plain) && !matched {
-			matchedID = e.ID
-			matchedGen = e.Generation
-			matched = true
+		if verifyArgon2id(e.Hash, plain) {
+			return e.ID, e.Generation, true
 		}
 	}
-	return matchedID, matchedGen, matched
+	_ = verifyArgon2id(connPassDummyHash, plain)
+	return "", 0, false
 }
 
 // Create generates a new connection password entry with the given label and
@@ -252,13 +253,7 @@ func (s *ConnPassStore) Create(label string, ttl time.Duration) (ConnPassEntrySt
 	return statusOf(entry, now), plain, nil
 }
 
-// SetTTL updates the expiry of the named entry.
-//   - ttl == 0 clears any expiry (entry never expires)
-//   - ttl  > 0 sets ExpiresAt = now + ttl
-//   - ttl  < 0 marks the entry as immediately expired (admin can renew later)
-//
-// Use this to extend, renew, or disable an entry rather than rotating its
-// plaintext.
+// SetTTL updates the expiry without rotating the plaintext (extend, renew, or disable temporarily).
 func (s *ConnPassStore) SetTTL(id string, ttl time.Duration) (ConnPassEntryStatus, error) {
 	now := time.Now().UTC()
 	s.mu.Lock()
