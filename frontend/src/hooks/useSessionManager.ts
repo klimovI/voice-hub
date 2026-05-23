@@ -15,7 +15,6 @@ import { useAudioEngine } from './useAudioEngine';
 import { preloadEngine, isEngineReady } from '../audio/engine';
 import { useSFU } from './useSFU';
 import {
-  clearLegacyStorage,
   loadOrCreateDisplayName,
   saveDisplayName,
   consumeRejoinFlag,
@@ -487,7 +486,6 @@ export function useSessionManager({
   // ---- Config load + auto-rejoin on mount ----
 
   useEffect(() => {
-    clearLegacyStorage();
     const shouldRejoin = consumeRejoinFlag();
     loadAppConfig()
       .then((cfg) => {

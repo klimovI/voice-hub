@@ -6,20 +6,6 @@ import type { EngineKind } from '../types';
 import { ENGINE_IDS } from '../audio/engine';
 import { isRoomSlug, DEFAULT_ROOM_SLUG, type RoomSlug } from '../rooms';
 
-// Legacy key, no longer written. We migrate it away on startup so users who
-// reloaded while deafened don't get stuck with output muted forever (the
-// dedicated mute button was removed in 143d849; only deafen toggles it now,
-// so persisting it independently created an orphan-state trap).
-const LEGACY_OUTPUT_MUTED_KEY = 'voice-hub.output-muted';
-
-export function migrateLegacyKeys(): void {
-  try {
-    localStorage.removeItem(LEGACY_OUTPUT_MUTED_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
 export const KEYS = {
   // Audio / engine
   outputVolume: 'voice-hub.output-volume',
@@ -297,16 +283,3 @@ export function consumeRejoinFlag(): boolean {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Migration: remove keys written by old code versions
-// ---------------------------------------------------------------------------
-
-export function clearLegacyStorage(): void {
-  localStorage.removeItem('voice-hub.mic-mode');
-  localStorage.removeItem('voice-hub.rnnoise-enabled');
-  localStorage.removeItem('voice-hub.rnnoise-mix');
-  localStorage.removeItem('voice-hub.gate-enabled');
-  localStorage.removeItem('voice-hub.gate-threshold');
-  localStorage.removeItem('voice-hub.gate-attack');
-  localStorage.removeItem('voice-hub.gate-release');
-}

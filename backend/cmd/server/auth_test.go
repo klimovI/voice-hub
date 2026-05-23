@@ -113,26 +113,6 @@ func TestRequireAdmin_RejectsStaleAdminVersion(t *testing.T) {
 	}
 }
 
-// Legacy admin cookies issued before the AdminVersion field existed have an
-// empty fingerprint. They must also be rejected after the rollout, otherwise
-// the migration would silently grandfather every pre-rollout admin cookie.
-func TestRequireAdmin_RejectsLegacyEmptyAdminVersion(t *testing.T) {
-	secret := newTestSecret()
-	srv := httptest.NewServer(middleware.RequireAdmin(secret, "av-current", adminHandler()))
-	defer srv.Close()
-
-	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
-	req.AddCookie(cookieFor(secret, auth.RoleAdmin, 0))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("legacy admin cookie: got %d, want 403", resp.StatusCode)
-	}
-}
-
 func TestRequireAdmin_RejectsForgedCookie(t *testing.T) {
 	secret := newTestSecret()
 	srv := httptest.NewServer(middleware.RequireAdmin(secret, "av-test", adminHandler()))
@@ -286,24 +266,6 @@ func TestAuthenticated_RevokedEntryRejectsUser(t *testing.T) {
 	}
 }
 
-// A user cookie with empty EntryID (legacy four-part format) must be rejected:
-// no entry will match an empty id, so the user-session branch of Authenticated
-// must return false. Otherwise legacy pre-rollout user cookies would silently
-// stay valid against a freshly-created entry.
-func TestAuthenticated_LegacyUserCookieRejected(t *testing.T) {
-	secret := newTestSecret()
-	connPass := mustEmptyStore(t)
-	if _, _, err := connPass.Create("test", 0); err != nil {
-		t.Fatal(err)
-	}
-	cookie := cookieFor(secret, auth.RoleUser, 1) // empty entry id
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(cookie)
-	if auth.Authenticated(secret, connPass, "av-test", req) {
-		t.Fatal("legacy user cookie accepted by Authenticated")
-	}
-}
-
 func TestAuthenticated_AdminUnaffectedByRotate(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
@@ -335,20 +297,6 @@ func TestAuthenticated_StaleAdminVersionRejected(t *testing.T) {
 	req.AddCookie(cookie)
 	if auth.Authenticated(secret, connPass, "av-current", req) {
 		t.Fatal("stale admin cookie accepted by Authenticated")
-	}
-}
-
-// Legacy admin cookies (issued before AdminVersion existed) carry an empty
-// AdminVersion. Once a real adminVer is configured they must be rejected too.
-func TestAuthenticated_LegacyAdminCookieRejected(t *testing.T) {
-	secret := newTestSecret()
-	connPass := mustEmptyStore(t)
-	cookie := cookieFor(secret, auth.RoleAdmin, 0)
-
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(cookie)
-	if auth.Authenticated(secret, connPass, "av-current", req) {
-		t.Fatal("legacy admin cookie accepted by Authenticated")
 	}
 }
 

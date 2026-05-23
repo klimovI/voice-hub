@@ -70,15 +70,6 @@ type connPassFileFormat struct {
 	Entries []connPassEntry `json:"entries"`
 }
 
-// legacyConnPassFile is the pre-multi-entry single-hash format. Used only for
-// one-shot migration on first load after upgrade.
-type legacyConnPassFile struct {
-	Hash       string    `json:"hash"`
-	Generation uint64    `json:"generation"`
-	RotatedAt  time.Time `json:"rotated_at"`
-	Present    bool      `json:"present"`
-}
-
 // ConnPassStore guards the connection-password state and persists it to a JSON file.
 // Safe for concurrent use.
 type ConnPassStore struct {
@@ -89,7 +80,6 @@ type ConnPassStore struct {
 }
 
 // LoadConnPassStore reads connection-password.json from dir or initializes empty state.
-// If a pre-multi-entry file is present, migrates it to one entry labeled "main".
 func LoadConnPassStore(dir string) (*ConnPassStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -102,35 +92,8 @@ func LoadConnPassStore(dir string) (*ConnPassStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", connPassFile, err)
 	}
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(data, &probe); err != nil {
+	if err := json.Unmarshal(data, &s.state); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", connPassFile, err)
-	}
-	if _, hasEntries := probe["entries"]; hasEntries {
-		if err := json.Unmarshal(data, &s.state); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", connPassFile, err)
-		}
-		return s, nil
-	}
-	var legacy legacyConnPassFile
-	if err := json.Unmarshal(data, &legacy); err != nil {
-		return nil, fmt.Errorf("parse legacy %s: %w", connPassFile, err)
-	}
-	if legacy.Present && legacy.Hash != "" {
-		id, err := newEntryID()
-		if err != nil {
-			return nil, err
-		}
-		s.state.Entries = append(s.state.Entries, connPassEntry{
-			ID:         id,
-			Label:      "main",
-			Hash:       legacy.Hash,
-			Generation: legacy.Generation,
-			CreatedAt:  legacy.RotatedAt,
-		})
-	}
-	if err := s.persist(s.state); err != nil {
-		return nil, fmt.Errorf("migrate %s: %w", connPassFile, err)
 	}
 	return s, nil
 }

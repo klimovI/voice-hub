@@ -23,8 +23,8 @@ const (
 type Session struct {
 	Role         Role
 	Generation   uint64 // ConnPass entry generation at issue time; user sessions invalidate when this drifts.
-	AdminVersion string // Admin-password fingerprint at issue time; empty for user sessions and legacy cookies.
-	EntryID      string // ConnPass entry id at issue time; empty for admin sessions and legacy user cookies.
+	AdminVersion string // Admin-password fingerprint at issue time; empty for user sessions.
+	EntryID      string // ConnPass entry id at issue time; empty for admin sessions.
 	Expires      time.Time
 }
 
@@ -59,11 +59,8 @@ func Decode(secret []byte, value string) (Session, error) {
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return Session{}, errors.New("bad signature")
 	}
-	// 3-part: pre-AdminVersion legacy. 4-part: pre-EntryID legacy. 5-part: current.
-	// Legacy user cookies decode with EntryID=="" — Authenticated rejects them
-	// because no entry will match an empty id.
 	parts := strings.SplitN(payload, ":", 5)
-	if len(parts) < 3 || len(parts) > 5 {
+	if len(parts) != 5 {
 		return Session{}, errors.New("malformed payload")
 	}
 	expUnix, err := strconv.ParseInt(parts[0], 10, 64)
@@ -78,13 +75,7 @@ func Decode(secret []byte, value string) (Session, error) {
 	if err != nil {
 		return Session{}, errors.New("bad generation")
 	}
-	var adminVer, entryID string
-	if len(parts) >= 4 {
-		adminVer = parts[3]
-	}
-	if len(parts) == 5 {
-		entryID = parts[4]
-	}
+	adminVer, entryID := parts[3], parts[4]
 	expires := time.Unix(expUnix, 0)
 	if time.Now().After(expires) {
 		return Session{}, errors.New("expired")

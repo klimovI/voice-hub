@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,57 +30,6 @@ func TestSessionRoundTrip(t *testing.T) {
 		if sess.EntryID != "entry-1" {
 			t.Errorf("entry id: got %q want %q", sess.EntryID, "entry-1")
 		}
-	}
-}
-
-// Pre-EntryID cookies have only four payload segments. Decode must accept them
-// with EntryID=="" so existing admin sessions survive the field rollout. The
-// caller (Authenticated) rejects four-part user cookies because no entry will
-// match an empty id; admin sessions stay valid because their AdminVersion check
-// is independent of EntryID.
-func TestDecodeAcceptsFourPartCookie(t *testing.T) {
-	secret := []byte("0123456789abcdef0123456789abcdef")
-	exp := time.Now().Add(time.Hour).Unix()
-	payload := strconv.FormatInt(exp, 10) + ":admin:0:av-xyz"
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(payload))
-	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	token := payload + "." + sig
-
-	sess, err := Decode(secret, token)
-	if err != nil {
-		t.Fatalf("decode four-part: %v", err)
-	}
-	if sess.Role != RoleAdmin || sess.AdminVersion != "av-xyz" {
-		t.Errorf("decoded fields wrong: %+v", sess)
-	}
-	if sess.EntryID != "" {
-		t.Errorf("legacy EntryID should be empty, got %q", sess.EntryID)
-	}
-}
-
-// Cookies issued before the AdminVersion field existed have only three
-// payload segments. Decode must accept them with AdminVersion=="" so existing
-// user sessions survive the field rollout. RequireAdmin's separate version
-// check still rejects legacy admin cookies.
-func TestDecodeAcceptsLegacyThreePartCookie(t *testing.T) {
-	secret := []byte("0123456789abcdef0123456789abcdef")
-	exp := time.Now().Add(time.Hour).Unix()
-	payload := strconv.FormatInt(exp, 10) + ":user:7"
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(payload))
-	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	token := payload + "." + sig
-
-	sess, err := Decode(secret, token)
-	if err != nil {
-		t.Fatalf("decode legacy: %v", err)
-	}
-	if sess.Role != RoleUser || sess.Generation != 7 {
-		t.Errorf("decoded fields wrong: %+v", sess)
-	}
-	if sess.AdminVersion != "" {
-		t.Errorf("legacy AdminVersion should be empty, got %q", sess.AdminVersion)
 	}
 }
 
