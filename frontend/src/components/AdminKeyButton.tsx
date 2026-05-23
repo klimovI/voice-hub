@@ -79,7 +79,9 @@ export function AdminKeyButton() {
   );
 
   const handleRotate = useCallback(
-    async (id: string) => {
+    async (id: string, label: string) => {
+      const what = label ? `«${label}»` : 'этот пароль';
+      if (!window.confirm(`Перегенерировать ${what}? Старый пароль перестанет работать.`)) return;
       setBusy(true);
       setError(null);
       try {
@@ -197,7 +199,7 @@ export function AdminKeyButton() {
                         key={entry.id}
                         entry={entry}
                         busy={busy}
-                        onRotate={(id) => void handleRotate(id)}
+                        onRotate={(id, label) => void handleRotate(id, label)}
                         onRename={(id, label) => void handleRename(id, label)}
                         onRevoke={(id, label) => void handleRevoke(id, label)}
                         onSetTTL={(id, ttlSeconds) => void handleSetTTL(id, ttlSeconds)}

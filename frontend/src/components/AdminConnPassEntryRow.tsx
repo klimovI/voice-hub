@@ -41,7 +41,7 @@ function relativeTime(iso: string): string {
 interface Props {
   entry: ConnPassEntry;
   busy: boolean;
-  onRotate: (id: string) => void;
+  onRotate: (id: string, label: string) => void;
   onRename: (id: string, label: string) => void;
   onRevoke: (id: string, label: string) => void;
   onSetTTL: (id: string, ttlSeconds: number) => void;
@@ -129,7 +129,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
           </button>
           <button
             type="button"
-            onClick={() => onRotate(entry.id)}
+            onClick={() => onRotate(entry.id, entry.label)}
             disabled={busy}
             className="p-1.5 text-muted-2 hover:text-accent hover:bg-[rgba(255,255,255,0.04)]"
             title="Перегенерировать"
