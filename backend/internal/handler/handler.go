@@ -8,11 +8,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"voice-hub/backend/internal/auth"
@@ -48,12 +51,25 @@ type VersionResponse struct {
 	Version string `json:"version"`
 }
 
-// RotateResponse is the JSON body for POST /api/admin/connection-password/rotate.
-type RotateResponse struct {
+// ConnPassPlaintextResponse is the JSON body for POST endpoints that mint or
+// rotate a connection-password entry. The plaintext is shown once and discarded.
+type ConnPassPlaintextResponse struct {
 	Host       string    `json:"host"`
+	ID         string    `json:"id"`
+	Label      string    `json:"label"`
 	Password   string    `json:"password"`
 	Generation uint64    `json:"generation"`
-	RotatedAt  time.Time `json:"rotated_at"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ConnPassCreateRequest is the JSON body for POST /api/admin/connection-passwords.
+type ConnPassCreateRequest struct {
+	Label string `json:"label"`
+}
+
+// ConnPassRenameRequest is the JSON body for POST /api/admin/connection-passwords/{id}/rename.
+type ConnPassRenameRequest struct {
+	Label string `json:"label"`
 }
 
 // FrontendVersion fingerprints the deployed frontend by hashing index.html.
@@ -135,15 +151,15 @@ func Login(cfg LoginConfig) http.HandlerFunc {
 		// Admin first; constant-time compare to avoid timing leak on length.
 		if subtle.ConstantTimeCompare([]byte(pass), wantAdmin) == 1 {
 			cfg.Limiter.Success(ip)
-			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleAdmin, 0, cfg.AdminVer)
+			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleAdmin, 0, cfg.AdminVer, "")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
-		// Then connection password.
-		if cfg.ConnPass.Verify(pass) {
+		// Then connection password — try every active entry.
+		if entryID, gen, ok := cfg.ConnPass.Verify(pass); ok {
 			cfg.Limiter.Success(ip)
-			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleUser, cfg.ConnPass.Generation(), "")
+			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleUser, gen, "", entryID)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -213,37 +229,182 @@ func ConnPassStatus(connPass *auth.ConnPassStore) http.HandlerFunc {
 	}
 }
 
-func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.HandlerFunc {
+// ConnPassCreate handles POST /api/admin/connection-passwords.
+// Adds a new entry with an optional label and TTL and returns the plaintext once.
+func ConnPassCreate(appHostname string, connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		plain, err := connPass.Rotate()
+		label, ttl := parseLabelAndTTL(r)
+		entry, plain, err := connPass.Create(label, ttl)
 		if err != nil {
-			log.Printf("connpass rotate: %v", err)
-			http.Error(w, "rotate failed", http.StatusInternalServerError)
+			if errors.Is(err, auth.ErrTooManyEntries) {
+				http.Error(w, "too many entries", http.StatusConflict)
+				return
+			}
+			log.Printf("connpass create: %v", err)
+			http.Error(w, "create failed", http.StatusInternalServerError)
 			return
 		}
-		status := connPass.Status()
-		resp := RotateResponse{
-			Host:       appHostname,
-			Password:   plain,
-			Generation: status.Generation,
-			RotatedAt:  status.RotatedAt,
+		writePlaintextResponse(w, appHostname, entry, plain, "connpass create")
+	}
+}
+
+// ConnPassSetTTL handles POST /api/admin/connection-passwords/{id}/ttl.
+// Body: {"ttl_seconds": N} where N=0 clears expiry, N>0 sets ExpiresAt=now+N.
+func ConnPassSetTTL(connPass *auth.ConnPassStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ttl := parseTTL(r)
+		entry, err := connPass.SetTTL(id, ttl)
+		if err != nil {
+			if errors.Is(err, auth.ErrEntryNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("connpass set ttl: %v", err)
+			http.Error(w, "set ttl failed", http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Printf("connpass rotate: encode: %v", err)
+		if err := json.NewEncoder(w).Encode(entry); err != nil {
+			log.Printf("connpass set ttl: encode: %v", err)
 		}
 	}
 }
 
+// ConnPassRotate handles POST /api/admin/connection-passwords/{id}/rotate.
+// Replaces the plaintext of the named entry, invalidating sessions issued
+// against the old one.
+func ConnPassRotate(appHostname string, connPass *auth.ConnPassStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		entry, plain, err := connPass.Rotate(id)
+		if err != nil {
+			if errors.Is(err, auth.ErrEntryNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("connpass rotate: %v", err)
+			http.Error(w, "rotate failed", http.StatusInternalServerError)
+			return
+		}
+		writePlaintextResponse(w, appHostname, entry, plain, "connpass rotate")
+	}
+}
+
+// ConnPassRevoke handles DELETE /api/admin/connection-passwords/{id}.
 func ConnPassRevoke(connPass *auth.ConnPassStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := connPass.Revoke(); err != nil {
+		id := r.PathValue("id")
+		if err := connPass.Revoke(id); err != nil {
+			if errors.Is(err, auth.ErrEntryNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
 			log.Printf("connpass revoke: %v", err)
 			http.Error(w, "revoke failed", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ConnPassRename handles POST /api/admin/connection-passwords/{id}/rename.
+func ConnPassRename(connPass *auth.ConnPassStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		label := parseLabel(r)
+		if err := connPass.Rename(id, label); err != nil {
+			if errors.Is(err, auth.ErrEntryNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("connpass rename: %v", err)
+			http.Error(w, "rename failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// parseLabel pulls a label out of either a JSON body ({"label":"..."}) or a
+// form field. Empty body is allowed — the entry just gets no label.
+func parseLabel(r *http.Request) string {
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
+		var body struct {
+			Label string `json:"label"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return body.Label
+	}
+	_ = r.ParseForm()
+	return r.PostFormValue("label")
+}
+
+// parseLabelAndTTL extracts {label, ttl_seconds} from the JSON body (or form),
+// converting ttl_seconds to a Duration. Missing/zero/negative TTL = no expiry.
+// TTL is capped at one year as a sanity bound — the admin can always extend.
+func parseLabelAndTTL(r *http.Request) (string, time.Duration) {
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
+		var body struct {
+			Label      string `json:"label"`
+			TTLSeconds int64  `json:"ttl_seconds"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return body.Label, ttlFromSeconds(body.TTLSeconds)
+	}
+	_ = r.ParseForm()
+	ttlSec, _ := strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
+	return r.PostFormValue("label"), ttlFromSeconds(ttlSec)
+}
+
+// parseTTL extracts {ttl_seconds} from the JSON body (or form).
+func parseTTL(r *http.Request) time.Duration {
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "application/json") {
+		var body struct {
+			TTLSeconds int64 `json:"ttl_seconds"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return ttlFromSeconds(body.TTLSeconds)
+	}
+	_ = r.ParseForm()
+	ttlSec, _ := strconv.ParseInt(r.PostFormValue("ttl_seconds"), 10, 64)
+	return ttlFromSeconds(ttlSec)
+}
+
+const maxConnPassTTL = 366 * 24 * time.Hour
+
+// ttlFromSeconds maps a JSON ttl_seconds value to a Duration with three
+// distinct states understood by ConnPassStore.SetTTL / Create:
+//   - s == 0 → 0          (never expires)
+//   - s  > 0 → s*Second   (capped at maxConnPassTTL)
+//   - s  < 0 → -1*Second  (disable now — entry kept on disk, login blocked)
+func ttlFromSeconds(s int64) time.Duration {
+	if s == 0 {
+		return 0
+	}
+	if s < 0 {
+		return -time.Second
+	}
+	d := time.Duration(s) * time.Second
+	if d > maxConnPassTTL {
+		return maxConnPassTTL
+	}
+	return d
+}
+
+func writePlaintextResponse(w http.ResponseWriter, host string, entry auth.ConnPassEntryStatus, plain, logTag string) {
+	resp := ConnPassPlaintextResponse{
+		Host:       host,
+		ID:         entry.ID,
+		Label:      entry.Label,
+		Password:   plain,
+		Generation: entry.Generation,
+		CreatedAt:  entry.CreatedAt,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("%s: encode: %v", logTag, err)
 	}
 }
 

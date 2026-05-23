@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,14 +28,49 @@ const (
 	argonSaltLen        = 16
 
 	connPassFile = "connection-password.json"
+
+	// MaxConnPassEntries caps the number of simultaneous connection passwords.
+	MaxConnPassEntries = 16
+	// MaxConnPassLabelLen caps user-supplied label length to keep the admin UI sane.
+	MaxConnPassLabelLen = 64
+
+	connPassFileVersion = 2
 )
 
-// connPassFileFormat is the on-disk representation. Plaintext is never persisted.
+// ErrEntryNotFound is returned when an operation targets an unknown entry id.
+var ErrEntryNotFound = errors.New("connpass: entry not found")
+
+// ErrTooManyEntries is returned by Create when MaxConnPassEntries is already reached.
+var ErrTooManyEntries = errors.New("connpass: too many entries")
+
+// connPassEntry is the on-disk representation of one connection password.
+// Plaintext is never persisted.
+type connPassEntry struct {
+	ID         string    `json:"id"`
+	Label      string    `json:"label"`
+	Hash       string    `json:"hash"` // PHC-like: "argon2id$t=...$m=...$p=...$<salt>$<key>"
+	Generation uint64    `json:"generation"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at,omitzero"` // zero value = never expires
+}
+
+// IsExpired reports whether the entry has an expiry that is at or before now.
+func (e connPassEntry) IsExpired(now time.Time) bool {
+	return !e.ExpiresAt.IsZero() && !now.Before(e.ExpiresAt)
+}
+
 type connPassFileFormat struct {
-	Hash       string    `json:"hash"`       // PHC-like: "argon2id$t=...$m=...$p=...$<salt>$<key>"
-	Generation uint64    `json:"generation"` // bumps on each rotate/revoke
-	RotatedAt  time.Time `json:"rotated_at"` // zero when revoked
-	Present    bool      `json:"present"`    // false after revoke (admin can still log in)
+	Version uint            `json:"version"`
+	Entries []connPassEntry `json:"entries"`
+}
+
+// legacyConnPassFile is the pre-multi-entry single-hash format. Used only for
+// one-shot migration on first load after upgrade.
+type legacyConnPassFile struct {
+	Hash       string    `json:"hash"`
+	Generation uint64    `json:"generation"`
+	RotatedAt  time.Time `json:"rotated_at"`
+	Present    bool      `json:"present"`
 }
 
 // ConnPassStore guards the connection-password state and persists it to a JSON file.
@@ -47,11 +83,12 @@ type ConnPassStore struct {
 }
 
 // LoadConnPassStore reads connection-password.json from dir or initializes empty state.
+// If a pre-multi-entry file is present, migrates it to one entry labeled "main".
 func LoadConnPassStore(dir string) (*ConnPassStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	s := &ConnPassStore{path: filepath.Join(dir, connPassFile)}
+	s := &ConnPassStore{path: filepath.Join(dir, connPassFile), state: connPassFileFormat{Version: connPassFileVersion}}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -59,86 +96,308 @@ func LoadConnPassStore(dir string) (*ConnPassStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", connPassFile, err)
 	}
-	if err := json.Unmarshal(data, &s.state); err != nil {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", connPassFile, err)
+	}
+	if _, hasEntries := probe["entries"]; hasEntries {
+		if err := json.Unmarshal(data, &s.state); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", connPassFile, err)
+		}
+		return s, nil
+	}
+	var legacy legacyConnPassFile
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("parse legacy %s: %w", connPassFile, err)
+	}
+	if legacy.Present && legacy.Hash != "" {
+		id, err := newEntryID()
+		if err != nil {
+			return nil, err
+		}
+		s.state.Entries = append(s.state.Entries, connPassEntry{
+			ID:         id,
+			Label:      "main",
+			Hash:       legacy.Hash,
+			Generation: legacy.Generation,
+			CreatedAt:  legacy.RotatedAt,
+		})
+	}
+	if err := s.persist(s.state); err != nil {
+		return nil, fmt.Errorf("migrate %s: %w", connPassFile, err)
 	}
 	return s, nil
 }
 
-// ConnPassStatus is a read-only snapshot for the admin UI.
-type ConnPassStatus struct {
-	Exists     bool      `json:"exists"`
+// ConnPassEntryStatus is one row of the read-only snapshot returned to the admin UI.
+type ConnPassEntryStatus struct {
+	ID         string    `json:"id"`
+	Label      string    `json:"label"`
 	Generation uint64    `json:"generation"`
-	RotatedAt  time.Time `json:"rotated_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at,omitzero"`
+	Expired    bool      `json:"expired"`
+}
+
+// ConnPassStatus is a read-only snapshot of all entries for the admin UI.
+type ConnPassStatus struct {
+	Entries []ConnPassEntryStatus `json:"entries"`
 }
 
 func (s *ConnPassStore) Status() ConnPassStatus {
+	now := time.Now().UTC()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return ConnPassStatus{
-		Exists:     s.state.Present,
-		Generation: s.state.Generation,
-		RotatedAt:  s.state.RotatedAt,
+	out := ConnPassStatus{Entries: make([]ConnPassEntryStatus, 0, len(s.state.Entries))}
+	for _, e := range s.state.Entries {
+		out.Entries = append(out.Entries, ConnPassEntryStatus{
+			ID:         e.ID,
+			Label:      e.Label,
+			Generation: e.Generation,
+			CreatedAt:  e.CreatedAt,
+			ExpiresAt:  e.ExpiresAt,
+			Expired:    e.IsExpired(now),
+		})
 	}
+	return out
 }
 
-// Generation returns the current generation counter (used for cookie validation).
-func (s *ConnPassStore) Generation() uint64 {
+// EntryGeneration returns the generation counter of the given entry. Returns
+// (0, false) if no such entry exists OR the entry has expired — so user
+// sessions tied to expired entries are rejected on the next request.
+func (s *ConnPassStore) EntryGeneration(id string) (uint64, bool) {
+	if id == "" {
+		return 0, false
+	}
+	now := time.Now().UTC()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.state.Generation
+	for _, e := range s.state.Entries {
+		if e.ID == id {
+			if e.IsExpired(now) {
+				return 0, false
+			}
+			return e.Generation, true
+		}
+	}
+	return 0, false
 }
 
-// Verify checks whether the given plaintext matches the stored connection password.
-// Returns false (without error) when none is set.
-func (s *ConnPassStore) Verify(plain string) bool {
+// Verify checks whether plain matches any stored, non-expired entry. On match
+// returns the entry id and its current generation. Iterates every entry to
+// keep timing uniform across the entry set, but ignores expired entries so
+// login attempts against them fail closed.
+func (s *ConnPassStore) Verify(plain string) (string, uint64, bool) {
+	now := time.Now().UTC()
 	s.mu.RLock()
-	hash, has := s.state.Hash, s.state.Present
+	entries := make([]connPassEntry, len(s.state.Entries))
+	copy(entries, s.state.Entries)
 	s.mu.RUnlock()
-	if !has || hash == "" {
-		return false
+
+	var matchedID string
+	var matchedGen uint64
+	matched := false
+	for _, e := range entries {
+		if e.IsExpired(now) {
+			continue
+		}
+		if verifyArgon2id(e.Hash, plain) && !matched {
+			matchedID = e.ID
+			matchedGen = e.Generation
+			matched = true
+		}
 	}
-	return verifyArgon2id(hash, plain)
+	return matchedID, matchedGen, matched
 }
 
-// Rotate generates a new connection password, persists its hash, and bumps the generation.
-// Returns the plaintext — caller must show it once and discard.
-func (s *ConnPassStore) Rotate() (string, error) {
+// Create generates a new connection password entry with the given label and
+// persists it. Returns the new entry's status plus the plaintext — caller must
+// show it once and discard. Label is trimmed; an empty label is allowed.
+// ttl=0 means the entry never expires; otherwise ExpiresAt = now + ttl.
+func (s *ConnPassStore) Create(label string, ttl time.Duration) (ConnPassEntryStatus, string, error) {
+	label = normalizeLabel(label)
 	plain, err := GenerateConnPass()
 	if err != nil {
-		return "", err
+		return ConnPassEntryStatus{}, "", err
 	}
 	hash, err := hashArgon2id(plain)
 	if err != nil {
-		return "", err
+		return ConnPassEntryStatus{}, "", err
 	}
+	id, err := newEntryID()
+	if err != nil {
+		return ConnPassEntryStatus{}, "", err
+	}
+
+	now := time.Now().UTC()
 	s.mu.Lock()
-	s.state.Hash = hash
-	s.state.Generation++
-	s.state.RotatedAt = time.Now().UTC()
-	s.state.Present = true
-	snapshot := s.state
+	if len(s.state.Entries) >= MaxConnPassEntries {
+		s.mu.Unlock()
+		return ConnPassEntryStatus{}, "", ErrTooManyEntries
+	}
+	entry := connPassEntry{
+		ID:         id,
+		Label:      label,
+		Hash:       hash,
+		Generation: 1,
+		CreatedAt:  now,
+		ExpiresAt:  expiryFor(now, ttl),
+	}
+	s.state.Entries = append(s.state.Entries, entry)
+	snapshot := cloneState(s.state)
 	s.mu.Unlock()
 	if err := s.persist(snapshot); err != nil {
-		return "", err
+		return ConnPassEntryStatus{}, "", err
 	}
-	return plain, nil
+	return statusOf(entry, now), plain, nil
 }
 
-// Revoke clears the stored connection password and bumps the generation,
-// invalidating all outstanding user sessions. Admin sessions are unaffected.
-func (s *ConnPassStore) Revoke() error {
+// SetTTL updates the expiry of the named entry.
+//   - ttl == 0 clears any expiry (entry never expires)
+//   - ttl  > 0 sets ExpiresAt = now + ttl
+//   - ttl  < 0 marks the entry as immediately expired (admin can renew later)
+//
+// Use this to extend, renew, or disable an entry rather than rotating its
+// plaintext.
+func (s *ConnPassStore) SetTTL(id string, ttl time.Duration) (ConnPassEntryStatus, error) {
+	now := time.Now().UTC()
 	s.mu.Lock()
-	s.state.Hash = ""
-	s.state.Present = false
-	s.state.Generation++
-	s.state.RotatedAt = time.Time{}
-	snapshot := s.state
+	idx := indexOf(s.state.Entries, id)
+	if idx < 0 {
+		s.mu.Unlock()
+		return ConnPassEntryStatus{}, ErrEntryNotFound
+	}
+	s.state.Entries[idx].ExpiresAt = expiryFor(now, ttl)
+	entry := s.state.Entries[idx]
+	snapshot := cloneState(s.state)
+	s.mu.Unlock()
+	if err := s.persist(snapshot); err != nil {
+		return ConnPassEntryStatus{}, err
+	}
+	return statusOf(entry, now), nil
+}
+
+// expiryFor maps a TTL to an ExpiresAt timestamp:
+//   - ttl == 0  → zero time (never expires)
+//   - ttl  > 0  → now + ttl
+//   - ttl  < 0  → in the past (entry is immediately disabled but kept on disk
+//     so the admin can renew it later)
+func expiryFor(now time.Time, ttl time.Duration) time.Time {
+	if ttl == 0 {
+		return time.Time{}
+	}
+	if ttl < 0 {
+		return now.Add(-time.Second)
+	}
+	return now.Add(ttl)
+}
+
+func statusOf(e connPassEntry, now time.Time) ConnPassEntryStatus {
+	return ConnPassEntryStatus{
+		ID:         e.ID,
+		Label:      e.Label,
+		Generation: e.Generation,
+		CreatedAt:  e.CreatedAt,
+		ExpiresAt:  e.ExpiresAt,
+		Expired:    e.IsExpired(now),
+	}
+}
+
+// Rotate replaces the plaintext of the named entry and bumps its generation,
+// invalidating any sessions that were issued against the old hash. The entry's
+// existing ExpiresAt is preserved — use SetTTL to renew expiry.
+func (s *ConnPassStore) Rotate(id string) (ConnPassEntryStatus, string, error) {
+	plain, err := GenerateConnPass()
+	if err != nil {
+		return ConnPassEntryStatus{}, "", err
+	}
+	hash, err := hashArgon2id(plain)
+	if err != nil {
+		return ConnPassEntryStatus{}, "", err
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	idx := indexOf(s.state.Entries, id)
+	if idx < 0 {
+		s.mu.Unlock()
+		return ConnPassEntryStatus{}, "", ErrEntryNotFound
+	}
+	s.state.Entries[idx].Hash = hash
+	s.state.Entries[idx].Generation++
+	s.state.Entries[idx].CreatedAt = now
+	entry := s.state.Entries[idx]
+	snapshot := cloneState(s.state)
+	s.mu.Unlock()
+	if err := s.persist(snapshot); err != nil {
+		return ConnPassEntryStatus{}, "", err
+	}
+	return statusOf(entry, now), plain, nil
+}
+
+// Revoke removes the named entry. Sessions issued against it become
+// unrecognised at the next request and are rejected.
+func (s *ConnPassStore) Revoke(id string) error {
+	s.mu.Lock()
+	idx := indexOf(s.state.Entries, id)
+	if idx < 0 {
+		s.mu.Unlock()
+		return ErrEntryNotFound
+	}
+	s.state.Entries = append(s.state.Entries[:idx], s.state.Entries[idx+1:]...)
+	snapshot := cloneState(s.state)
 	s.mu.Unlock()
 	return s.persist(snapshot)
 }
 
+// Rename updates the label of the named entry.
+func (s *ConnPassStore) Rename(id, label string) error {
+	label = normalizeLabel(label)
+	s.mu.Lock()
+	idx := indexOf(s.state.Entries, id)
+	if idx < 0 {
+		s.mu.Unlock()
+		return ErrEntryNotFound
+	}
+	s.state.Entries[idx].Label = label
+	snapshot := cloneState(s.state)
+	s.mu.Unlock()
+	return s.persist(snapshot)
+}
+
+func indexOf(entries []connPassEntry, id string) int {
+	for i, e := range entries {
+		if e.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func cloneState(s connPassFileFormat) connPassFileFormat {
+	out := connPassFileFormat{Version: connPassFileVersion, Entries: make([]connPassEntry, len(s.Entries))}
+	copy(out.Entries, s.Entries)
+	return out
+}
+
+func normalizeLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if len(label) > MaxConnPassLabelLen {
+		label = label[:MaxConnPassLabelLen]
+	}
+	return label
+}
+
+func newEntryID() (string, error) {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 func (s *ConnPassStore) persist(state connPassFileFormat) error {
+	state.Version = connPassFileVersion
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err

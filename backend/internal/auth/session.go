@@ -22,8 +22,9 @@ const (
 
 type Session struct {
 	Role         Role
-	Generation   uint64 // ConnPass generation at issue time; user sessions invalidate when this drifts.
+	Generation   uint64 // ConnPass entry generation at issue time; user sessions invalidate when this drifts.
 	AdminVersion string // Admin-password fingerprint at issue time; empty for user sessions and legacy cookies.
+	EntryID      string // ConnPass entry id at issue time; empty for admin sessions and legacy user cookies.
 	Expires      time.Time
 }
 
@@ -36,10 +37,10 @@ func AdminPasswordVersion(secret []byte, password string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// Encode serializes a session as "<exp>:<role>:<gen>:<adminVer>.<sig>".
-func Encode(secret []byte, role Role, gen uint64, adminVer string, ttl time.Duration) string {
+// Encode serializes a session as "<exp>:<role>:<gen>:<adminVer>:<entryID>.<sig>".
+func Encode(secret []byte, role Role, gen uint64, adminVer, entryID string, ttl time.Duration) string {
 	exp := time.Now().Add(ttl).Unix()
-	payload := strconv.FormatInt(exp, 10) + ":" + string(role) + ":" + strconv.FormatUint(gen, 10) + ":" + adminVer
+	payload := strconv.FormatInt(exp, 10) + ":" + string(role) + ":" + strconv.FormatUint(gen, 10) + ":" + adminVer + ":" + entryID
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
@@ -58,11 +59,11 @@ func Decode(secret []byte, value string) (Session, error) {
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return Session{}, errors.New("bad signature")
 	}
-	// 3-part: legacy pre-AdminVersion cookies parse with AdminVersion="".
-	// Legacy admin cookies are rejected by Authenticated/RequireAdmin via the
-	// version check; legacy user cookies stay valid until ConnPass rotates.
-	parts := strings.SplitN(payload, ":", 4)
-	if len(parts) != 3 && len(parts) != 4 {
+	// 3-part: pre-AdminVersion legacy. 4-part: pre-EntryID legacy. 5-part: current.
+	// Legacy user cookies decode with EntryID=="" — Authenticated rejects them
+	// because no entry will match an empty id.
+	parts := strings.SplitN(payload, ":", 5)
+	if len(parts) < 3 || len(parts) > 5 {
 		return Session{}, errors.New("malformed payload")
 	}
 	expUnix, err := strconv.ParseInt(parts[0], 10, 64)
@@ -77,13 +78,16 @@ func Decode(secret []byte, value string) (Session, error) {
 	if err != nil {
 		return Session{}, errors.New("bad generation")
 	}
-	var adminVer string
-	if len(parts) == 4 {
+	var adminVer, entryID string
+	if len(parts) >= 4 {
 		adminVer = parts[3]
+	}
+	if len(parts) == 5 {
+		entryID = parts[4]
 	}
 	expires := time.Unix(expUnix, 0)
 	if time.Now().After(expires) {
 		return Session{}, errors.New("expired")
 	}
-	return Session{Role: role, Generation: gen, AdminVersion: adminVer, Expires: expires}, nil
+	return Session{Role: role, Generation: gen, AdminVersion: adminVer, EntryID: entryID, Expires: expires}, nil
 }

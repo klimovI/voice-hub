@@ -117,6 +117,10 @@ func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connpass store: %v", err)
 	}
+	entry, _, err := connPass.Create("test", 0)
+	if err != nil {
+		t.Fatalf("create entry: %v", err)
+	}
 	registry := auth.NewWSRegistry()
 
 	type result struct{ entered, exited chan struct{} }
@@ -141,9 +145,8 @@ func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
 	srv := httptest.NewServer(chain)
 	t.Cleanup(srv.Close)
 
-	cookieFor := func(role auth.Role, av string) *http.Cookie {
-		return &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, role, 0, av, time.Hour)}
-	}
+	userCookie := &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, auth.RoleUser, entry.Generation, "", entry.ID, time.Hour)}
+	adminCookie := &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, auth.RoleAdmin, 0, adminVer, "", time.Hour)}
 
 	mkReq := func(c *http.Cookie) *http.Request {
 		req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
@@ -151,8 +154,8 @@ func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
 		return req
 	}
 
-	go func() { _, _ = http.DefaultClient.Do(mkReq(cookieFor(auth.RoleUser, ""))) }()
-	go func() { _, _ = http.DefaultClient.Do(mkReq(cookieFor(auth.RoleAdmin, adminVer))) }()
+	go func() { _, _ = http.DefaultClient.Do(mkReq(userCookie)) }()
+	go func() { _, _ = http.DefaultClient.Do(mkReq(adminCookie)) }()
 
 	waitFor := func(ch chan struct{}, label string) {
 		select {
@@ -193,7 +196,7 @@ func TestRequireAuthAPIRejectsStaleAdminCookie(t *testing.T) {
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
 	t.Cleanup(srv.Close)
 
-	stale := &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, auth.RoleAdmin, 0, "av-old", time.Hour)}
+	stale := &http.Cookie{Name: auth.CookieName, Value: auth.Encode(secret, auth.RoleAdmin, 0, "av-old", "", time.Hour)}
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
 	req.AddCookie(stale)
 	resp, err := http.DefaultClient.Do(req)

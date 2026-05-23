@@ -14,7 +14,7 @@ import (
 func TestSessionRoundTrip(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	for _, role := range []Role{RoleAdmin, RoleUser} {
-		token := Encode(secret, role, 7, "av-xyz", time.Hour)
+		token := Encode(secret, role, 7, "av-xyz", "entry-1", time.Hour)
 		sess, err := Decode(secret, token)
 		if err != nil {
 			t.Fatalf("decode %s: %v", role, err)
@@ -28,6 +28,35 @@ func TestSessionRoundTrip(t *testing.T) {
 		if sess.AdminVersion != "av-xyz" {
 			t.Errorf("admin version: got %q want %q", sess.AdminVersion, "av-xyz")
 		}
+		if sess.EntryID != "entry-1" {
+			t.Errorf("entry id: got %q want %q", sess.EntryID, "entry-1")
+		}
+	}
+}
+
+// Pre-EntryID cookies have only four payload segments. Decode must accept them
+// with EntryID=="" so existing admin sessions survive the field rollout. The
+// caller (Authenticated) rejects four-part user cookies because no entry will
+// match an empty id; admin sessions stay valid because their AdminVersion check
+// is independent of EntryID.
+func TestDecodeAcceptsFourPartCookie(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	exp := time.Now().Add(time.Hour).Unix()
+	payload := strconv.FormatInt(exp, 10) + ":admin:0:av-xyz"
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(payload))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	token := payload + "." + sig
+
+	sess, err := Decode(secret, token)
+	if err != nil {
+		t.Fatalf("decode four-part: %v", err)
+	}
+	if sess.Role != RoleAdmin || sess.AdminVersion != "av-xyz" {
+		t.Errorf("decoded fields wrong: %+v", sess)
+	}
+	if sess.EntryID != "" {
+		t.Errorf("legacy EntryID should be empty, got %q", sess.EntryID)
 	}
 }
 
@@ -76,7 +105,7 @@ func TestAdminPasswordVersionDeterministic(t *testing.T) {
 
 func TestDecodeRejectsTamperedRole(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
-	token := Encode(secret, RoleUser, 0, "", time.Hour)
+	token := Encode(secret, RoleUser, 0, "", "", time.Hour)
 	// Splice "admin" into the payload while keeping the original signature.
 	tampered := strings.Replace(token, ":user:", ":admin:", 1)
 	if tampered == token {
@@ -89,7 +118,7 @@ func TestDecodeRejectsTamperedRole(t *testing.T) {
 
 func TestDecodeRejectsTamperedGeneration(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
-	token := Encode(secret, RoleUser, 1, "", time.Hour)
+	token := Encode(secret, RoleUser, 1, "", "", time.Hour)
 	tampered := strings.Replace(token, ":1:", ":99:", 1)
 	if tampered == token {
 		t.Fatalf("test setup: payload not modified")
@@ -102,7 +131,7 @@ func TestDecodeRejectsTamperedGeneration(t *testing.T) {
 func TestDecodeRejectsWrongSecret(t *testing.T) {
 	good := []byte("0123456789abcdef0123456789abcdef")
 	bad := []byte("ffffffffffffffffffffffffffffffff")
-	token := Encode(good, RoleAdmin, 0, "", time.Hour)
+	token := Encode(good, RoleAdmin, 0, "", "", time.Hour)
 	if _, err := Decode(bad, token); err == nil {
 		t.Fatalf("decode accepted cookie signed by attacker secret")
 	}
@@ -110,7 +139,7 @@ func TestDecodeRejectsWrongSecret(t *testing.T) {
 
 func TestDecodeRejectsExpired(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
-	token := Encode(secret, RoleAdmin, 0, "", -time.Second)
+	token := Encode(secret, RoleAdmin, 0, "", "", -time.Second)
 	if _, err := Decode(secret, token); err == nil {
 		t.Fatalf("decode accepted expired cookie")
 	}
@@ -119,7 +148,7 @@ func TestDecodeRejectsExpired(t *testing.T) {
 func TestSetSessionCookieSameSiteStrict(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	rec := httptest.NewRecorder()
-	SetSessionCookie(rec, true, secret, RoleUser, 0, "")
+	SetSessionCookie(rec, true, secret, RoleUser, 0, "", "")
 	header := rec.Result().Header.Get("Set-Cookie")
 	if !strings.Contains(header, "SameSite=Strict") {
 		t.Fatalf("Set-Cookie missing SameSite=Strict: %q", header)

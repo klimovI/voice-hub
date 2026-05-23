@@ -164,10 +164,13 @@ func main() {
 		StunURL:          stunURL,
 		TurnURL:          turnURL,
 	})))
-	mux.Handle("GET /api/admin/connection-password", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
-	mux.Handle("POST /api/admin/connection-password/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
-	mux.Handle("POST /api/admin/connection-password/revoke", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
-	mux.Handle("POST /api/admin/connection-password/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
+	mux.Handle("GET /api/admin/connection-passwords", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
+	mux.Handle("POST /api/admin/connection-passwords", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassCreate(cfg.AppHostname, connPass)))
+	mux.Handle("POST /api/admin/connection-passwords/{id}/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))
+	mux.Handle("POST /api/admin/connection-passwords/{id}/rename", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRename(connPass)))
+	mux.Handle("POST /api/admin/connection-passwords/{id}/ttl", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassSetTTL(connPass)))
+	mux.Handle("DELETE /api/admin/connection-passwords/{id}", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRevoke(connPass)))
+	mux.Handle("POST /api/admin/connection-passwords/disconnect-users", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.DisconnectUsers(wsRegistry)))
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -179,7 +182,7 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	log.Printf("auth enabled (cookie_secure=%v, connpass_present=%v)", cfg.CookieSecure, connPass.Status().Exists)
+	log.Printf("auth enabled (cookie_secure=%v, connpass_entries=%d)", cfg.CookieSecure, len(connPass.Status().Entries))
 	log.Printf("listening on %s, serving web from %s", cfg.Addr, cfg.WebDir)
 
 	srvErr := make(chan error, 1)

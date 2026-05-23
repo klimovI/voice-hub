@@ -34,9 +34,13 @@ func cookieFor(secret []byte, role auth.Role, gen uint64) *http.Cookie {
 }
 
 func cookieForVer(secret []byte, role auth.Role, gen uint64, adminVer string) *http.Cookie {
+	return cookieForEntry(secret, role, gen, adminVer, "")
+}
+
+func cookieForEntry(secret []byte, role auth.Role, gen uint64, adminVer, entryID string) *http.Cookie {
 	return &http.Cookie{
 		Name:  auth.CookieName,
-		Value: auth.Encode(secret, role, gen, adminVer, time.Hour),
+		Value: auth.Encode(secret, role, gen, adminVer, entryID, time.Hour),
 	}
 }
 
@@ -181,9 +185,9 @@ func TestLogin_AdminPasswordYieldsAdminRole(t *testing.T) {
 func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
-	plain, err := connPass.Rotate()
+	_, plain, err := connPass.Create("test", 0)
 	if err != nil {
-		t.Fatalf("rotate: %v", err)
+		t.Fatalf("create: %v", err)
 	}
 
 	limiter := auth.NewAuthLimiter(100, time.Minute)
@@ -212,7 +216,7 @@ func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
 func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
-	if _, err := connPass.Rotate(); err != nil {
+	if _, _, err := connPass.Create("test", 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,14 +248,14 @@ func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
 func TestAuthenticated_StaleUserGenerationRejected(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
-	if _, err := connPass.Rotate(); err != nil {
+	entry, _, err := connPass.Create("test", 0)
+	if err != nil {
 		t.Fatal(err)
 	}
-	gen := connPass.Generation()
 
-	// Issue a user session at the current generation, then rotate.
-	cookie := cookieFor(secret, auth.RoleUser, gen)
-	if _, err := connPass.Rotate(); err != nil {
+	// Issue a user session at the current entry generation, then rotate the entry.
+	cookie := cookieForEntry(secret, auth.RoleUser, entry.Generation, "", entry.ID)
+	if _, _, err := connPass.Rotate(entry.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,11 +266,53 @@ func TestAuthenticated_StaleUserGenerationRejected(t *testing.T) {
 	}
 }
 
+// A user session for an entry that's been deleted must be rejected — otherwise
+// "Удалить пароль" wouldn't actually disconnect users tied to that entry.
+func TestAuthenticated_RevokedEntryRejectsUser(t *testing.T) {
+	secret := newTestSecret()
+	connPass := mustEmptyStore(t)
+	entry, _, err := connPass.Create("test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := cookieForEntry(secret, auth.RoleUser, entry.Generation, "", entry.ID)
+	if err := connPass.Revoke(entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	if auth.Authenticated(secret, connPass, "av-test", req) {
+		t.Fatal("user session for revoked entry accepted")
+	}
+}
+
+// A user cookie with empty EntryID (legacy four-part format) must be rejected:
+// no entry will match an empty id, so the user-session branch of Authenticated
+// must return false. Otherwise legacy pre-rollout user cookies would silently
+// stay valid against a freshly-created entry.
+func TestAuthenticated_LegacyUserCookieRejected(t *testing.T) {
+	secret := newTestSecret()
+	connPass := mustEmptyStore(t)
+	if _, _, err := connPass.Create("test", 0); err != nil {
+		t.Fatal(err)
+	}
+	cookie := cookieFor(secret, auth.RoleUser, 1) // empty entry id
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	if auth.Authenticated(secret, connPass, "av-test", req) {
+		t.Fatal("legacy user cookie accepted by Authenticated")
+	}
+}
+
 func TestAuthenticated_AdminUnaffectedByRotate(t *testing.T) {
 	secret := newTestSecret()
 	connPass := mustEmptyStore(t)
 	cookie := cookieForVer(secret, auth.RoleAdmin, 0, "av-test")
-	if _, err := connPass.Rotate(); err != nil {
+	entry, _, err := connPass.Create("test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := connPass.Rotate(entry.ID); err != nil {
 		t.Fatal(err)
 	}
 
